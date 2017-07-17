@@ -11,21 +11,26 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 
 % The optional 3rd intput is useful for multi-frame dicom. When there are many
 % frames, it may be slow to read all frames in PerFrameFunctionalGroupsSequence.
-% The 3rd input can be used to specify the frames to read. By default, items for
-% only 1st, 2nd and last frames are read.
+% The 3rd input specifies the frames to read. By default, items for only 1st,
+% 2nd and last frames are read.
 % 
 % The optional 2nd output contains information in case of error, and will be
 % empty if there is no error.
+% 
+% The optional 3rd output is rarely needed. It returns the dicom dictionary
+% which may be updated from the input dict if the dicom vendor is different from
+% that in the input dict.
 % 
 % DICM_HDR is like Matlab dicominfo, but is independent of Image Processing
 % Toolbox. The advantage is that it decodes most private and shadow tags for
 % Siemens, GE and Philips dicom, and runs faster, especially for partial header
 % and multi-frame dicom.
 % 
-% DICM_HDR can also read Philips PAR file, AFNI HEAD file and some BrainVoyager
-% files, and return needed fields for dicm2nii to convert into nifti.
+% DICM_HDR can also read Philips PAR file, AFNI HEAD file, Freesurfer MGH file
+% and some BrainVoyager files, and return needed fields for dicm2nii to convert
+% into nifti.
 % 
-% See also DICM_DICT, DICM2NII, DICM_IMG, RENAME_DICM, SORT_DICM
+% See also DICM_DICT, DICM2NII, DICM_IMG, RENAME_DICM, SORT_DICM, ANONYMIZE_DICM
 
 % History (yymmdd):
 % 130823 Write it for dicm2nii.m (xiangrui.li@gmail.com).
@@ -77,10 +82,18 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 160422 Performance: avoid nestedFunc (big), use uint8, avoid typecast (minor).
 % 160527 philips_par: center of slice 1 for slice dir; (dim-1)/2 for vol center.
 % 160608 read_sq: n=nEnd (j>2) with PerFrameSQ (needed if length is not inf).
+% 160825 can read dcm without PixelData, by faking p.iPixelData=fSize+1.
+% 160829 no make-up SeriesNumber/InstanceUID in afni_head/philips_par/bv_file.
+% 160928 philips_par: fix para table ind; treat type 17 as phase img. Thx SS.
+% 161130 check i+n-1<=p.iPixelData in search method to avoid error. Thx xLei.
+% 170127 Implement mgh_file: read FreeSurfer mgh or mgz.
+% 170618 philips_par(): use regexp (less error prone); ignore keyname case.
+% 170618 afni_head(): make MSB_FIRST (BE) BRIK work; fix negative PixelSpacing.
+% 170625 read_ProtocolDataBlock(): decompress only to avoid guessing datatype.
 
 persistent dict_full;
 s = []; info = '';
-p.fullHdr = false; % p for parameters: only updated in main func
+p.fullHdr = false; % parameters: only updated in main func
 if nargin<2 || isempty(dict)
     if isempty(dict_full), dict_full = dicm_dict; end
     p.fullHdr = true;
@@ -96,15 +109,15 @@ end
 
 if nargin<3, iFrames = []; end
 p.iFrames = iFrames;
-fid = fopen(fname);
+fid = fopen(fname, 'r', 'l');
 if fid<0, info = ['File not exists: ' fname]; return; end
 closeFile = onCleanup(@() fclose(fid)); % auto close when done or error
 fseek(fid, 0, 1); fSize = ftell(fid); fseek(fid, 0, -1);
-b8 = fread(fid, 130000, 'uint8=>uint8')'; % enough for most dicom
 if fSize<140 % 132 + one empty tag, ignore truncated
     info = ['Invalid file: ' fname];
     return;
 end
+b8 = fread(fid, 130000, 'uint8=>uint8')'; % enough for most dicom
 
 iTagStart = 132; % start of first tag
 isDicm = isequal(b8(129:132), 'DICM');
@@ -120,6 +133,8 @@ if ~isDicm % may be PAR/HEAD/BV file
             [s, info] = philips_par(fname);
         elseif strcmpi(ext, '.HEAD') % || strcmpi(ext, '.BRIK')
             [s, info] = afni_head(fname);
+        elseif any(strcmpi(ext, {'.mgh' '.mgz'}))
+            [s, info] = mgh_file(fname);
         elseif any(strcmpi(ext, {'.vmr' '.fmr' '.dmr'})) % BrainVoyager
             [s, info] = bv_file(fname);
         else
@@ -168,9 +183,8 @@ for nb = [0 2e6 20e6 fSize] % if not enough, read more till all read
     end
     if found, break; end
     if feof(fid)
-        if isempty(i), info = ['No PixelData in ' fname]; return; 
-        else break;
-        end
+        if isempty(i), p.iPixelData = fSize+1; end % fake it: no PixelData
+        break;
     end
 end
 
@@ -181,8 +195,8 @@ nTag = numel(p.dict.tag); % always search if only one tag: can find it in any SQ
 toSearch = nTag<2 || (nTag<30 && ~any(strcmp(p.dict.vr, 'SQ')) && p.iPixelData<1e6);
 if toSearch % search each tag if header is short and not many tags asked
     if ~isempty(tsUID), s.TransferSyntaxUID = tsUID; end % hope it is 1st tag
-    ib = p.iPixelData; % will be updated each loop
-    if ~isempty(p.dict.vendor)
+    ib = p.iPixelData-1; % will be updated each loop
+    if ~isempty(p.dict.vendor) && any(mod(p.dict.group, 2))
         tg = char([8 0 112 0]); % Manufacturer
         if p.be, tg = tg([2 1 4 3]); end
         if p.expl, tg = [tg 'LO']; end
@@ -206,7 +220,7 @@ if toSearch % search each tag if header is short and not many tags asked
         i = strfind(char(b8(1:ib)), tg);
         i = i(mod(i,2)==1);
         if isempty(i), continue; % no this tag, next
-        elseif numel(i)>1 % +1 tags found, add vr to reduce if expl
+        elseif numel(i)>1 % +1 tags found, add vr to try again if expl
             if hasVR
                 tg = [tg p.dict.vr{k}]; %#ok
                 i = strfind(char(b8(1:ib)), tg);
@@ -227,6 +241,7 @@ if toSearch % search each tag if header is short and not many tags asked
         [n, nvr] = val_len(vr, b8(i+(0:5)), hasVR, swap); i = i+nvr;
         if n==0, continue; end % dont assign empty tag
 
+        if i+n-1>p.iPixelData, break; end
         [dat, info] = read_val(b8(i+(0:n-1)), vr, swap);
         if ~isempty(info), toSearch = false; break; end % re-do in regular way
         if ~isempty(dat), s1.(p.dict.name{k}) = dat; end
@@ -243,7 +258,7 @@ while ~toSearch
         if strcmp(name, 'PixelData') % iPixelData might be in img
             p.iPixelData = iPre + p.expl*4 + 7; % overwrite previous
             p.bytes = ch2int32(b8(p.iPixelData+(-3:0)), p.be);
-        else
+        elseif p.iPixelData < fSize % has PixelData
             info = ['End of file reached: likely error: ' s.Filename];  
         end
         break; % done or give up
@@ -262,8 +277,10 @@ while ~toSearch
     end
 end
 
-s.PixelData.Start = p.iPixelData;
-s.PixelData.Bytes = p.bytes;
+if p.iPixelData < fSize+1
+    s.PixelData.Start = p.iPixelData;
+    s.PixelData.Bytes = p.bytes;
+end
 
 if isfield(s, 'CSAImageHeaderInfo') % Siemens CSA image header
     s.CSAImageHeaderInfo = read_csa(s.CSAImageHeaderInfo);
@@ -302,7 +319,7 @@ elmnt = ch2int16(b8(i+(0:1)), swap); i=i+2;
 tag = group*65536 + elmnt;
 if tag == 4294893581 % || tag == 4294893789 % FFFEE00D or FFFEE0DD
     i = i+4; % skip length
-    return; % rerurn in case n is not 0
+    return; % return in case n is not 0
 end
 
 swap = p.be && group~=2;
@@ -326,7 +343,7 @@ elseif tag==593936 % 0x0009 0010 GEIIS not dicom compliant
 elseif p.fullHdr
     if elmnt==0, i = i+n; return; end % skip GroupLength
     if mod(group,2), name = sprintf('Private_%04x_%04x', group, elmnt);
-    else             name = sprintf('Unknown_%04x_%04x', group, elmnt);
+    else,            name = sprintf('Unknown_%04x_%04x', group, elmnt);
     end
     if ~hasVR, vr = 'UN'; end % not in dict, will leave as uint8
 elseif n<4294967295 % no skip for SQ with length 0xffffffff
@@ -442,7 +459,7 @@ len16 = 'AE AS AT CS DA DS DT FD FL IS LO LT PN SH SL SS ST TM UI UL US';
 if ~expl % implicit, length irrevalent to vr (faked as CS)
     n = ch2int32(b(1:4), swap);
     nvr = 4; % bytes of VR
-elseif ~isempty(strfind(len16, vr)) % length in uint16
+elseif ~isempty(strfind(len16, vr)) %#ok<*STREMP> % length in uint16
     n = ch2int16(b(1:2), swap);
     nvr = 2;
 else % length in uint32 and skip 2 bytes
@@ -494,7 +511,7 @@ if isfield(s, 'NumberOfFrames')
     p.nFrames = s.NumberOfFrames; % useful for PerFrameSQ
 elseif all(isfield(s, {'Columns' 'Rows' 'BitsAllocated'})) && p.bytes<4294967295
     if isfield(s, 'SamplesPerPixel'), spp = double(s.SamplesPerPixel);
-    else spp = 1;
+    else, spp = 1;
     end
     n = p.bytes * 8 / double(s.BitsAllocated);
     p.nFrames = n / (spp * double(s.Columns) * double(s.Rows));
@@ -509,38 +526,34 @@ b = csa';
 if numel(b)<4 || ~strcmp(char(b(1:4)), 'SV10'), return; end % no op if not SV10
 chDat = 'AE AS CS DA DT LO LT PN SH ST TM UI UN UT';
 i = 8; % 'SV10' 4 3 2 1
-try %#ok in case of error, we return the original csa
+try % in case of error, we return the original csa
     nField = ch2int32(b(i+(1:4)), 0); i=i+8;
     for j = 1:nField
         i=i+68; % name(64) and vm(4)
         vr = char(b(i+(1:2))); i=i+8; % vr(4), syngodt(4)
         n = ch2int32(b(i+(1:4)), 0); i=i+8;
         if n<1, continue; end % skip name decoding, faster
-        nam = char(b(i-84+(1:64)));
-        ind = strfind(nam, char(0));
-        nam = nam(1:ind(1)-1);
+        nam = regexp(char(b(i-84+(1:64))), '\w+', 'match', 'once');
+        isNum = isempty(strfind(chDat, vr));
         % fprintf('%s %3g %s\n', vr, n, nam);
 
-        dat = cell(n,1);
+        dat = [];
         for k = 1:n % n is often 6, but often only the first contains value
             len = ch2int32(b(i+(1:4)), 0); i=i+16;
             if len<1, i = i+(n-k)*16; break; end % rest are empty too
             foo = char(b(i+(1:len-1))); % exclude nul, need for Octave
             i = i + ceil(len/4)*4; % multiple 4-byte
-            if isempty(strfind(chDat, vr))
+            if isNum
                 tmp = sscanf(foo, '%f', 1); % numeric to double
-                if ~isempty(tmp), dat{k} = tmp; end
+                if ~isempty(tmp), dat(k,1) = tmp; end %#ok
             else
-                dat{k} = deblank(foo);
+                dat{k} = deblank(foo); %#ok
             end
         end
-        if ischar(dat{1})
-            ind = cellfun(@isempty, dat);
-            dat = dat(~ind);
+        if ~isNum
+            dat(cellfun(@isempty, dat)) = []; %#ok
             if isempty(dat), continue; end
             if numel(dat)==1, dat = dat{1}; end
-        else
-            dat = [dat{:}]'; % cell2mat
         end
         rst.(nam) = dat;
     end
@@ -552,53 +565,15 @@ end
 function ch = read_ProtocolDataBlock(ch)
 n = typecast(ch(1:4), 'int32') + 4; % nBytes, zeros may be padded to make 4x
 if ~all(ch(5:6) == [31 139]') || n>numel(ch), return; end % gz signature
-
-b = gunzip_mem(ch(5:n));
-b = regexp(char(b'), '(\w*)\s+"(.*)"', 'tokens', 'dotexceptnewline');
-if isempty(b{1}), return; end % guzip faild or wrong format
-
-try %#ok
-    for j = 1:numel(b)
-        a = sscanf(b{j}{2}, '%f', 1);
-        if isempty(a), rst.(b{j}{1}) = strtrim(b{j}{2});
-        else rst.(b{j}{1}) = a; % convert into num if possible
-        end
-    end
-    ch = rst;
-end
-end
-
-%% gunzip data in memory if possible.
-% For a GE ProtocolDataBlock, memory / file approaches take 0.5 / 43 ms.
-% When gz_bytes is large, pigz will be faster. The reversing point is about 8M.
-function bytes = gunzip_mem(gz_bytes)
-bytes = [];
-try
-    import com.mathworks.mlwidgets.io.*
-    streamCopier = InterruptibleStreamCopier.getInterruptibleStreamCopier;
-    baos = java.io.ByteArrayOutputStream;
-    b = typecast(gz_bytes, 'int8');
-    bais = java.io.ByteArrayInputStream(b);
-    gzis = java.util.zip.GZIPInputStream(bais);
-    streamCopier.copyStream(gzis, baos);
-    bytes = typecast(baos.toByteArray, 'uint8'); % int8 to uint8
-catch
-    try %#ok
-        tmp = tempname; % temp gz file
-        fid = fopen([tmp '.gz'], 'w');
-        if fid<0, return; end
-        cln = onCleanup(@() delete([tmp '*'])); % delete gz and unziped files
-        fwrite(fid, gz_bytes, 'uint8');
-        fclose(fid);
-        
-        gunzipOS = nii_tool('func_handle', 'gunzipOS');
-        gunzipOS([tmp '.gz']);
-        
-        fid = fopen(tmp);
-        bytes = fread(fid, '*uint8');
-        fclose(fid);
-    end
-end
+gunzip_mem = nii_tool('func_handle', 'gunzip_mem');
+ch = char(gunzip_mem(ch(5:n))');
+% b = gunzip_mem(ch(5:n));
+% b = regexp(char(b'), '(\w*)\s+"(.*)"', 'tokens', 'dotexceptnewline');
+% if isempty(b{1}), return; end % guzip faild or wrong format
+% try
+%     for j = 1:numel(b), rst.(b{j}{1}) = b{j}{2}; end
+%     ch = rst;
+% end
 end
 
 %% subfunction: get fields for multiframe dicom
@@ -606,18 +581,17 @@ function s1 = search_MF_val(s, s1, iFrame)
 % s1 = search_MF_val(s, s1, iFrame);
 %  Arg 1: the struct returned by dicm_hdr for a multiframe dicom
 %  Arg 2: a struct with fields to search, and with initial value, such as
-%    zeros or nans. The number of rows indicate the number of values for the
+%    zeros or nans. The number of rows indicates the number of values for the
 %    tag, and columns for frames indicated by iFrame, Arg 3.
 %  Arg 3: frame indice, length consistent with columns of s1 field values.
 % Example: 
 %  s = dicm_hdr('multiFrameFile.dcm'); % read only 1,2 and last frame by default
 %  s1 = struct('ImagePositionPatient', nan(3, s.NumberOfFrames)); % define size
 %  s1 = search_MF_val(s, s1, 1:s.NumberOfFrames); % get values
-%  This is MUCH faster than asking all frames by dicm_hdr, and avoid to get into
-%  annoying SQ levels under PerFrameFuntionalGroupSequence.
-% In case a tag is not found in PerFrameSQ, the code will search SharedSQ and
-% common tags, and will ignore the 3th arg and fake the same value for all
-% frames.
+% This is MUCH faster than asking all frames by dicm_hdr, and avoid to get into
+% annoying SQ levels under PerFrameFuntionalGroupSequence. In case a tag is not
+% found in PerFrameSQ, the code will search SharedSQ and common tags, and will
+% ignore the 3th arg and duplicate the same value for all frames.
 
 if ~isfield(s, 'PerFrameFunctionalGroupsSequence'), return; end
 expl = false;
@@ -661,7 +635,7 @@ for i = 1:numel(flds)
             [n, nvr] = val_len(vr, uint8(b0(k+(0:5))), isEX, isBE); k = k + nvr;
             a = read_val(uint8(b0(k+(0:n-1))), vr, isBE);
             if ischar(a), a = {a}; end
-            s1.(flds{i}) = repmat(a, 1, nf); % all frames share the same value
+            s1.(flds{i}) = repmat(a, 1, nf); % all frames have the same value
         end
         continue;
     end
@@ -688,19 +662,19 @@ for i = 1:numel(flds)
         j = find(ind>fStart(j) & ind<fStart(j+1), 1); % index in ind
         if isempty(j), continue; end % no tag for this frame
         if len==2, n = ch2int16(b(ind(j)+(0:1)), isBE);
-        else       n = ch2int32(b(ind(j)+(0:3)), isBE);
+        else,      n = ch2int32(b(ind(j)+(0:3)), isBE);
         end
         a = b(ind(j)+len+(0:n-1));
         if isDS
             a = sscanf(a, '%f\\'); % like 1\2\3
-            try s1.(flds{i})(:,k) = a; catch, end % ignore in case of error
+            try s1.(flds{i})(:,k) = a; end %#ok<*TRYNC> ignore in case of error
         elseif isCH
-            while ~isempty(a) && a(end)==0, a(end) = ''; end
-            try s1.(flds{i}){k} = deblank(a); catch, end
+            while ~isempty(a) && a(end)==0, a(end) = ''; end % for Octave
+            try s1.(flds{i}){k} = deblank(a); end
         else
             a = typecast(uint8(a), fmt)';
             if isBE, a = swapbytes(a); end
-            try s1.(flds{i})(:,k) = a; catch, end
+            try s1.(flds{i})(:,k) = a; end
         end
     end
 end
@@ -709,129 +683,99 @@ end
 %% subfunction: read PAR file, return struct like that from dicm_hdr.
 function [s, err] = philips_par(fname)
 err = '';
-if numel(fname)>4 && strcmpi(fname(end+(-3:0)), '.REC')
-    fname(end+(-3:0)) = '.PAR';
-    if ~exist(fname, 'file'), fname(end+(-3:0)) = '.par'; end
+[pth, nam, ext] = fileparts(fname);
+if strcmpi(ext, '.REC')
+    fname = fullfile(pth, [nam '.PAR']);
+    if ~exist(fname, 'file'), fname = fullfile(pth, [nam '.par']); end
 end
 fid = fopen(fname);
 if fid<0, s = []; err = ['File not exist: ' fname]; return; end
 str = fread(fid, inf, '*char')'; % read all as char
 fname = fopen(fid); % name with full path
 fclose(fid);
-
-str = strrep(str, char(13), char(10)); % make carriage return single char(10)
-while true
-    ind = strfind(str, char([10 10]));
-    if isempty(ind), break; end
-    str(ind) = []; 
-end
-n = numel(str);
-while true
-    str = strrep(str, [char(10) '.  '], [char(10) '. ']);
-    n1 = numel(str);
-    if n1==n, break; else n = n1; end
-end
+str = strrep(str, char(13), char(10)); % remove char(13)
 
 % In V4, offcentre and Angulation labeled as y z x, but actually x y z. We
 % try not to use these info
-key = 'image export tool';
-C = regexp(str, [key '\s*(.*)'], 'tokens', 'once', 'dotexceptnewline');
-if isempty(C), err = 'Not PAR file'; s = []; return; end
-s.SoftwareVersion = [C{1} '\PAR'];
+V = regexpi(str, '(?<=image export tool +)V[\d.]+', 'match', 'once');
+if isempty(V), err = 'Not PAR file'; s = []; return; end
+s.SoftwareVersion = [V '\PAR'];
 if strncmpi(s.SoftwareVersion, 'V3', 2)
     fprintf(2, ' V3 PAR file is not supported.\n');
     s = []; return;
 end
 
-s.PatientName = par_key('Patient name', 0);
-s.StudyDescription = par_key('Examination name', 0);
+s.PatientName = par_key(str, 'Patient name', 0);
+s.StudyDescription = par_key(str, 'Examination name', 0);
 [pth, nam] = fileparts(fname);
 s.SeriesDescription = nam;
-s.ProtocolName = par_key('Protocol name', 0);
-foo = par_key('Examination date/time', 0);
-foo = foo(isstrprop(foo, 'digit'));
-s.AcquisitionDateTime = foo;
-s.SeriesNumber = par_key('Acquisition nr');
-s.SeriesInstanceUID = sprintf('%g.%s.%09.0f', s.SeriesNumber, ...
-    datestr(now, 'yymmdd.HHMMSS.fff'), rand*1e9);
-% s.ReconstructionNumberMR = par_key('Reconstruction nr');
-% s.MRSeriesScanDuration = par_key('Scan Duration');
-s.NumberOfEchoes = par_key('Max. number of echoes');
-nSL = par_key('Max. number of slices/locations');
+s.ProtocolName = par_key(str, 'Protocol name', 0);
+a = par_key(str, 'Examination date/time', 0);
+a = a(isstrprop(a, 'digit'));
+s.AcquisitionDateTime = a;
+s.SeriesNumber = par_key(str, 'Acquisition nr');
+% s.ReconstructionNumberMR = par_key(str, 'Reconstruction nr');
+% s.MRSeriesScanDuration = par_key(str, 'Scan Duration');
+s.NumberOfEchoes = par_key(str, 'Max. number of echoes');
+nSL = par_key(str, 'Max. number of slices/locations');
 s.LocationsInAcquisition = nSL;
-foo = par_key('Patient position', 0);
-if isempty(foo), foo = par_key('Patient Position', 0); end
-if ~isempty(foo)
-    if numel(foo)>4, s.PatientPosition = foo(regexp(foo, '\<.')); 
-    else s.PatientPosition = foo; 
+a = par_key(str, 'Patient position', 0);
+if isempty(a), a = par_key(str, 'Patient Position', 0); end
+if ~isempty(a)
+    if numel(a)>4, s.PatientPosition = a(regexp(a, '\<.')); 
+    else, s.PatientPosition = a; 
     end
 end
-s.MRAcquisitionType = par_key('Scan mode', 0);
-s.ScanningSequence = par_key('Technique', 0); % ScanningTechnique
-typ = par_key('Series Type', 0); typ(isspace(typ)) = '';
+s.MRAcquisitionType = par_key(str, 'Scan mode', 0);
+s.ScanningSequence = par_key(str, 'Technique', 0); % ScanningTechnique
+typ = par_key(str, 'Series Type', 0); typ(isspace(typ)) = '';
 s.ImageType = ['PhilipsPAR\' typ '\' s.ScanningSequence];
-s.RepetitionTime = par_key('Repetition time');
-s.WaterFatShift = par_key('Water Fat shift');
-rotAngle = par_key('Angulation midslice'); % (ap,fh,rl) deg
+s.RepetitionTime = par_key(str, 'Repetition time');
+s.WaterFatShift = par_key(str, 'Water Fat shift');
+rotAngle = par_key(str, 'Angulation midslice'); % (ap,fh,rl) deg
 rotAngle = rotAngle([3 1 2]);
-posMid = par_key('Off Centre midslice'); % (ap,fh,rl) [mm]
+posMid = par_key(str, 'Off Centre midslice'); % (ap,fh,rl) [mm]
 s.Stack.Item_1.MRStackOffcentreAP = posMid(1);
 s.Stack.Item_1.MRStackOffcentreFH = posMid(2);
 s.Stack.Item_1.MRStackOffcentreRL = posMid(3);
 posMid = posMid([3 1 2]); % better precision than those in the table
-s.EPIFactor = par_key('EPI factor');
-% s.DynamicSeries = par_key('Dynamic scan'); % 0 or 1
-isDTI = par_key('Diffusion')>0;
+s.EPIFactor = par_key(str, 'EPI factor');
+% s.DynamicSeries = par_key(str, 'Dynamic scan'); % 0 or 1
+isDTI = par_key(str, 'Diffusion')>0;
 if isDTI
     s.ImageType = [s.ImageType '\DIFFUSION\'];
-    s.DiffusionEchoTime = par_key('Diffusion echo time'); % ms
+    s.DiffusionEchoTime = par_key(str, 'Diffusion echo time'); % ms
 end
 
-foo = par_key('Preparation direction', 0); % Anterior-Posterior
-if ~isempty(foo)
-    foo = foo(regexp(foo, '\<.')); % 'AP'
-    s.Stack.Item_1.MRStackPreparationDirection = foo;
-    iPhase = strfind('LRAPFH', foo(1));
+a = par_key(str, 'Preparation direction', 0); % Anterior-Posterior
+if ~isempty(a)
+    a = a(regexp(a, '\<.')); % 'AP'
+    s.Stack.Item_1.MRStackPreparationDirection = a;
+    iPhase = strfind('LRAPFH', a(1));
     iPhase = ceil(iPhase/2); % 1/2/3
 end
 
 % Get list of para meaning for the table, and col index of each para
-i1 = strfind(str, 'IMAGE INFORMATION DEFINITION'); i1 = i1(end);
-ind = strfind(str(i1:end), [char(10) '#']) + i1;
-for i = 1:9 % find the empty line before column descrip
-    [~, foo] = strtok(str(ind(i):ind(i+1)-2)); % remove # and char(10)
-    if isempty(foo), break; end 
-end
-j = 1; 
-for i = i+1:numel(ind)
-    [~, foo] = strtok(str(ind(i):ind(i+1)-2));
-    if isempty(foo), break; end % the end of the col label
-    foo = strtrim(foo);
-    i3 = strfind(foo, '<');
-    i2 = strfind(foo, '(');
-    if isempty(i3), i3 = i2(1); end
-    colLabel{j} = strtrim(foo(1:i3(1)-1)); %#ok para name
-    nCol = sscanf(foo(i2(end)+1:end), '%g');
+i1 = regexpi(str, 'IMAGE INFORMATION DEFINITION', 'once');
+i2 = regexpi(str, '= IMAGE INFORMATION ='); i2 = i2(end);
+ind = regexp(str(i1:i2), '\n#') + i1;
+colLabel = {}; iColumn = [];
+for i = 1:numel(ind)-1
+    a = str(ind(i)+1:ind(i+1)-2); % a line
+    i1 = regexp(a, '[<(]{1}'); % need first '<' or '(', and last '('
+    if isempty(i1), continue; end
+    nCol = sscanf(a(i1(end)+1:end), '%g');
     if isempty(nCol), nCol = 1; end
-    iColumn(j) = nCol; %#ok number of columns in the table for this para
-    j = j + 1;
+    colLabel{end+1} = strtrim(a(1:i1(1)-1)); %#ok para name
+    iColumn(end+1) = nCol; %#ok number of columns in the table for this para
 end
 iColumn = cumsum([1 iColumn]); % col start ind for corresponding colLabel
-keyInLabel = @(key)strcmp(colLabel, key);
+keyInLabel = @(key)strcmpi(colLabel, key);
 colIndex = @(key)iColumn(keyInLabel(key));
 
-i1 = strfind(str, '= IMAGE INFORMATION ='); i1 = i1(end);
-ind = strfind(str(i1:end), char(10)) + i1 + 1; % start of a line
-for i = 1:9
-    foo = sscanf(str(ind(i):end), '%g', 1);
-    if ~isempty(foo), break; end % get the first number
-end
-while str(ind(i))==10, i = i+1; end % skip empty lines (only one)
-str = str(ind(i):end); % now start of the table
-i1 = strfind(str, char(10));
-para = sscanf(str(1:i1(1)), '%g'); % 1st row
-n = numel(para); % number of items each row, 41 for V4
-para = sscanf(str, '%g'); % read all numbers
+i1 = regexp(str(i2:end), '\n\s*\d+', 'once') + i2;
+n = iColumn(end)-1; % number of items each row, 41 for V4
+para = sscanf(str(i1:end), '%g'); % read all numbers
 nImg = floor(numel(para) / n); 
 para = reshape(para(1:n*nImg), n, nImg)'; % whole table now
 getTableVal('index in REC file', 'IndexInREC', 1:nImg);
@@ -862,11 +806,13 @@ if any(diff(sl,2)>0), s.SliceNumber = sl; end % slice order in REC file
 imgType = para(iVol, colIndex('image_type_mr')); % 0 mag; 3, phase?
 if any(diff(imgType) ~= 0) % more than 1 type of image
     s.ComplexImageComponent = 'MIXED';
-    s.VolumeIsPhase = (imgType==3); % one for each vol
+    s.VolumeIsPhase = (imgType==3 | imgType==17); % one for each vol
     s.LastFile.RescaleIntercept = para(end, colIndex('rescale intercept'));
     s.LastFile.RescaleSlope = para(end, colIndex('rescale slope'));
-elseif imgType(1)==0, s.ComplexImageComponent = 'MAGNITUDE';
-elseif imgType(1)==3, s.ComplexImageComponent = 'PHASE';
+elseif imgType(1)==0 || imgType(1)==16
+    s.ComplexImageComponent = 'MAGNITUDE';
+elseif imgType(1)==3 || imgType(1)==17
+    s.ComplexImageComponent = 'PHASE';
 end
 
 % These columns should be the same for nifti-convertible images: 
@@ -881,9 +827,9 @@ for i = 1:numel(cols)
     if isempty(j), continue; end
     ind = [ind iColumn(j):iColumn(j+1)-1]; %#ok
 end
-foo = para(:, ind);
-foo = abs(diff(foo));
-if any(foo(:) > 1e-5)
+a = para(:, ind);
+a = abs(diff(a));
+if any(a(:) > 1e-5)
     err = sprintf('Inconsistent image size, bits etc: %s', fname);
     fprintf(2, ' %s. \n', err);
     s = []; return;
@@ -922,6 +868,7 @@ rx = [1 0 0; 0 ca(1) -sa(1); 0 sa(1) ca(1)]; % 3D rotation
 ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
 rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
 R = rx * ry * rz; % seems right for Philips
+% R = makehgtform('x', , 'y', , 'z', );
 
 getTableVal('slice orientation', 'SliceOrientation'); % 1/2/3 for TRA/SAG/COR
 iOri = mod(s.SliceOrientation+1, 3) + 1; % [1 2 3] to [3 1 2]
@@ -937,7 +884,7 @@ else % Tra
     s.SliceOrientation = 'TRANSVERSAL';
 end
 
-% 'pixel spacing' 'pixel spacing' and 'slice gap' have poor precision for v<=4?
+% 'pixel spacing' and 'slice gap' have poor precision for v<=4?
 % It may be wrong to use FOV, maybe due to partial Fourier?
 getTableVal('pixel spacing', 'PixelSpacing');
 s.PixelSpacing = s.PixelSpacing(:);
@@ -945,9 +892,9 @@ getTableVal('slice gap', 'SpacingBetweenSlices');
 s.SpacingBetweenSlices = s.SpacingBetweenSlices + s.SliceThickness;
 
 if exist('iPhase', 'var')
-    foo = 'COL';
-    if iPhase == (iOri==1)+1, foo = 'ROW'; end
-    s.InPlanePhaseEncodingDirection = foo;
+    a = 'COL';
+    if iPhase == (iOri==1)+1, a = 'ROW'; end
+    s.InPlanePhaseEncodingDirection = a;
 end
 
 s.ImageOrientationPatient = R(1:6)';
@@ -977,27 +924,16 @@ s.PixelData.Bytes = s.Rows * s.Columns * nImg * s.BitsAllocated / 8;
         s.(fldname) = para(iRow, iColumn(iCol):iColumn(iCol+1)-1);
     end
 
-    % nested subfunction: return value specified by key in PAR file
-    function val = par_key(key, isNum)
-        if nargin<2, isNum = true; end
-        i0 = strfind(str, [char(10) '. ' key]); % start with new line
-        if isempty(i0)
-            if isNum, val = []; else val = ''; end
-            return;
-        end
-        i0 = i0(1) + numel(key);
-        ii = strfind(str(i0:end), char(10)); % next new line
-        a = str(i0+(1:ii(1)-2)); % like '   : 5'
-        i0 = strfind(a, ':'); % must have ':'
-        val = strtrim(a(i0(1)+1:end));
-        if isNum, val = sscanf(val, '%g'); end
+    % subfunction: return value specified by key in PAR file
+    function val = par_key(str, key, isNum)
+        expr = ['(?<=\n.\s*' key '.*?:).*?\n']; % \n. key ... : val \n
+        val = strtrim(regexp(str, expr, 'match', 'once'));
+        if nargin<2 || isNum, val = sscanf(val, '%g'); end
     end
 end
 
 %% subfunction: read AFNI HEAD file, return struct like that from dicm_hdr.
 function [s, err] = afni_head(fname)
-persistent SN;
-if isempty(SN), SN = 1; end
 err = '';
 if numel(fname)>5 && strcmp(fname(end+(-4:0)), '.BRIK')
     fname(end+(-4:0)) = '.HEAD';
@@ -1015,13 +951,10 @@ if isempty(i), s = []; err = 'Not brik header file'; return; end
 [~, foo] = fileparts(fname);
 % s.IsAFNIHEAD = true;
 s.ProtocolName = foo;
-s.SeriesNumber = SN; SN = SN+1; % make it unique for multilple files
-s.SeriesInstanceUID = sprintf('%g.%s.%09.0f', s.SeriesNumber, ...
-    datestr(now, 'yymmdd.HHMMSS.fff'), rand*1e9);
 s.ImageType = ['AFNIHEAD\' afni_key('TYPESTRING')];
 
-foo = afni_key('BYTEORDER_STRING');
-if strcmp(foo(1), 'M'), err = 'BYTEORDER_STRING not supported'; s = []; return; end
+foo = afni_key('BYTEORDER_STRING'); % "LSB_FIRST" or "MSB_FIRST".
+if strcmpi(foo, 'MSB_FIRST'), s.TransferSyntaxUID = '1.2.840.10008.1.2.2'; end
 
 foo = afni_key('BRICK_FLOAT_FACS');
 if any(diff(foo)~=0), err = 'Inconsistent BRICK_FLOAT_FACS'; 
@@ -1089,9 +1022,9 @@ R = R(1:3, 1:3);
 R = R ./ (ones(3,1) * sqrt(sum(R.^2)));
 s.ImageOrientationPatient = R(1:6)';
 foo = afni_key('DELTA');
-s.PixelSpacing = foo(1:2);
+s.PixelSpacing = abs(foo(1:2));
 % s.SpacingBetweenSlices = foo(3);
-s.SliceThickness = foo(3);
+s.SliceThickness = abs(foo(3));
 foo = afni_key('BRICK_STATS');
 foo = reshape(foo, [2 numel(foo)/2]);
 mn = min(foo(1,:)); mx = max(foo(2,:));
@@ -1120,20 +1053,18 @@ s.PixelData.Bytes = prod(dim(1:4)) * s.BitsAllocated / 8;
 
     % subfunction: return value specified by key in afni header str
     function val = afni_key(key)
-    i1 = regexp(str, ['\nname\s*=\s*' key '\n']); % line 'name = key'
-    if isempty(i1), val = []; return; end
-    i1 = i1(1) + 1;
-    i2 = regexp(str(1:i1), 'type\s*=\s*\w*-attribute\n');
-    keyType = sscanf(str(i2(end):i1), 'type%*c=%*c%s', 1); %'string-attribute'
-    i1 = find(str(i1:end)==char(10), 1, 'first') + i1;
-    count = sscanf(str(i1:end), 'count%*c=%*c%g', 1);
-    if strcmp(keyType, 'string-attribute')
-        i1 = find(str(i1:end)=='''', 1, 'first') + i1;
-        val = str(i1+(0:count-2));
-    else
-        i1 = find(str(i1:end)==char(10), 1, 'first') + i1;
-        val = sscanf(str(i1:end), '%g', count);
-    end
+        i1 = regexp(str, ['\nname\s*=\s*' key '\n']); % line 'name = key'
+        if isempty(i1), val = []; return; end
+        i1 = i1(1) + 1;
+        typ = regexp(str(1:i1), 'type\s*=\s*(\w*)-attribute\n', 'tokens');
+        [n, i2] = regexp(str(i1:end), '(?<=count\s*=\s*)\d+', 'match', 'end', 'once');
+        n = sscanf(n, '%g');
+        if strcmpi(typ{end}{1}, 'string')
+            val = regexp(str(i1:end), '(?<='')(.*?\n)', 'match', 'once');
+            val = val(1:n-1); % remove ~
+        else
+            val = sscanf(str(i2+i1:end), '%g', n);
+        end
     end
 end
 
@@ -1160,8 +1091,8 @@ if ~isempty(bv.Trf)
     end
 end
 
-persistent SN subj folder % folder is used to update subj
-if isempty(SN), SN = 1; subj = ''; folder = ''; end
+persistent subj folder % folder is used to update subj
+if isempty(subj), subj = ''; folder = ''; end
 s.Filename = bv.FilenameOnDisk;
 fType = bv.filetype;
 s.ImageType = ['BrainVoyagerFile\' fType];
@@ -1309,14 +1240,11 @@ s.ImagePositionPatient = pos(:,1);
 s.LastFile.ImagePositionPatient = pos(:,2);
 
 % Following make dicm2nii happy
-try %#ok
+try
     [~, nam] = fileparts(bv.FirstDataSourceFile);
     serN = sscanf(nam, [subj '-%f'], 1);
-    if ~isempty(serN), SN = serN; end
+    if ~isempty(serN), s.SeriesNumber = serN; end
 end
-s.SeriesNumber = SN; SN = SN+1; % make it unique for multilple files
-s.SeriesInstanceUID = sprintf('%g.%s.%09.0f', s.SeriesNumber, ...
-    datestr(now, 'yymmdd.HHMMSS.fff'), rand*1e9);
 c = class(s.PixelData);
 if strcmp(c, 'double') %#ok
     s.BitsAllocated = 64;
@@ -1326,4 +1254,86 @@ else
     ind = find(isstrprop(c, 'digit'), 1);
     s.BitsAllocated = sscanf(c(ind:end), '%g');
 end
+end
+
+%% subfunction: read Freesurfer mgh or mgz file, return dicm info dicm_hdr.
+function [s, err] = mgh_file(fname)
+err = ''; s = [];
+[~, ~, ext] = fileparts(fname);
+isGZ = strcmpi(ext, '.mgz'); % .mgz = .mgh.gz
+if isGZ
+    gunzipOS = nii_tool('func_handle', 'gunzipOS');
+    nam = gunzipOS(fname);
+    fid = fopen(nam, 'r', 'b');
+else
+    fid = fopen(fname, 'r', 'b'); % always big endian?
+end
+
+if fid<0, err = sprintf('File not exists: %s', fname); return; end
+cln = onCleanup(@() close_mgh(fid, isGZ)); % close file, delete if isGZ
+v = fread(fid, 1, 'int32');
+if v ~= 1, err = sprintf('Not mgh file: %s', fname); return; end
+
+dim = fread(fid, 4, 'int32')';
+typ = fread(fid, 1, 'int32');
+dof = fread(fid, 1, 'int32'); %#ok not used
+s.Filename = fname;
+s.Columns = dim(1);
+s.Rows = dim(2);
+s.LocationsInAcquisition = dim(3);
+if dim(4)>1, s.NumberOfTemporalPositions = dim(4); end
+
+have_ras = fread(fid, 1, 'int16');
+if have_ras % 3+9+3=15 single
+    pixdim = fread(fid, 3, 'single');
+    R = fread(fid, [3 3], 'single'); % direction cosine matrix
+    c = fread(fid, 3, 'single'); % center xyz
+    
+    R(1:2,:) = -R(1:2,:); c(1:2) = -c(1:2); % RAS to dicom LPS
+    s.PixelSpacing = pixdim(1:2);
+    s.SliceThickness = pixdim(3);
+    s.ImageOrientationPatient = R(1:6)';
+    R = R * diag(pixdim);
+    s.ImagePositionPatient = R * -dim(1:3)'/2 + c;
+    s.LastFile.ImagePositionPatient = R * [-(dim(1:2))/2 dim(3)/2-1]' + c;
+else
+    s.ImageOrientationPatient = [1 0 0 0 0 -1]'; % coronal
+end
+
+switch typ
+    case 0, bpp = 1; fmt = 'uint8';     % MRI_UCHAR
+    case 1, bpp = 4; fmt = 'int32';     % MRI_INT
+    case 2, bpp = 4; fmt = 'int32';     % MRI_LONG
+    case 3, bpp = 4; fmt = 'single';    % MRI_FLOAT
+    case 4, bpp = 2; fmt = 'int16';     % MRI_SHORT
+%     case 5, bpp = 1; fmt = 'uint8';     % MRI_BITMAP *3?
+%     case 6, bpp = 1; fmt = 'uint8';     % MRI_TENSOR *5?
+    otherwise 
+        err = sprintf('Unknown datatype: %s', fname); 
+        s = []; return;
+end
+fseek(fid, 284, 'bof'); % start of img data
+nv = prod(dim);
+img = fread(fid, nv, ['*' fmt]);
+if numel(img) ~= nv
+    err = ['Not enough data in file: ' fname];
+    s = []; return;
+end
+s.BitsAllocated = bpp * 8; % for dicm_img
+
+flds = {'RepetitionTime' 'FlipAngle' 'EchoTime' 'InversionTime'};
+parms4 = fread(fid, 4, 'single');
+for i = 1:numel(parms4), s.(flds{i}) = parms4(i); end
+if isfield(s, 'FlipAngle'), s.FlipAngle = s.FlipAngle/pi*180; end % to deg
+s.PixelData = reshape(img, dim);
+
+    function close_mgh(fid, isGZ)
+        if isGZ
+            uzip_nam = fopen(fid);
+            fclose(fid);
+            delete(uzip_nam);
+        else
+            fclose(fid);
+        end
+    end
 end

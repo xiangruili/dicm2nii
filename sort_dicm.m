@@ -16,7 +16,7 @@ function varargout = sort_dicm(srcDir)
 % This function is kind of obsolete since later version of dicm2nii will convert
 % files with more than one subjects.
 % 
-% See also DICM2NII, DICM_HDR, RENAME_DICM 
+% See also DICM2NII, DICM_HDR, RENAME_DICM, ANONYMIZE_DICM
 
 % History (yymmdd):
 % 141016 Wrote it (Xiangrui Li).

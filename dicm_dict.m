@@ -81,6 +81,7 @@ C = {
     '0008' '1155' 'UI' 'ReferencedSOPInstanceUID'
     '0008' '1160' 'IS' 'ReferencedFrameNumber'
     '0008' '1199' 'SQ' 'ReferencedSOPSequence'
+    '0008' '2111' 'ST' 'DerivationDescription'
     '0008' '2112' 'SQ' 'SourceImageSequence'
     '0008' '2218' 'SQ' 'AnatomicRegionSequence'
     '0008' '9007' 'CS' 'FrameType'

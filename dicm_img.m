@@ -33,7 +33,7 @@ function img = dicm_img(s, xpose)
 % 150404 Add 'if' block for numeric s.PixelData (BVfile). 
 % 160114 cast s.PixelData.Bytes to double (thx DavidR). 
 % 160127 support big endian files. 
-% 160521 support dicom wiht BitsStored~=HighBit+1 (tkx RayL).
+% 160521 support dicom with BitsStored~=HighBit+1 (tkx RayL).
 
 persistent flds dict;
 if isempty(flds), flds = {'Columns' 'Rows' 'BitsAllocated'}; end
@@ -48,7 +48,7 @@ if ischar(s) % input is file name
 end
 
 if isfield(s, 'SamplesPerPixel'), spp = double(s.SamplesPerPixel);
-else spp = 1;
+else, spp = 1;
 end
 
 if isnumeric(s.PixelData) % data already in hdr
@@ -97,7 +97,7 @@ if ~isfield(s, 'TransferSyntaxUID') || ... % files other than dicom
     end
     if xpose, img = permute(img, [2 1 3 4]); end
     if isfield(s, 'TransferSyntaxUID') && ...
-            strcmp(s.TransferSyntaxUID, '1.2.840.10008.1.2.2');
+            strcmp(s.TransferSyntaxUID, '1.2.840.10008.1.2.2')
         img = swapbytes(img);
     end
 else % rely on imread for decompression

@@ -1,0 +1,122 @@
+{
+"nii_tool":
+{
+    "inputs":
+        [
+            {"name":"cmd", "kind":"required", "type":"choices={'hdr'}"},
+            {"name":"varargin", "kind":"required", "type":"filepath=*.nii,*.nii.gz"}
+        ]
+},
+"nii_tool":
+{
+    "inputs":
+        [
+            {"name":"cmd", "kind":"required", "type":"choices={'load', 'img', 'ext'}"},
+            {"name":"varargin", "kind":"required", "type":[["struct"], ["filepath=*.nii,*.nii.gz"]]}
+        ]
+},
+"nii_tool":
+{
+    "inputs":
+        [
+            {"name":"cmd", "kind":"required", "type":"choices={'init'}"},
+            {"name":"varargin", "kind":"required", "type":"numeric"}
+        ]
+},
+"nii_tool":
+{
+    "inputs":
+        [
+            {"name":"cmd", "kind":"required", "type":"choices={'save', 'update'}"},
+            {"name":"varargin", "kind":"required", "type":"struct"}
+        ]
+},
+"nii_tool":
+{
+    "inputs":
+        [
+            {"name":"cmd", "kind":"required", "type":"choices={'cat3D'}"},
+            {"name":"varargin", "kind":"required", "type":"filepath=*.nii,*.nii.gz"}
+        ]
+},
+"nii_moco":
+{
+    "inputs":
+        [
+            {"name":"nii", "kind":"required", "type":[["struct"], ["filepath=*.nii,*.nii.gz"]]},
+            {"name":"out", "kind":"optional", "type":"char"},
+            {"name":"ref", "kind":"optional", "type":[["struct"], ["numeric"], ["filepath=*.nii,*.nii.gz"]]}
+        ]
+},
+"dicm2nii":
+{
+    "inputs":
+        [
+            {"name":"src", "kind":"optional", "type":"filepath=*.dcm*.par"},
+            {"name":"niiFolder", "kind":"optional", "type":[["char"], ["folderpath"]]},
+            {"name":"fmt", "kind":"optional", "type":"choices={'.hdr', '.hdr.gz', '.hdr (3D)', '.nii', '.nii (3D)', '.nii.gz'}"}
+        ]
+},
+"nii_stc":
+{
+    "inputs":
+        [
+            {"name":"nii", "kind":"required", "type":[["struct"], ["filepath=*.nii,*.nii.gz"]]},
+            {"name":"out", "kind":"optional", "type":"char"},
+            {"name":"timing", "kind":"optional", "type":"numeric"}
+        ]
+},
+"anonymize_dicm":
+{
+    "inputs":
+        [
+            {"name":"src", "kind":"optional", "type":"filepath=*.par,*.dcm"},
+            {"name":"rst", "kind":"optional", "type":[["folderpath"], ["filepath=*.par,*.dcm"]]},
+            {"name":"subID", "kind":"optional", "type":[["char"], ["numeric"]]}
+        ]
+},
+"nii_viewer":
+{
+    "inputs":
+        [
+            {"name":"fname", "kind":"optional", "type":[["struct"], ["filepath=*.nii,*.nii.gz"]]},
+            {"name":"overlayName", "kind":"optional", "type":[["struct"], ["cell"], ["filepath=*.nii,*.nii.gz"]]}
+        ]
+},
+"nii_xform":
+{
+    "inputs":
+        [
+            {"name":"src", "kind":"required", "type":[["struct"], ["numeric"], ["filepath=*.nii,*.nii.gz"]]},
+            {"name":"target", "kind":"required", "type":[["struct"], ["numeric"], ["filepath=*.nii,*.nii.gz"]]},
+            {"name":"rst", "kind":"optional", "type":"char"},
+            {"name":"intrp", "kind":"optional", "type":"choices={'linear', 'nearest', 'cubic', 'spline'}"},
+            {"name":"missVal", "kind":"optional", "type":"numeric"}
+        ]
+},
+"dicm_hdr":
+{
+    "inputs":
+        [
+            {"name":"fname", "kind":"required", "type":"filepath=*.par,*.dcm"},
+            {"name":"dict", "kind":"optional", "type":"struct"},
+            {"name":"iFrames", "kind":"optional", "type":"numeric"}
+        ]
+},
+"dicm_img":
+{
+    "inputs":
+        [
+            {"name":"s", "kind":"required", "type":[["struct"], ["filepath=*.par,*.dcm"]]},
+            {"name":"xpose", "kind":"optional", "type":[["logical"], ["numeric"]]}
+        ]
+},
+"dicm_dict":
+{
+    "inputs":
+        [
+            {"name":"vendor", "kind":"optional", "type":"choices={'SIEMENS', 'GE', 'Philips'}"},
+            {"name":"flds",   "kind":"optional", "type":[["char"], ["cell"]]}
+        ]
+}
+}

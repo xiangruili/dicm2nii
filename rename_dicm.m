@@ -32,7 +32,7 @@ function rename_dicm(files, fmt)
 % If the first input is not provided or empty, you will be asked to pick up
 % a folder.
 % 
-% See also DICM_HDR SORT_DICM
+% See also DICM_HDR, SORT_DICM, ANONYMIZE_DICM
  
 % History (yymmdd):
 % 0710?? Write it (Xiangrui Li)
