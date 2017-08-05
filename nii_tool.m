@@ -820,6 +820,17 @@ if ismac % pigz for mac is not included in the package
         fprintf(2, [' Please install pigz for fast compression: ' ...
             'http://macappstore.org/pigz/\n']);
     end
+elseif ispc % rename back pigz for Windows. Renamed to trick Matlab Central
+    try %#ok<*TRYNC>
+        fname = [m_dir '\pigz.win'];
+        if exist(fname, 'file')
+            movefile(fname, [m_dir '\pigz.exe'], 'f');
+        end
+        fname = [m_dir '\pthreadGC2.win'];
+        if exist(fname, 'file')
+            movefile(fname, [m_dir '\pthreadGC2.dll'], 'f');
+        end
+    end
 else % linux
     [st, val] = fileattrib([m_dir '/pigz']);
     if st && ~val.UserExecute, fileattrib([m_dir '/pigz'], '+x'); end

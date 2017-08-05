@@ -90,6 +90,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 170618 philips_par(): use regexp (less error prone); ignore keyname case.
 % 170618 afni_head(): make MSB_FIRST (BE) BRIK work; fix negative PixelSpacing.
 % 170625 read_ProtocolDataBlock(): decompress only to avoid guessing datatype.
+% 170803 par_key(): bug fix introduced on 170618.
 
 persistent dict_full;
 s = []; info = '';
@@ -928,7 +929,7 @@ s.PixelData.Bytes = s.Rows * s.Columns * nImg * s.BitsAllocated / 8;
     function val = par_key(str, key, isNum)
         expr = ['(?<=\n.\s*' key '.*?:).*?\n']; % \n. key ... : val \n
         val = strtrim(regexp(str, expr, 'match', 'once'));
-        if nargin<2 || isNum, val = sscanf(val, '%g'); end
+        if nargin<3 || isNum, val = sscanf(val, '%g'); end
     end
 end
 

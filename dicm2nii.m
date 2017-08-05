@@ -355,7 +355,8 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 170403 save_jason: add DelayTime for BIDS.
 % 170404 set MB slice_code to 0 to avoid FreeSurfer error. Thx JacobM.
 % 170417 checkUpdate(): use 'user_version' due to Matlab Central web change.
-% 170625 phaseDirection(): GE VIEWORDER update to due to dicm_hdr() update.
+% 170625 phaseDirection(): GE VIEWORDER update due to dicm_hdr() update.
+% 170720 Allow regularly missing InstanceNumbers, like CMRR ISSS.
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -633,9 +634,16 @@ for i = 1:nRun
         if s.isDTI, continue; end % allow missing directions for DTI
         a = zeros(1, nFile);
         for j = 1:nFile, a(j) = tryGetField(h{i}{j}, 'InstanceNumber', 1); end
-        if any(diff(a) ~= 1)
+        ind = find(diff(a)>1);
+        if isempty(ind), continue; end
+
+        if numel(unique(diff(ind))) ~= 1
             errorLog(['Missing file(s) detected for ' series '. Series skipped.']);
             keep(i) = 0;
+        else % InstanceNumber regular spacing, like CMRR ISSS seq
+            errorLog(['InstanceNumber discontinuity detected for ' series '. ' ...
+                'See InstanceNumbers in NIfTI ext or dcmHeaders.mat.']);
+            h{i}{1}.InstanceNumbers = a;
         end
         continue; % no other check for mosaic
     end
@@ -761,7 +769,7 @@ for i = 1:nRun
         fnames{iRuns(i)}(j_s(i)+1:end) = [];
     end
 end
-fmtStr = sprintf(' %%-%gs %%gx%%gx%%gx%%g\n', max(cellfun(@numel, fnames))+6);
+fmtStr = sprintf(' %%-%gs %%dx%%dx%%dx%%d\n', max(cellfun(@numel, fnames))+6);
 
 %% Now ready to convert nii series by series
 subjStr = sprintf('''%s'', ', subj{:}); subjStr(end+(-1:0)) = [];
@@ -1412,7 +1420,10 @@ if q(1)<0, q = -q; end % as MRICron
 
 %% Subfunction: get dicom xform matrix and related info
 function [ixyz, R, pixdim, xyz_unit] = xform_mat(s, dim)
-try R = reshape(s.ImageOrientationPatient, 3, 2); catch, R = [1 0 0; 0 1 0]'; end
+haveIOP = isfield(s, 'ImageOrientationPatient');
+if haveIOP, R = reshape(s.ImageOrientationPatient, 3, 2);
+else, R = [1 0 0; 0 1 0]';
+end
 R(:,3) = cross(R(:,1), R(:,2)); % right handed, but sign may be wrong
 foo = abs(R);
 [~, ixyz] = max(foo); % orientation info: perm of 1:3
@@ -1433,7 +1444,8 @@ thk = tryGetField(s, 'SpacingBetweenSlices');
 if isempty(thk), thk = tryGetField(s, 'SliceThickness', pixdim(1)); end
 pixdim = [pixdim; thk];
 R = R * diag(pixdim); % apply vox size
-try ipp = s.ImagePositionPatient; catch, ipp = -(dim'.* pixdim)/2; end
+haveIPP = isfield(s, 'ImagePositionPatient');
+if haveIPP, ipp = s.ImagePositionPatient; else, ipp = -(dim'.* pixdim)/2; end
 % Next is almost dicom xform matrix, except mosaic trans and unsure slice_dir
 R = [R ipp; 0 0 0 1];
 
@@ -1477,7 +1489,11 @@ if isempty(pos) && isfield(s, 'Stack') % Philips
 end
 
 if isempty(pos) % keep right-handed, and warn user
-    errorLog(['Please check whether slices are flipped: ' s.NiftiName]);
+    if haveIPP && haveIOP
+        errorLog(['Please check whether slices are flipped: ' s.NiftiName]);
+    else
+        errorLog(['No orientation/Location information found for ' s.NiftiName]);
+    end
 elseif sign(pos-R(iSL,4)) ~= sign(cosSL) % same direction?
     R(:,3) = -R(:,3);
 end
@@ -2179,7 +2195,8 @@ flds = { % fields to put into nifti ext
   'PatientPosition' 'SliceThickness' 'FlipAngle' 'RBMoCoTrans' 'RBMoCoRot' ...
   'Manufacturer' 'SoftwareVersion' 'MRAcquisitionType' 'InstitutionName' ...
   'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
-  'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector'};
+  'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector', ...
+  'InstanceNumbers'};
 if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
 
 ext.ecode = 6; % text ext
@@ -2407,10 +2424,10 @@ catch me
 end
 
 latestNum = datenum(latestStr, 'yyyy.mm.dd');
-d = {reviseDate('nii_viewer') reviseDate('nii_tool') ...
-    reviseDate('dicm2nii') reviseDate('dicm_hdr')};
-d = sort(d);
-myFileDate = datenum(['20' d{end}], 'yyyymmdd');
+d = sort({reviseDate('nii_viewer') reviseDate('nii_tool') ...
+          reviseDate('dicm2nii') reviseDate('dicm_hdr')});
+d = ['20' d{end}];
+myFileDate = datenum(d, 'yyyymmdd');
 
 if myFileDate >= latestNum
     msgbox([mfile ' and the package are up to date.'], 'Check update');
@@ -2422,12 +2439,21 @@ msg = ['A newer version (' latestStr ') is available on the MathWorks File ' ...
 answer = questdlg(msg, ['Update ' mfile], 'Yes', 'Later', 'Yes');
 if ~strcmp(answer, 'Yes'), return; end
 
-fileUrl = [webUrl '?controller=file_infos&download=true'];
 try
-    unzip(fileUrl, fileparts(which(mfile)));
+    tmp = [tempdir '/dicm2nii'];
+    websave(tmp, 'http://www.mathworks.com/matlabcentral/mlc-downloads/downloads/submissions/42997/versions/1/download/zip');
+    unzip(tmp, tempdir); delete(tmp);
+    tmp = [tempdir '/xiangruili-dicm2nii-14ceee6/'];
+    movefile([tmp '*.*'], [fileparts(which(mfile)) '/.'], 'f');
+    rmdir(tmp, 's');
 catch me
-    errordlg(['Error in updating: ' me.message], mfile);
-    return;
+    try
+        fileUrl = [webUrl '?controller=file_infos&download=true'];
+        unzip(fileUrl, fileparts(which(mfile)));
+    catch
+        errordlg(['Error in updating: ' me.message], mfile);
+        return;
+    end
 end
 rehash;
 warndlg(['Package updated successfully. Please restart ' mfile ...
