@@ -357,6 +357,11 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 170417 checkUpdate(): use 'user_version' due to Matlab Central web change.
 % 170625 phaseDirection(): GE VIEWORDER update due to dicm_hdr() update.
 % 170720 Allow regularly missing InstanceNumbers, like CMRR ISSS.
+% 170810 Use GE SLICEORDER for SliceTiming if needed (thx PatrickS).
+% 170826 Use 'VolumeTiming' for missing volumes based on BIDS.
+% 170923 Correct readout (thx Chris R and MH); Always store readout in descrip;
+% 170924 Bug fix for long file name (avoid genvarname now).
+% 170927 Store TE in descrip even if multiple TEs.
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -642,8 +647,9 @@ for i = 1:nRun
             keep(i) = 0;
         else % InstanceNumber regular spacing, like CMRR ISSS seq
             errorLog(['InstanceNumber discontinuity detected for ' series '. ' ...
-                'See InstanceNumbers in NIfTI ext or dcmHeaders.mat.']);
-            h{i}{1}.InstanceNumbers = a;
+                'See VolumeTiming in NIfTI ext or dcmHeaders.mat.']);
+            TR = tryGetField(s, 'RepetitionTime', 1000) / 1000;
+            h{i}{1}.VolumeTiming = (a-1) / TR;
         end
         continue; % no other check for mosaic
     end
@@ -721,7 +727,9 @@ if nRun<1
     return;
 end
 rNames = cell(1, nRun);
-multiSubj = numel(subj)>1; 
+multiSubj = numel(subj)>1;
+j_s = nan(nRun, 1); % index-1 for _s003. needed if 4+ length SeriesNumbers
+maxLen = namelengthmax;
 for i = 1:nRun
     s = h{i}{1};
     sN = sNs(i);
@@ -734,31 +742,29 @@ for i = 1:nRun
     if nStudy(i)>1, a = [a '_Study' studyIDs{i}]; end
     if ~isstrprop(a(1), 'alpha'), a = ['x' a]; end % genvarname behavior
     a(~isstrprop(a, 'alphanum')) = '_'; % make str valid for field name
-    while true % remove repeated underscore
-        ind = strfind(a, '__');
-        if isempty(ind), break; end
-        a(ind) = '';
-    end
+    a = regexprep(a, '_{2,}', '_'); % remove repeated underscore
     if sN>100 && strncmp(s.Manufacturer, 'Philips', 7)
         sN = tryGetField(s, 'AcquisitionNumber', floor(sN/100));
     end
     rNames{i} = sprintf('%s_s%03.0f', a, sN);
+    a = strfind(rNames{i}, '_s'); j_s(i) = a(end)-1;
+    d = numel(rNames{i}) - maxLen;
+    if d>0, rNames{i}(a+(-d:-1)) = ''; j_s(i) = j_s(i)-d; end % keep _s007
 end
-if any(cellfun(@numel, rNames)>namelengthmax)
-    rNames = genvarname(rNames); %#ok also make unique after shortening
-end 
 
 vendor = strtok(unique(vendor));
 if nargout>0, varargout{1} = subj; end % return converted subject IDs
-if nargout>1, varargout{2} = {}; end % will remove in the future
 
 % After following sort, we need to compare only neighboring names. Remove
 % _s007 if there is no conflict. Have to ignore letter case for Windows & MAC
 fnames = rNames; % copy it, reserve letter cases
 [rNames, iRuns] = sort(lower(fnames));
-j_s = nan(nRun, 1); % in case of long SeriesNumber _s003 will be 4+ length
-for i = 1:nRun, a = strfind(rNames{i}, '_s'); j_s(i) = a(end)-1; end
+j_s = j_s(iRuns);
 for i = 1:nRun
+    if i>1 &&  strcmp(rNames{i}, rNames{i-1}) % truncated StudyID to PatientName
+        a = num2str(i);
+        rNames{i}(j_s(i)+(-numel(a)+1:0)) = a; % not 100% unique    
+    end
     a = rNames{i}(1:j_s(i)); % remove _s003
     % no conflict with both previous and next name
     if nRun==1 || ... % only one run
@@ -955,8 +961,11 @@ tf = ~isempty(strfind(typ, keyword)); %#ok<*STREMP>
 function tf = isDTI(s)
 tf = isType(s, '\DIFFUSION'); % Siemens, Philips
 if tf, return; end
-if strncmp(s.Manufacturer, 'GE', 2) % not labeled as \DIFFISION
-    tf = tryGetField(s, 'DiffusionDirection', 0)>0;
+if isfield(s, 'ProtocolDataBlock') % GE, not labeled as \DIFFISION
+    IOPT = tryGetField(s.ProtocolDataBlock, 'IOPT');
+    if isempty(IOPT), tf = tryGetField(s, 'DiffusionDirection', 0)>0;
+    else, tf = ~isempty(regexp(IOPT, 'DIFF', 'once'));
+    end
 elseif strncmpi(s.Manufacturer, 'Philips', 7)
     tf = strcmp(tryGetField(s, 'MRSeriesDiffusion', 'N'), 'Y');
 else % Some Siemens DTI are not labeled as \DIFFUSION
@@ -1085,19 +1094,20 @@ nii.hdr.intent_name = seq; % char[16], meaning of the data
 foo = tryGetField(s, 'AcquisitionDateTime');
 descrip = sprintf('time=%s;', foo(1:min(18,end))); 
 TE0 = asc_header(s, 'alTE[0]')/1000; % s.EchoTime stores only 1 TE
-TE1 = asc_header(s, 'alTE[1]')/1000;
-if ~isempty(TE1), s.SecondEchoTime = TE1; end
-dTE = abs(TE1 - TE0); % TE difference
 if isempty(TE0), TE0 = tryGetField(s, 'EchoTime'); end % GE, philips
-if isempty(dTE) && tryGetField(s, 'NumberOfEchoes', 1)>1
-    dTE = tryGetField(s, 'SecondEchoTime') - TE0; % need to update
+if isType(s, '\P\') || strcmpi(tryGetField(s, 'ComplexImageComponent', ''), 'PHASE')
+    TE1 = asc_header(s, 'alTE[1]')/1000;
+    if ~isempty(TE1), s.SecondEchoTime = TE1; end
+    dTE = abs(TE1 - TE0); % TE difference
+    if isempty(dTE) && tryGetField(s, 'NumberOfEchoes', 1)>1
+        dTE = tryGetField(s, 'SecondEchoTime') - TE0; % need to update
+    end
+    if ~isempty(dTE)
+        descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
+        s.deltaTE = dTE;
+    end
 end
-if ~isempty(dTE)
-    descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
-    s.deltaTE = dTE;
-elseif ~isempty(TE0)
-    descrip = sprintf('TE=%.4g;%s', TE0, descrip);
-end
+descrip = sprintf('TE=%.4g;%s', TE0, descrip);
 
 % Get dwell time
 if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
@@ -1125,24 +1135,10 @@ if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
     end
     if ~isempty(dwell)
         s.EffectiveEPIEchoSpacing = dwell;
-        % ppf = asc_header(s, 'sKSpace.ucPhasePartialFourier');
-        % lns = asc_header(s, 'sKSpace.lPhaseEncodingLines');
-        epiFactor = double(tryGetField(s, 'EPIFactor'));
-        if isempty(epiFactor)
-            epiFactor = asc_header(s, 'sFastImaging.lEPIFactor');
-        end
-        pat = tryGetField(s, 'ParallelReductionFactorInPlane'); % guessed
-        if isempty(pat), pat = asc_header(s, 'sPat.ucPATMode'); end
-        if isempty(pat), pat = 1; end
-        % http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/TOPUP/Faq
-        readout = dwell * pat * epiFactor / 1000; % multiply pat?
-        % readout = dwell * dim(iPhase) / 1000; % before 20160601
-        if ~isempty(readout), s.ReadoutSeconds = readout; end
-        if s.isDTI && ~isempty(readout)
-            descrip = sprintf('readout=%.3g;%s', readout, descrip);
-        else
-            descrip = sprintf('dwell=%.3g;%s', dwell, descrip);
-        end
+        % https://github.com/rordenlab/dcm2niix/issues/130
+        readout = dwell * (dim(iPhase)- 1) / 1000; % since 170923
+        s.ReadoutSeconds = readout;
+        descrip = sprintf('readout=%.3g;dwell=%.3g;%s', readout, dwell, descrip);
     end
 end
 
@@ -1217,6 +1213,18 @@ end
 if isempty(t), t = tryGetField(s, 'RefAcqTimes'); end % GE or Siemens non-mosaic
 
 nSL = hdr.dim(4);
+if isempty(t) && isfield(s, 'ProtocolDataBlock') % GE with invalid RTIA_timer
+    SliceOrder = s.ProtocolDataBlock.SLICEORDER;
+    t = (0:nSL-1)' * TA/nSL;
+    if strcmp(SliceOrder, '1') % 0/1: sequential/interleaved based on limited data
+        t([1:2:nSL 2:2:nSL]) = t;
+    elseif ~strcmp(SliceOrder, '0')
+        errorLog(['Unknown SLICEORDER (' SliceOrder ') for ' s.NiftiName]);
+        return;
+    end
+    s.RefAcqTimes = t;
+end
+
 if isempty(t) % non-mosaic Siemens: create 't' based on ucMode
     ucMode = asc_header(s, 'sSliceArray.ucMode'); % 1/2/4: Asc/Desc/Inter
     if isempty(ucMode), return; end
@@ -1515,10 +1523,11 @@ else % in case of failure to decode CSA header
 end
 
 % tSequenceFileName  = ""%SiemensSeq%\gre_field_mapping""
-i0 = strfind(str, [char(10) key]); %#ok<*CHARTEN> % regexp not good for some key
+i0 = strfind(str, [char(10) key]); %#ok<*CHARTEN> regexp bad for key with [ etc
 if isempty(i0), return; end
-i0 = i0(1) + numel(key);
-str = regexp(str(i0:end), '(?<=\s*=\s*).*', 'match', 'once', 'dotexceptnewline');
+i0 = i0(1) + 1 + numel(key);
+i1 = regexp(str(i0:end), '\s*=\s*', 'end', 'once') + i0;
+str = regexp(str(i1:end), '.*?(?=\n)', 'match', 'once');
 str = strtrim(str);
 
 if strncmp(str, '""', 2) % str parameter
@@ -1651,14 +1660,12 @@ switch cmd
                 'Last updated on 20%s\n'], reviseDate);
             helpdlg(str, 'About dicm2nii')
         elseif item == 2 % license
-            fid = fopen([fileparts(which(mfilename)) '/license.txt']);
-            if fid<1
+            try
+                str = fileread([fileparts(which(mfilename)) '/license.txt']);
+            catch
                 str = 'license.txt file not found';
-            else
-                str = strtrim(fread(fid, '*char')');
-                fclose(fid);
             end
-            helpdlg(str, 'License')
+            helpdlg(strtrim(str), 'License')
         elseif item == 3
             doc dicm2nii;
         elseif item == 4
@@ -1709,7 +1716,7 @@ fh = figure('dicm' * 256.^(0:3)'); % arbitury integer
 if strcmp('dicm2nii_fig', get(fh, 'Tag')), return; end
 
 scrSz = get(0, 'ScreenSize');
-fSz = 9 + isunix * 2;
+fSz = 9 + ~(ispc || ismac) * 2;
 clr = [1 1 1]*206/256;
 clrButton = [1 1 1]*216/256;
 cb = @(cmd) {@gui_callback cmd fh}; % callback shortcut
@@ -1762,24 +1769,24 @@ hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
 
 uitxt('Output format', [8 166 82 16]);
 hs.rstFmt = uicontrol('Style', 'popup', 'Background', 'white', 'FontSize', fSz, ...
-    'Value', getpf('rstFmt',1), 'Position', [92 162 80 24], 'String', ' .nii| .hdr/.img', ...
+    'Value', getpf('rstFmt',1), 'Position', [92 162 82 24], 'String', {' .nii' ' .hdr/.img'}, ...
     'TooltipString', 'Choose output file format');
 
 hs.gzip = chkbox(fh, getpf('gzip',true), 'Compress', '', 'Compress into .gz files');
-sz = get(hs.gzip, 'Extent'); set(hs.gzip, 'Position', [220 166 sz(3)+16 sz(4)]);
+sz = get(hs.gzip, 'Extent'); set(hs.gzip, 'Position', [220 166 sz(3)+24 sz(4)]);
 
 hs.rst3D = chkbox(fh, getpf('rst3D',false), 'SPM 3D', cb('SPMStyle'), ...
     'Save one file for each volume (SPM style)');
-sz = get(hs.rst3D, 'Extent'); set(hs.rst3D, 'Position', [330 166 sz(3)+16 sz(4)]);
+sz = get(hs.rst3D, 'Extent'); set(hs.rst3D, 'Position', [330 166 sz(3)+24 sz(4)]);
            
 hs.convert = uicontrol('Style', 'pushbutton', 'Position', [104 8 200 30], ...
     'FontSize', fSz, 'String', 'Start conversion', ...
     'Background', clrButton, 'Callback', cb('do_convert'), ...
     'TooltipString', 'Dicom source and Result folder needed before start');
 
-hs.about = uicontrol('Style', 'popup', ...
-    'String', 'About|License|Help text|Check update|A paper about conversion', ...
-    'Position', [342 12 72 20], 'Callback', cb('about'));
+hs.about = uicontrol('Style', 'popup',  'String', ...
+    {'About' 'License' 'Help text' 'Check update' 'A paper about conversion'}, ...
+    'Position', [326 12 88 20], 'Callback', cb('about'));
 
 ph = uipanel(fh, 'Units', 'Pixels', 'Position', [4 50 410 102], 'FontSize', fSz, ...
     'BackgroundColor', clr, 'Title', 'Preferences (also apply to command line and future sessions)');
@@ -1788,27 +1795,27 @@ setpf = @(p)['setpref(''dicm2nii_gui_para'',''' p ''',get(gcbo,''Value''));'];
 p = 'lefthand';
 h = chkbox(ph, getpf(p,true), 'Left-hand storage', setpf(p), ...
     'Left hand storage works well for FSL, and likely doesn''t matter for others');
-sz = get(h, 'Extent'); set(h, 'Position', [4 60 sz(3)+16 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [4 60 sz(3)+24 sz(4)]);
 
 p = 'save_patientName';
 h = chkbox(ph, getpf(p,true), 'Store PatientName', setpf(p), ...
     'Store PatientName in NIfTI hdr, ext and json');
-sz = get(h, 'Extent'); set(h, 'Position', [180 60 sz(3)+16 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [180 60 sz(3)+24 sz(4)]);
 
 p = 'use_parfor';
 h = chkbox(ph, getpf(p,true), 'Use parfor if needed', setpf(p), ...
     'Converter will start parallel tool if necessary');
-sz = get(h, 'Extent'); set(h, 'Position', [4 36 sz(3)+16 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [4 36 sz(3)+24 sz(4)]);
 
 p = 'use_seriesUID';
 h = chkbox(ph, getpf(p,true), 'Use SeriesInstanceUID if exists', setpf(p), ...
     'Only uncheck this if SeriesInstanceUID is messed up by some third party archive software');
-sz = get(h, 'Extent'); set(h, 'Position', [180 36 sz(3)+16 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [180 36 sz(3)+24 sz(4)]);
 
 p = 'save_json';
 h = chkbox(ph, getpf(p,false), 'Save json file', setpf(p), ...
     'Save json file for BIDS (http://bids.neuroimaging.io/)');
-sz = get(h, 'Extent'); set(h, 'Position', [4 12 sz(3)+16 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [4 12 sz(3)+24 sz(4)]);
 
 hs.fig = fh;
 guidata(fh, hs); % store handles
@@ -1838,8 +1845,7 @@ if strncmpi(s.Manufacturer, 'SIEMENS', 7)
     phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
 elseif strncmpi(s.Manufacturer, 'GE', 2)
     try % VIEWORDER "1" == bottom_up
-        expr = '(?<=\n\s*VIEWORDER\s+")\d+(?=")';
-        phPos = regexp(s.ProtocolDataBlock, expr, 'match', 'once') == '1';
+        phPos = s.ProtocolDataBlock.VIEWORDER == '1';
     end
 elseif strncmpi(s.Manufacturer, 'Philips', 7)
     try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
@@ -2041,11 +2047,8 @@ fclose(fid);
 %% Get the last date string in history
 function dStr = reviseDate(mfile)
 if nargin<1, mfile = mfilename; end
-dStr = '170517?';
-fid = fopen(which(mfile));
-if fid<1, return; end
-str = fread(fid, '*char')';
-fclose(fid);
+dStr = '170922?';
+try str = fileread(which(mfile)); catch, return; end
 str = regexp(str, '.*\n% (\d{6}) ', 'tokens', 'once'); % last one
 if isempty(str), return; end
 dStr = str{1};
@@ -2196,7 +2199,7 @@ flds = { % fields to put into nifti ext
   'Manufacturer' 'SoftwareVersion' 'MRAcquisitionType' 'InstitutionName' ...
   'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
   'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector', ...
-  'InstanceNumbers'};
+  'VolumeTiming'};
 if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
 
 ext.ecode = 6; % text ext

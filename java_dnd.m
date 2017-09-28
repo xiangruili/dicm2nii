@@ -39,8 +39,7 @@ if jSource.getDropType() == 1 % String dropped
     evt.Data = char(jSource.getTransferData());
     if strncmp(evt.Data, 'file://', 7) % files identified as string
         evt.DropType = 'file';
-        evt.Data = strrep(evt.Data, char(13), char(10)); %#ok<*CHARTEN>
-        evt.Data = regexp(evt.Data, '(?<=file://).*', 'match', 'dotexceptnewline')';
+        evt.Data = regexp(evt.Data, '(?<=file://).*?(?=\r?\n)', 'match')';
     end
 elseif jSource.getDropType() == 2 % file(s) dropped
     evt.DropType = 'file';

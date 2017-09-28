@@ -89,8 +89,10 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 170127 Implement mgh_file: read FreeSurfer mgh or mgz.
 % 170618 philips_par(): use regexp (less error prone); ignore keyname case.
 % 170618 afni_head(): make MSB_FIRST (BE) BRIK work; fix negative PixelSpacing.
-% 170625 read_ProtocolDataBlock(): decompress only to avoid guessing datatype.
+% 170625 read_ProtocolDataBlock(): decompress only to avoid datatype guess.
 % 170803 par_key(): bug fix introduced on 170618.
+% 170910 regexp tweak to work for Octave.
+% 170921 read_ProtocolDataBlock: decode into struct with better performance.
 
 persistent dict_full;
 s = []; info = '';
@@ -568,13 +570,9 @@ n = typecast(ch(1:4), 'int32') + 4; % nBytes, zeros may be padded to make 4x
 if ~all(ch(5:6) == [31 139]') || n>numel(ch), return; end % gz signature
 gunzip_mem = nii_tool('func_handle', 'gunzip_mem');
 ch = char(gunzip_mem(ch(5:n))');
-% b = gunzip_mem(ch(5:n));
-% b = regexp(char(b'), '(\w*)\s+"(.*)"', 'tokens', 'dotexceptnewline');
-% if isempty(b{1}), return; end % guzip faild or wrong format
-% try
-%     for j = 1:numel(b), rst.(b{j}{1}) = b{j}{2}; end
-%     ch = rst;
-% end
+ch = regexp(ch, '(\w*)\s+"(.*?)"\n', 'tokens');
+ch = [ch{:}];
+ch = struct(ch{:});
 end
 
 %% subfunction: get fields for multiframe dicom
@@ -694,13 +692,13 @@ if fid<0, s = []; err = ['File not exist: ' fname]; return; end
 str = fread(fid, inf, '*char')'; % read all as char
 fname = fopen(fid); % name with full path
 fclose(fid);
-str = strrep(str, char(13), char(10)); % remove char(13)
+str = strrep(str, char([13 10]), char(10)); % remove char(13)
 
 % In V4, offcentre and Angulation labeled as y z x, but actually x y z. We
 % try not to use these info
-V = regexpi(str, '(?<=image export tool +)V[\d.]+', 'match', 'once');
+V = regexpi(str, 'image export tool\s*(V[\d\.]+)', 'tokens', 'once');
 if isempty(V), err = 'Not PAR file'; s = []; return; end
-s.SoftwareVersion = [V '\PAR'];
+s.SoftwareVersion = [V{1} '\PAR'];
 if strncmpi(s.SoftwareVersion, 'V3', 2)
     fprintf(2, ' V3 PAR file is not supported.\n');
     s = []; return;
@@ -927,8 +925,9 @@ s.PixelData.Bytes = s.Rows * s.Columns * nImg * s.BitsAllocated / 8;
 
     % subfunction: return value specified by key in PAR file
     function val = par_key(str, key, isNum)
-        expr = ['(?<=\n.\s*' key '.*?:).*?\n']; % \n. key ... : val \n
-        val = strtrim(regexp(str, expr, 'match', 'once'));
+        expr = ['\n.\s*' key '.*?:(.*?)\n']; % \n. key ... : val \n
+        val = strtrim(regexp(str, expr, 'tokens', 'once'));
+        if isempty(val), val = ''; else, val = val{1}; end
         if nargin<3 || isNum, val = sscanf(val, '%g'); end
     end
 end
@@ -1058,11 +1057,10 @@ s.PixelData.Bytes = prod(dim(1:4)) * s.BitsAllocated / 8;
         if isempty(i1), val = []; return; end
         i1 = i1(1) + 1;
         typ = regexp(str(1:i1), 'type\s*=\s*(\w*)-attribute\n', 'tokens');
-        [n, i2] = regexp(str(i1:end), '(?<=count\s*=\s*)\d+', 'match', 'end', 'once');
-        n = sscanf(n, '%g');
+        [n, i2] = regexp(str(i1:end), 'count\s*=\s*(\d+)', 'tokens', 'end', 'once');
+        n = sscanf(n{1}, '%g');
         if strcmpi(typ{end}{1}, 'string')
-            val = regexp(str(i1:end), '(?<='')(.*?\n)', 'match', 'once');
-            val = val(1:n-1); % remove ~
+            val = regexp(str(i1:end), '(?<='').*?(?=~?\n)', 'match', 'once');
         else
             val = sscanf(str(i2+i1:end), '%g', n);
         end

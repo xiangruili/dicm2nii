@@ -50,7 +50,7 @@ for i = 1:n
 
     if isfield(s, 'PatientName'), subj = s.PatientName;
     elseif isfield(s, 'PatientID'), subj = s.PatientID;
-    else continue;
+    else, continue;
     end
     if ~isfield(s, 'StudyID'), s.StudyID = '1'; end
     

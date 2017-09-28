@@ -42,7 +42,7 @@ if nargin<1 || isempty(src)
 end
 
 if nargin<2 || isempty(rst)
-    if isdir(src), def = src; else def = fileparts(src); end
+    if isdir(src), def = src; else, def = fileparts(src); end
     if ~isdir(src) && (exist(src, 'file') || (iscell(src) && numel(src)==1))
         [rst, pth] = uiputfile([def filesep '*.dcm'], ...
             'Input file name to save the anonymized file');
@@ -109,7 +109,7 @@ for i = 1:nFile
         expl = true;
     end
     if be, ed = 'b'; tag = char([0 16 0 16]); % '0010' '0010' 'PN' 'PatientName'
-    else   ed = 'l'; tag = char([16 0 16 0]); 
+    else,  ed = 'l'; tag = char([16 0 16 0]); 
     end
     if expl, tag = [tag 'PN']; end
     try n = s.PixelData.Start; catch, n = s.FileSize; end
@@ -121,7 +121,7 @@ for i = 1:nFile
     end
     i0 = i0(1) + numel(tag);
     n = double(b8(i0+(0:1)));
-    if be, n = n(1)*256 + n(2); else n = n(2)*256 + n(1); end % uint16
+    if be, n = n(1)*256 + n(2); else, n = n(2)*256 + n(1); end % uint16
     
     fid = fopen(nam, 'w', ed);
     fwrite(fid, b8(1:i0-1), 'uint8'); % till len
