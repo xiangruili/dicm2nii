@@ -257,6 +257,7 @@ function varargout = nii_tool(cmd, varargin)
 % 170410 read_img(): turn off auto RGB dim detection, and use rgb_dim.
 % 170714 'save': force to version 2 if img dim exceeds 2^15-1.
 % 170716 Add functionSignatures.json file for tab auto-completion.
+% 171031 'LocalFunc' makes eaiser to call local functions.
 
 persistent C para; % C columns: name, length, format, value, offset
 if isempty(C)
@@ -630,8 +631,10 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
     
     varargout{1} = nii;
     if nargout>1, varargout{2} = fmt; end
-elseif strcmpi(cmd, 'func_handle') % make a local function avail to outside 
+elseif strcmp(cmd, 'func_handle') % make a local function avail to outside 
     varargout{1} = str2func(varargin{1});
+elseif strcmp(cmd, 'LocalFunc') % call  local function from outside 
+    [varargout{1:nargout}] = feval(varargin{:});
 else
     error('Invalid command for nii_tool: %s', cmd);
 end

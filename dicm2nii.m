@@ -734,9 +734,7 @@ for i = 1:nRun
     s = h{i}{1};
     sN = sNs(i);
     a = strtrim(ProtocolName(s));
-    if isType(s, '\P\') || strcmpi(tryGetField(s, 'ComplexImageComponent', ''), 'PHASE')
-        a = [a '_phase']; % phase image
-    end
+    if isPhase(s), a = [a '_phase']; end % phase image
     if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\'), a = [a '_MoCo']; end
     if multiSubj, a = [a '_' subjs{i}]; end
     if nStudy(i)>1, a = [a '_Study' studyIDs{i}]; end
@@ -888,7 +886,7 @@ for i = 1:nRun
     if s.isDTI, [h{i}, nii] = get_dti_para(h{i}, nii); end
     
     [nii, h{i}{1}] = set_nii_header(nii, h{i}{1}, pf); % set most nii hdr
-    h{i}{1}.NiftiCreator = converter;
+    h{i}{1}.ConversionSoftware = converter;
     nii.ext = set_nii_ext(h{i}{1}, pf); % NIfTI extension
     if pf.save_json, save_json(h{i}{1}, fname); end
 
@@ -946,8 +944,7 @@ if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
 %% Subfunction: return SeriesDescription
 function name = ProtocolName(s)
 name = tryGetField(s, 'SeriesDescription');
-if isempty(name) || (strncmp(s.Manufacturer, 'SIEMENS', 7) && ...
-        numel(name)>9 && strcmp(name(end+(-9:0)), 'MoCoSeries'))
+if isempty(name) || (strncmp(s.Manufacturer, 'SIEMENS', 7) && any(regexp(name, 'MoCoSeries$')))
     name = tryGetField(s, 'ProtocolName');
 end
 if isempty(name), [~, name] = fileparts(s.Filename); end
@@ -971,7 +968,12 @@ elseif strncmpi(s.Manufacturer, 'Philips', 7)
 else % Some Siemens DTI are not labeled as \DIFFUSION
     tf = ~isempty(csa_header(s, 'B_value'));
 end
-        
+
+%% Subfunction: return true if series is phase img
+function tf = isPhase(s)
+tf = isType(s, '\P\') || ...
+    strcmpi(tryGetField(s, 'ComplexImageComponent', ''), 'PHASE'); % Philips
+
 %% Subfunction: get field if exist, return default value otherwise
 function val = tryGetField(s, field, dftVal)
 if isfield(s, field), val = s.(field); 
@@ -1095,7 +1097,7 @@ foo = tryGetField(s, 'AcquisitionDateTime');
 descrip = sprintf('time=%s;', foo(1:min(18,end))); 
 TE0 = asc_header(s, 'alTE[0]')/1000; % s.EchoTime stores only 1 TE
 if isempty(TE0), TE0 = tryGetField(s, 'EchoTime'); end % GE, philips
-if isType(s, '\P\') || strcmpi(tryGetField(s, 'ComplexImageComponent', ''), 'PHASE')
+if isPhase(s)
     TE1 = asc_header(s, 'alTE[1]')/1000;
     if ~isempty(TE1), s.SecondEchoTime = TE1; end
     dTE = abs(TE1 - TE0); % TE difference
@@ -2191,7 +2193,7 @@ end
 % 0.9836791 0.17571079 0.038744]; % matrix rows separated by char(10) and/or ';'
 function ext = set_nii_ext(s, pf)
 flds = { % fields to put into nifti ext
-  'NiftiCreator' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
+  'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
   'AcquisitionDateTime' 'bval' 'bvec' 'ReadoutSeconds' 'SliceTiming' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'InversionTime' ...
   'PatientName' 'PatientSex' 'PatientAge' 'PatientSize' 'PatientWeight' ...
@@ -2335,7 +2337,7 @@ end
 % matlab.internal.webservices.toJSON(s)
 function save_json(s, fname)
 flds = {
-  'NiftiCreator' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
+  'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
   'AcquisitionDateTime' 'bval' 'bvec' ...
   'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'SecondEchoTime' 'InversionTime' ...

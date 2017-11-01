@@ -568,9 +568,8 @@ end
 function ch = read_ProtocolDataBlock(ch)
 n = typecast(ch(1:4), 'int32') + 4; % nBytes, zeros may be padded to make 4x
 if ~all(ch(5:6) == [31 139]') || n>numel(ch), return; end % gz signature
-gunzip_mem = nii_tool('func_handle', 'gunzip_mem');
-ch = char(gunzip_mem(ch(5:n))');
-ch = regexp(ch, '(\w*)\s+"(.*?)"\n', 'tokens');
+ch = nii_tool('LocalFunc', 'gunzip_mem', ch(5:n))';
+ch = regexp(char(ch), '(\w*)\s+"(.*?)"\n', 'tokens');
 ch = [ch{:}];
 ch = struct(ch{:});
 end
@@ -682,11 +681,6 @@ end
 %% subfunction: read PAR file, return struct like that from dicm_hdr.
 function [s, err] = philips_par(fname)
 err = '';
-[pth, nam, ext] = fileparts(fname);
-if strcmpi(ext, '.REC')
-    fname = fullfile(pth, [nam '.PAR']);
-    if ~exist(fname, 'file'), fname = fullfile(pth, [nam '.par']); end
-end
 fid = fopen(fname);
 if fid<0, s = []; err = ['File not exist: ' fname]; return; end
 str = fread(fid, inf, '*char')'; % read all as char
@@ -935,9 +929,6 @@ end
 %% subfunction: read AFNI HEAD file, return struct like that from dicm_hdr.
 function [s, err] = afni_head(fname)
 err = '';
-if numel(fname)>5 && strcmp(fname(end+(-4:0)), '.BRIK')
-    fname(end+(-4:0)) = '.HEAD';
-end
 fid = fopen(fname);
 if fid<0, s = []; err = ['File not exist: ' fname]; return; end
 str = fread(fid, inf, '*char')';
@@ -1261,8 +1252,7 @@ err = ''; s = [];
 [~, ~, ext] = fileparts(fname);
 isGZ = strcmpi(ext, '.mgz'); % .mgz = .mgh.gz
 if isGZ
-    gunzipOS = nii_tool('func_handle', 'gunzipOS');
-    nam = gunzipOS(fname);
+    nam = nii_tool('LocalFunc', 'gunzipOS', fname);
     fid = fopen(nam, 'r', 'b');
 else
     fid = fopen(fname, 'r', 'b'); % always big endian?

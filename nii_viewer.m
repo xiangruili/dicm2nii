@@ -72,11 +72,11 @@ function varargout = nii_viewer(fname, overlayName)
 % overlay, the overlay voxel value will also show up, unless its display is off.
 % When the pointer moves onto the panel or the bottom-right quadrant, the
 % information for the voxel at crosshair will be displayed. The display format
-% is as following:
-%  (i,j,k)=(x,y,z): val_background val_overlay1 val_overlay2 ...
+% is as following with val of the top image displayed first:
+%  (i,j,k)=(x,y,z): val_1 val_2 val_3
 %
 % Note that although the x/y/z coordinates are shared by background and overlay
-% images, IJK indices are always for background image (shown on title bar).
+% images, IJK indices are always for background image (name shown on title bar).
 % 
 % The mouse-over display can be turned on/off from Help -> Preferences ...
 % 
@@ -85,6 +85,7 @@ function varargout = nii_viewer(fname, overlayName)
 % a voxel value and ROI label pair per line, like
 %  1 Precentral_L
 %  2 Precentral_R
+%  3 ...
 % 
 % Image display can be smoothed in 3D (default is off). The smooth is slow when
 % the image dimension is large, even when the current implementation of smooth
@@ -95,7 +96,7 @@ function varargout = nii_viewer(fname, overlayName)
 % feature is indicated by a frame grouping these parameters. Each NIfTI file has
 % its own set of parameters (display min and max value, LUT, alpha, whether to
 % smooth, interpolation method, and volume number) to control its display.
-% Moving the mouse onto a parameter will show what the parameter means.
+% Moving the mouse onto a parameter will show the meaning of the parameter.
 % 
 % The lastly added overlay is on the top of display and top of the file list.
 % The background and overlay order can be changed by the two small buttons next
@@ -121,9 +122,8 @@ function varargout = nii_viewer(fname, overlayName)
 % 
 % For multi-volume data, one can change the Volume Number (the parameter at
 % rightmost of the panel) to check the head motion. Click in the number dialer
-% and hold up or down arrow key, or press < or > key, to simulate movie play. It
-% is better to open the 4D data as background, since it may be slower to map it
-% to the background image.
+% and or press < or > key, to simulate movie play. It is better to open the 4D
+% data as background, since it may be slower to map it to the background image.
 % 
 % Popular LUT options are implemented. Custom LUT can be added by File -> Load
 % custom LUT. The color coding can be shown by View -> Show colorbar. There are
@@ -157,12 +157,12 @@ function varargout = nii_viewer(fname, overlayName)
 % 
 % The viewer figure can be copied into clipboard (not available for Linux) or
 % saved as variety of image format. For high quality picture, one can increase
-% the output resolution from Help -> Preferences -> Resolution. Higher
-% resolution will take longer time to copy or save, and result in larger file.
-% If needed, one can change to white background for picture output. With white
-% background, the threshold for the background image needs to be carefully
-% selected to avoid strange effect with some background images. For this reason,
-% white background is intended only for picture output.
+% the output resolution by Help -> Preferences -> Resolution. Higher resolution
+% will take longer time to copy or save, and result in larger file. If needed,
+% one can change to white background for picture output. With white background,
+% the threshold for the background image needs to be carefully selected to avoid
+% strange effect with some background images. For this reason, white background
+% is intended only for picture output.
 % 
 % The selected NIfTI can also be saved as different format from File -> Save
 % NIfTI as. For example, a file can be saved as a different resolution. With a
@@ -172,7 +172,7 @@ function varargout = nii_viewer(fname, overlayName)
 % 
 % See also NII_TOOL DICM2NII NII_XFORM
 
-%% By Xiangrui Li (xiangrui.li@gmail.com)
+%% By Xiangrui Li (xiangrui.li at gmail.com)
 % History(yymmdd):
 % 151021 Almost ready to publish.
 % 151104 Include drag&drop by Maarten van der Seijs.
@@ -237,7 +237,7 @@ function varargout = nii_viewer(fname, overlayName)
 % 160713 javaDropFnc for Linux: Robot key press replaces mouse click;
 %        Implement 'Set crosshair at' 'Smoothed maximum'.
 % 160715 lut2img: bug fix for custom LUT; custom LUT uses rg [0 255]; add gap=0.
-% 160721 Implement 'Set crosshair at' 'a point with value of'.
+% 160721 Implement 'Set crosshair at' & 'a point with value of'.
 % 160730 Allow to load single volume for large dataset.
 % 161003 Add aligned overlay: accept FSL warp file as transformation.
 % 161010 Implement 'Save volume as'; xyzr2roi: use valid q/sform.
@@ -252,6 +252,7 @@ function varargout = nii_viewer(fname, overlayName)
 % 170212 Can open nifti-convertible files; Add Save NIfTI as -> a copy.
 % 170421 java_dnd() changed as func, ControlDown OS independent by ACTION_LINK.
 % 170515 Use area to normalize histogram.
+% 171031 Implement layout. axes replace subplot to avoid overlap problem.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -261,9 +262,13 @@ end
 
 pf = getpref('nii_viewer_para');
 if isempty(pf) || ~isfield(pf, 'mouseOver')
-    pf = struct('openPath', pwd, 'addPath', pwd, 'interp', 'linear', ...
-        'extraV', NaN, 'dpi', '0', 'rightOnLeft', false, 'mouseOver', true);
+    pf = struct('openPath', pwd, 'addPath', pwd, 'interp', 'linear', 'extraV', NaN, ...
+        'dpi', '0', 'rightOnLeft', false, 'mouseOver', true, 'layout', 2);
     setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
+end
+if ~isfield(pf, 'layout')
+    pf.layout = 2;
+    setpref('nii_viewer_para', 'layout', 2);
 end
 
 if nargin<1
@@ -286,21 +291,8 @@ if ~isreal(q.nii.img)
     q.nii.img = abs(q.nii.img); % real now
 end
 hs.q{1} = q;
-
-mm = dim .* hs.pixdim; % FOV
-siz = [sum(mm(1:2)) sum(mm(2:3))]; % image area width/height
-x0 = mm(1) / siz(1); % normalized width of left images
-y0 = mm(2) / siz(2); % normalized height of bottom image (tra)
-z0 = mm(3) / siz(2); % normalized height of top images
-
-res = screen_pixels;
-% leave some room for system bar and figure menu/title/panel both dimension
-siz = siz * min((res-[40 156]) ./ siz); % almost max size
-if siz(2)>800, siz = siz*0.8; end % make it smaller on big screen
-siz = ceil(siz);
-
 hs.dim = single(dim); % single saves memory for ndgrid
-hs.siz = siz; % image panel size
+[siz, plotPos] = plot_pos(dim.*hs.pixdim, pf.layout);
 hs.gap = min(hs.pixdim) ./ hs.pixdim * 3; % in unit of smallest pixdim
 
 p = struct('lut', [], 'lb', rg(1), 'ub', rg(2));
@@ -308,13 +300,13 @@ p = dispPara(p, hs.q{1}.nii.hdr);
 [pName, niiName, ext] = fileparts(p.fname);
 if strcmpi(ext, '.gz'), [~, niiName] = fileparts(niiName); end
 
+res = screen_pixels(1); % use 1st screen
 if nargin>1 && all(ishandle(overlayName)) % internal call by 'open' or dnd
     fh = overlayName;
     fn = get(fh, 'Number');
     pos = fh.Position(1:2);
     close(fh); 
 else
-    res = screen_pixels(1); % use 1st screen
     pos = round((res-siz)/2);
 
     set(0, 'ShowHiddenHandles', 'on');
@@ -438,14 +430,13 @@ hs.volume = java_spinner([361 8 44 22], [1 1 nVol 1], ph, cb('volume'), '#', ...
 hs.volume.setEnabled(nVol>1);
 
 %% Three views: sag, cor, tra
-% this panel makes resize easy: subplot relative to panel
+% this panel makes resize easy: axes relative to panel
 hs.frame = uipanel(fh, 'Units', 'pixels', 'Position', [1 1 siz], ...
     'BorderType', 'none', 'BackgroundColor', 'k');
 
-pos = [x0 y0 1-x0 z0;  0 y0 x0 z0;  0 0 x0 y0];
 for i = 1:3
     j = 1:3; j(j==i) = [];
-    hs.ax(i) = subplot('Position', pos(i,:), 'Parent', hs.frame);
+    hs.ax(i) = axes('Position', plotPos(i,:), 'Parent', hs.frame);
     hs.hsI(i) = image(zeros(dim(j([2 1])), 'single')); hold(hs.ax(i), 'on');
     
     x = [c(j(1))+[-1 1 0 0]*hs.gap(j(1)); 0 dim(j(1))+1 c(j(1))*[1 1]];
@@ -468,12 +459,12 @@ for i = 1:numel(labls)
 end
 
 % early matlab's colormap works only for axis, so ax(4) is needed.
-hs.ax(4) = subplot('Position', [x0 0 1-x0 y0], 'Parent', hs.frame, 'Ylim', [0 1]);
-colorbar('Units', 'Normalized', 'Position', [x0+0.2 y0*0.15 0.03 y0*0.7]);
+hs.ax(4) = axes('Position', plotPos(4,:), 'Parent', hs.frame, 'Ylim', [0 1]);
+colorbar('Location', 'West', 'Units', 'Normalized');
 hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); % trick for early matlab
 set(hs.colorbar, 'Visible', 'off', 'UIContextMenu', '', 'EdgeColor', [1 1 1]);
 % hs.colorbar = colorbar(hs.ax(4), 'YTicks', [0 0.5 1], 'Color', [1 1 1], ...
-%     'Location', 'west', 'PickableParts', 'none', 'Visible', 'off');
+%     'Location', 'West', 'PickableParts', 'none', 'Visible', 'off');
 
 % image() reverses YDir. Turn off ax and ticks
 set(hs.ax, 'YDir', 'normal', 'Visible', 'off');
@@ -531,7 +522,7 @@ hs.overlay(3) = h;
 
 hs.overlay(5) = uimenu(h_over, 'Label', 'Remove overlay', 'Accelerator', 'R', ...
     'Callback', cb('close'), 'Enable', 'off');
-hs.overlay(4) = uimenu(h_over, 'Label', 'Remove overlays', 'Accelerator', 'Q', ...
+hs.overlay(4) = uimenu(h_over, 'Label', 'Remove overlays', ...
     'Callback', cb('closeAll'), 'Enable', 'off');
 
 h_view = uimenu(fh, 'Label', '&View');
@@ -539,6 +530,10 @@ h = uimenu(h_view, 'Label', 'Zoom in by');
 for i = [1 1.2 1.5 2 3 4 5 8 10 20]
     uimenu(h, 'Label', num2str(i), 'Callback', cb('zoom'));
 end
+h = uimenu(h_view, 'Label', 'Layout', 'UserData', pf.layout);
+uimenu(h, 'Label', 'one-row', 'Callback', cb('layout'));
+uimenu(h, 'Label', 'two-row sag on right', 'Callback', cb('layout'));
+uimenu(h, 'Label', 'two-row sag on left', 'Callback', cb('layout'));
 uimenu(h_view, 'Label', 'White background', 'Callback', cb('background'));
 hLR = uimenu(h_view, 'Label', 'Right on left side', 'Callback', cb('flipLR'));
 uimenu(h_view, 'Label', 'Show colorbar', 'Callback', cb('colorbar'));
@@ -692,16 +687,17 @@ switch cmd
         posF = getpixelposition(fh); % asked position by user
         posI = getpixelposition(hs.frame); % old size
         
-        res = screen_pixels;
+        siz = hs.frame.Position(3:4);
+        res = screen_pixels(1);
         oldF = round([posI(3) posI(4)+posP(4)]); % previous fig size
         if isequal(oldF, posF(3:4)), return; end % moving without size change
         if all(posF(3:4) >= oldF) % enlarge
-            a = max([posF(3) posF(4)-posP(4)] ./ hs.siz) * hs.siz;
+            a = max([posF(3) posF(4)-posP(4)] ./ siz) * siz;
             a(1) = min(a(1), res(1)-30); % leave space for MAC dock etc
             a(2) = min(a(2), res(2)-92-posP(4)); % leave space for title bar etc
-            a = min(a ./ hs.siz) * hs.siz;
+            a = min(a ./ siz) * siz;
         elseif all(posF(3:4) <= oldF) % shrink
-            a = min([posF(3) posF(4)-posP(4)] ./ hs.siz) * hs.siz;
+            a = min([posF(3) posF(4)-posP(4)] ./ siz) * siz;
         else % one side enlarge, another side shrink: use old size
             a = posI(3:4);
         end
@@ -963,6 +959,32 @@ switch cmd
             set(hs.ax([2 3]), 'XDir', 'reverse');
             set(hs.ras([3 5]), 'String', 'R');
         end
+    case 'layout'
+        submenu = {'one-row' 'two-row sag on right' 'two-row sag on left'};
+        layout = find(strcmp(get(h, 'Label'), submenu));
+        hLayout = findobj(hs.fig, 'Type', 'uimenu', 'Label', 'Layout');
+        if get(hLayout, 'UserData') == layout, return; end
+        
+        cb = hs.fig.ResizeFcn;
+        hs.fig.ResizeFcn = ''; drawnow;
+        clnObj = onCleanup(@() set(hs.fig, 'ResizeFcn', cb));
+        
+        res = screen_pixels(1) - [60 92];
+        oldSiz = hs.frame.Position(3:4);
+        [siz, plotPos] = plot_pos(hs.dim.*hs.pixdim, layout);
+        if siz(1)<oldSiz(1), siz = siz/siz(1)*oldSiz(1); end
+        if siz(2)+64>res(2), siz = siz/siz(2)*(res(2)-64); end
+        pos = hs.fig.Position;
+        pos(2) = pos(2) + oldSiz(2) - siz(2);
+        pos(3:4) = siz+[0 64];
+        d = pos(2)+pos(4) - res(2); 
+        if d>0, pos(2) = pos(2) - d; end 
+        hs.fig.Position = pos;
+        hs.frame.Position(3:4) = siz;
+        hs.panel.Position(2) =  hs.fig.Position(4) - 64;
+        for i = 1:4, set(hs.ax(i), 'Position', plotPos(i,:)); end
+        set(hLayout, 'UserData', layout);
+        drawnow;
     case 'keyHelp'
         str = sprintf([ ...
            'Key press available when focus is not in a number dialer:\n\n' ...
@@ -2001,22 +2023,34 @@ function pref_dialog(pref)
 pf = get(pref, 'UserData');
 d = dialog('Name', 'Preferences', 'Visible', 'off');
 pos = getpixelposition(d);
-pos(3:4) = [396 300];
+pos(3:4) = [396 332];
 h.fig = ancestor(pref, 'figure');  
 
-uicontrol('Parent', d, 'Style', 'text', 'Position', [8 274 300 22], ...
+uicontrol(d, 'Style', 'text', 'Position', [8 306 300 22], ...
     'String', 'Background (template) image folder:', 'HorizontalAlignment', 'left');
 h.openPath = uicontrol(d, 'Style', 'edit', 'String', pf.openPath, ...
-    'Position', [8 256 350 22], 'BackgroundColor', 'w', 'HorizontalAlignment', 'left', ...
+    'Position', [8 288 350 22], 'BackgroundColor', 'w', 'HorizontalAlignment', 'left', ...
     'TooltipString', 'nii_viewer will point to this folder when you "Open" image');
-uicontrol('Parent', d, 'Position', [358 257 30 22], 'Tag', 'browse', ...
+uicontrol('Parent', d, 'Position', [358 289 30 22], 'Tag', 'browse', ...
     'String', '...', 'Callback', @pref_dialog_cb);
 
 h.rightOnLeft = uicontrol(d, 'Style', 'popup', 'BackgroundColor', 'w', ...
-    'Position', [8 220 380 22], 'Value', pf.rightOnLeft+1, ...
+    'Position', [8 252 380 22], 'Value', pf.rightOnLeft+1, ...
     'String', {'Neurological orientation (left on left side)' ...
                'Radiological orientation (right on left side)'}, ...
     'TooltipString', 'Display convention also applies to future use');
+
+uicontrol(d, 'Style', 'text', 'Position', [8 210 40 22], ...
+    'String', 'Layout', 'HorizontalAlignment', 'left', ...
+    'TooltipString', 'Layout for three views');
+
+% iconsFolder = fullfile(matlabroot,'/toolbox/matlab/icons/');
+% iconUrl = strrep(['file:/' iconsFolder 'matlabicon.gif'],'\','/');
+% str = ['<html><img src="' iconUrl '"/></html>'];
+h.layout = uicontrol(d, 'Style', 'popup', 'BackgroundColor', 'w', ...
+    'Position', [50 214 338 22], 'Value', pf.layout, ...
+    'String', {'one-row' 'two-row sag on right' 'two-row sag on left'}, ...
+    'TooltipString', 'Layout for three views');
 
 h.mouseOver = uicontrol(d, 'Style', 'checkbox', ...
     'Position', [8 182 380 22], 'Value', pf.mouseOver, ...
@@ -2075,6 +2109,8 @@ if strcmp(get(h, 'Tag'), 'OK') % done
     else
         set(fh, 'WindowButtonMotionFcn', '');        
     end
+    
+    pf.layout = get(hs.layout, 'Value'); % 0 or 1
     
     i = get(hs.interp, 'Value');
     str = get(hs.interp, 'String');
@@ -2959,4 +2995,29 @@ end
 try nii = nii_tool('load', strtrim(nam));
 catch, nii = dicm2nii(fname, pwd, 'no_save');
 end
+
+%% Get figure/plot position from FoV for layout
+% siz is in pixels, while pos is normalized.
+function [siz, pos] = plot_pos(mm, layout)
+if layout==1 % 1x3
+    siz = [sum(mm([2 1 1]))+mm(1)/4 max(mm(2:3))]; % image area width/height
+    y0 = mm(2) / siz(1); % normalized width of sag images
+    x0 = mm(1) / siz(1); % normalized width of cor/tra image
+    z0 = mm(3) / siz(2); % normalized height of sag/cor images
+    y1 = mm(2) / siz(2); % normalized height of tra image
+    pos = [0 0 y0 z0;  y0 0 x0 z0;  y0+x0 0 x0 y1;  y0+x0*2 0 mm(1)/4/siz(1) min(z0,y1)];
+elseif layout<4
+    siz = [sum(mm(1:2)) sum(mm(2:3))]; % image area width/height
+    x0 = mm(1) / siz(1); % normalized width of cor/tra images
+    y0 = mm(2) / siz(2); % normalized height of tra image
+    z0 = mm(3) / siz(2); % normalized height of sag/cor images
+    if layout == 2 % 2x2 sag at (1,2)
+        pos = [x0 y0 1-x0 z0;  0 y0 x0 z0;  0 0 x0 y0;  x0 0 1-x0 y0];
+    else % ==3:      2x2 sag at (1,2)
+        pos = [0 y0 1-x0 z0;  1-x0 y0 x0 z0;  1-x0 0 x0 y0;  0 0 1-x0 y0];
+    end
+else
+    error('Unknown layout parameter');
+end
+siz = siz / max(siz) * 800;
 %%
