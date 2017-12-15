@@ -19,6 +19,7 @@ function dict = dicm_dict(vendor, flds)
 % 141030 Make ScanningSequence & SequenceVariant consistent for vendors.
 % 150114 Add two more CSA header duplicate tags, and more command tags.
 % 160411 dict contains group and element.
+% 171211 Add Siemens grp 0021 and more.
 
 if nargin<1, vendor = 'SIEMENS'; end
 dict.vendor = vendor;
@@ -88,6 +89,7 @@ C = {
     '0008' '9092' 'SQ' 'ReferencedImageEvidenceSequence'
     '0008' '9121' 'SQ' 'ReferencedRawDataSequence'
     '0008' '9123' 'UI' 'CreatorVersionUID'
+    '0008' '9154' 'SQ' 'SourceImageEvidenceSequence'
     '0008' '9205' 'CS' 'PixelPresentation'
     '0008' '9206' 'CS' 'VolumetricProperties'
     '0008' '9207' 'CS' 'VolumeBasedCalculationTechnique'
@@ -273,6 +275,13 @@ C = {
     '0018' '9240' 'US' 'RFEchoTrainLength'
     '0018' '9241' 'US' 'GradientEchoTrainLength'
     '0018' '9302' 'CS' 'AcquisitionType'
+    '0018' '9601' 'SQ' 'DiffusionB_MatrixSequence'
+    '0018' '9602' 'FD' 'DiffusionB_ValueXX'
+    '0018' '9603' 'FD' 'DiffusionB_ValueXY'
+    '0018' '9604' 'FD' 'DiffusionB_ValueXZ'
+    '0018' '9605' 'FD' 'DiffusionB_ValueYY'
+    '0018' '9606' 'FD' 'DiffusionB_ValueYZ'
+    '0018' '9607' 'FD' 'DiffusionB_ValueZZ'
     '0020' '000D' 'UI' 'StudyInstanceUID'
     '0020' '000E' 'UI' 'SeriesInstanceUID'
     '0020' '0010' 'SH' 'StudyID'
@@ -348,6 +357,8 @@ C = {
     '0028' '1201' 'OW' 'RedPaletteColorLookupTableData'
     '0028' '1202' 'OW' 'GreenPaletteColorLookupTableData'
     '0028' '1203' 'OW' 'BluePaletteColorLookupTableData'
+    '0028' '2000' 'OB' 'ICCProfile'
+    '0028' '2002' 'CS' 'ColorSpace'
     '0028' '2110' 'CS' 'LossyImageCompression'
     '0028' '2112' 'DS' 'LossyImageCompressionRatio'
     '0028' '2114' 'CS' 'LossyImageCompressionMethod'
@@ -387,6 +398,7 @@ C = {
     '0040' '08EA' 'SQ' 'MeasurementUnitsCodeSequence'
     '0040' '1001' 'SH' 'RequestedProcedureID'
     '0040' '1400' 'LT' 'RequestedProcedureComments'
+    '0040' '2004' 'DA' 'IssueDateOfImagingServiceRequest'
     '0040' '2017' 'LO' 'FillerOrderNumberOfImagingServiceRequest'
     '0040' '2400' 'LT' 'ImagingServiceRequestComments'
     '0040' '9096' 'SQ' 'RealWorldValueMappingSequence'
@@ -406,6 +418,12 @@ C = {
     '0050' '0020' 'LO' 'DeviceDescription'
     '0088' '0140' 'UI' 'StorageMediaFileSetUID'
     '0088' '0200' 'SQ' 'IconImageSequence'
+    '0400' '0550' 'SQ' 'ModifiedAttributesSequence'
+    '0400' '0561' 'SQ' 'OriginalAttributesSequence'
+    '0400' '0562' 'DT' 'AttributeModificationDatetime'
+    '0400' '0563' 'LO' 'ModifyingSystem'
+    '0400' '0565' 'CS' 'ReasonForTheAttributeModification'
+    '2050' '0020' 'CS' 'PresentationLUTShape'
     '5200' '9229' 'SQ' 'SharedFunctionalGroupsSequence'
     '5200' '9230' 'SQ' 'PerFrameFunctionalGroupsSequence'
     '7FE0' '0010' 'OW' 'PixelData' };
@@ -434,6 +452,30 @@ if strncmpi(vendor, 'SIEMENS', 7)
     '0019' '1027' 'FD' 'B_matrix'
     '0019' '1028' 'FD' 'BandwidthPerPixelPhaseEncode'
     '0019' '1029' 'FD' 'MosaicRefAcqTimes'
+    '0021' '1009' 'LO' 'ImaPATModeText' % group 0021 here from guess
+    '0021' '1019' 'CS' 'MrPhoenixProtocol'
+    '0021' '1025' 'SL' 'TablePositionOrigin'
+    '0021' '1026' 'IS' 'MiscSequenceParam'
+    '0021' '102A' 'IS' 'CoilId'
+    '0021' '102B' 'ST' 'PatReinPattern'
+    '0021' '1031' 'IS' 'AbsTablePosition'
+    '0021' '10FE' 'SQ' 'CSASeriesHeaderInfo' % use old csa name
+    '0021' '1103' 'DS' 'SliceMeasurementDuration'
+    '0021' '1104' 'DS' 'BandwidthPerPixelPhaseEncode'
+    '0021' '1106' 'LO' 'ICE_Dims'
+    '0021' '111C' 'IS' 'PhaseEncodingDirectionPositive'
+    '0021' '1124' 'IS' 'ProtocolSliceNumber'
+    %'0021' '1133' 'IS' 'EchoColumnPosition' % 1149 ?
+    '0021' '1142' 'IS' 'RealDwellTime'
+    '0021' '1145' 'SL' 'ImaAbsTablePosition'
+    '0021' '114F' 'LO' 'ImaCoilString'
+    '0021' '1151' 'UL' 'SequenceMask'
+    %'0021' '1156' 'LO' 'ImaPATModeText'
+    '0021' '1158' 'SH' 'AcquisitionMatrixText'
+    '0021' '115B' 'FD' 'SlicePosition_PCS'
+    '0021' '1188' 'DS' 'SliceLocation'
+    '0021' '118A' 'IS' 'InStackPositionNumber'
+    '0021' '11FE' 'SQ' 'CSAImageHeaderInfo' % use old csa name
     '0029' '1008' 'CS' 'CSAImageHeaderType'
     '0029' '1009' 'LO' 'CSAImageHeaderVersion'
     '0029' '1010' 'OB' 'CSAImageHeaderInfo'

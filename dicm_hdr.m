@@ -355,7 +355,9 @@ end
 % compressed PixelData, n can be 0xffffffff
 if ~hasVR && n==4294967295, vr = 'SQ'; end % best guess
 if n+i>p.iPixelData && ~strcmp(vr, 'SQ'), i = i+n; return; end % PixelData or err
+% if group==33
 % fprintf('(%04x %04x) %s %6.0f %s\n', group, elmnt, vr, n, name);
+% end
 
 if strcmp(vr, 'SQ')
     nEnd = min(i+n, p.iPixelData); % n is likely 0xffff ffff

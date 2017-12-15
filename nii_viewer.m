@@ -5,9 +5,9 @@ function varargout = nii_viewer(fname, overlayName)
 %  NII_VIEWER('background.nii', 'overlay.nii')
 %  NII_VIEWER('background.nii', {'overlay1.nii' 'overlay2.nii'})
 % 
-% If no input is provided, the viewer will ask for background NIfTI. Although
-% the preferred format is NIfTI, NII_VIEWER accepts any files that can be
-% converted into NIfTI by dicm2nii.
+% If no input is provided, the viewer will load MNI_2mm brain as background
+% NIfTI. Although the preferred format is NIfTI, NII_VIEWER accepts any files
+% that can be converted into NIfTI by dicm2nii.
 % 
 % Here are some features and usage.
 % 
@@ -253,6 +253,8 @@ function varargout = nii_viewer(fname, overlayName)
 % 170421 java_dnd() changed as func, ControlDown OS independent by ACTION_LINK.
 % 170515 Use area to normalize histogram.
 % 171031 Implement layout. axes replace subplot to avoid overlap problem.
+% 171129 bug fix save_nii_as(): undo img scale for no_save_nii.
+% 171214 Try to convert back to volume in case of CIfTI (need anatomical gii).
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -272,12 +274,14 @@ if ~isfield(pf, 'layout')
 end
 
 if nargin<1
-    types = '*.nii; *.hdr; *.nii.gz; *.hdr.gz';
-    [fname, pName] = uigetfile([pf.openPath '/' types], ...
-        'Select NIfTI to view', 'MultiSelect', 'on');
-    if isnumeric(fname), return; end
-    fname = strcat([pName '/'], fname);
-    setpref('nii_viewer_para', 'openPath', pName);
+    fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
+    fname = load(fname, 'nii'); fname = fname.nii;
+%     types = '*.nii; *.hdr; *.nii.gz; *.hdr.gz';
+%     [fname, pName] = uigetfile([pf.openPath '/' types], ...
+%         'Select NIfTI to view', 'MultiSelect', 'on');
+%     if isnumeric(fname), return; end
+%     fname = strcat([pName '/'], fname);
+%     setpref('nii_viewer_para', 'openPath', pName);
 end
 
 nii = get_nii(fname);
@@ -1646,6 +1650,13 @@ function [q, frm, rg, dim] = read_nii(fname, ask_code, reOri)
 if ischar(fname), q.nii = nii_tool('load', fname);
 else, q.nii = fname; fname = q.nii.hdr.file_name;
 end
+
+if q.nii.hdr.intent_code>=3000 && q.nii.hdr.intent_code<=3012 && ...
+        isfield(q.nii, 'ext') && any([q.nii.ext.ecode] == 32)
+    q.nii = cii2nii(q.nii);
+end
+
+
 ndim = q.nii.hdr.dim(1);
 dim = q.nii.hdr.dim(2:8);
 dim(dim<1 | dim>32767 | mod(dim,1)>0) = 1;
@@ -1936,70 +1947,8 @@ elseif lut == 10 % two-sided
     map = [map_neg(end:-1:1,:); map];
 elseif lut == 11, map(:,2:3) = 0; % vector lines
 elseif lut == 12 % parula not in old matlab, otherwise this can be omitted
-    map = [ 0.208 0.166 0.529
-            0.212 0.190 0.578
-            0.212 0.214 0.627
-            0.208 0.239 0.677
-            0.196 0.264 0.728
-            0.171 0.292 0.779
-            0.125 0.324 0.830
-            0.059 0.360 0.868
-            0.012 0.388 0.882
-            0.006 0.409 0.883
-            0.017 0.427 0.879
-            0.033 0.443 0.872
-            0.050 0.459 0.864
-            0.063 0.474 0.855
-            0.072 0.489 0.847
-            0.078 0.504 0.838
-            0.079 0.520 0.831
-            0.075 0.538 0.826
-            0.064 0.557 0.824
-            0.049 0.577 0.823
-            0.034 0.597 0.820
-            0.026 0.614 0.814
-            0.024 0.629 0.804
-            0.023 0.642 0.791
-            0.023 0.653 0.777
-            0.027 0.664 0.761
-            0.038 0.674 0.744
-            0.059 0.684 0.725
-            0.084 0.693 0.706
-            0.113 0.702 0.686
-            0.145 0.710 0.665
-            0.180 0.718 0.642
-            0.218 0.725 0.619
-            0.259 0.732 0.595
-            0.302 0.738 0.571
-            0.348 0.742 0.547
-            0.395 0.746 0.524
-            0.442 0.748 0.503
-            0.487 0.749 0.484
-            0.530 0.749 0.466
-            0.571 0.749 0.449
-            0.610 0.747 0.434
-            0.647 0.746 0.419
-            0.683 0.743 0.404
-            0.718 0.741 0.390
-            0.752 0.738 0.377
-            0.786 0.736 0.363
-            0.819 0.733 0.350
-            0.851 0.730 0.336
-            0.882 0.727 0.322
-            0.914 0.726 0.306
-            0.945 0.726 0.289
-            0.974 0.731 0.267
-            0.994 0.745 0.240
-            0.999 0.765 0.216
-            0.996 0.786 0.197
-            0.988 0.807 0.179
-            0.979 0.827 0.163
-            0.970 0.848 0.147
-            0.963 0.871 0.131
-            0.959 0.895 0.113
-            0.960 0.922 0.095
-            0.966 0.951 0.076
-            0.976 0.983 0.054];
+    fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
+    a = load(fname, 'parula'); map = a.parula;
 elseif lut < 26 % matlab LUT
     map = feval(hs.lutStr{lut}, 64);
 elseif lut == 27 % phase3: red-yellow-green-yellow-red
@@ -2661,6 +2610,8 @@ catch % restore reoriented img
     if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
     for k = 1:3, if hs.q{i}.flip(k), nii.img = flip(nii.img, k); end; end
     nii.img = permute(nii.img, [hs.q{i}.perm 4:8]); % all vol in dim(4)
+    slope = nii.hdr.scl_slope; if slope==0, slope = 1; end
+    nii.img = (single(nii.img) - nii.hdr.scl_inter) / slope; % undo scale
     if nii.hdr.datatype == 4 % leave others as it is or single
         nii.img = int16(nii.img);
     elseif nii.hdr.datatype == 512
@@ -3006,7 +2957,7 @@ if layout==1 % 1x3
     z0 = mm(3) / siz(2); % normalized height of sag/cor images
     y1 = mm(2) / siz(2); % normalized height of tra image
     pos = [0 0 y0 z0;  y0 0 x0 z0;  y0+x0 0 x0 y1;  y0+x0*2 0 mm(1)/4/siz(1) min(z0,y1)];
-elseif layout<4
+elseif layout==2 || layout==3 % 2x2
     siz = [sum(mm(1:2)) sum(mm(2:3))]; % image area width/height
     x0 = mm(1) / siz(1); % normalized width of cor/tra images
     y0 = mm(2) / siz(2); % normalized height of tra image
@@ -3020,4 +2971,170 @@ else
     error('Unknown layout parameter');
 end
 siz = siz / max(siz) * 800;
+
+%% Return nii struct from cii and gii
+function nii = cii2nii(nii)
+if any(nii.hdr.dim(7) == [91282 64984]) % HCP gray or cortex
+    fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
+    gii = load(fname, 'gii'); gii = gii.gii;
+else
+    [gii_nam, pth] = uigetfile([fileparts(nii.hdr.file_name) '/*.surf.gii'], ...
+        ['CIfTI needs corresponding GIfTI to map to NIfTI. ' ...
+        'Select un-inflated GIfTI as template for both hemispheres'], ...
+        'MultiSelect', 'on');
+    if isnumeric(gii_nam), gii_nam = [];
+    else, gii_nam = strcat([pth '/'], gii_nam);
+    end
+    if isempty(gii_nam), gii = [];
+    elseif iscell(gii_nam)
+        gii = read_gifti(gii_nam{1});
+        gii = read_gifti(gii_nam{2}, gii);
+    else
+        gii = read_gifti(nam);
+    end
+end
+
+xml = nii.ext([nii.ext.ecode]==32).edata_decoded;
+dim = gii_attr(xml, 'VolumeDimensions', 1);
+if isempty(dim), dim = [91 109 91]; end % 2x2x2 mm
+TR = gii_attr(xml, 'SeriesStep', 1);
+if ~isempty(TR), nii.hdr.pixdim(5) = TR; end
+mat = gii_element(xml, 'TransformationMatrixVoxelIndicesIJKtoXYZ', 1);
+
+nVol = nii.hdr.dim(6);
+nii.hdr.dim = [(nVol>1)+3 dim nVol 1 1 1];
+if isempty(mat) % some cii miss 'mat' and 'dim'
+    mat = [-2 0 0 90; 0 2 0 -126; 0 0 2 -72; 0 0 0 1]; % HCP template
+    nii.hdr.sform_code = 0;
+else
+    pow = gii_attr(xml, 'MeterExponent', 1);
+    mat(1:3,:) = mat(1:3,:) / 10^(3+pow);
+    nii.hdr.sform_code = gii.DataSpace;
+end
+nii.hdr.srow_x = mat(1,:);
+nii.hdr.srow_y = mat(2,:);
+nii.hdr.srow_z = mat(3,:);
+nii.hdr.pixdim(2:4) = sqrt(sum(mat(1:3,1:3).^2));
+
+img = permute(nii.img, [5 6 1:4]);
+nii.img = zeros([dim nVol], class(img));
+
+iMdl = regexp(xml, '<BrainModel');
+for j = 1:numel(iMdl)
+    c = regexp(xml(iMdl(j):end), '.*?(?=</BrainModel>)', 'match', 'once');
+    offset = gii_attr(c, 'IndexOffset', 1); % 0-based
+    typ = gii_attr(c, 'ModelType');
+    if strcmp(typ, 'CIFTI_MODEL_TYPE_SURFACE')
+        if isempty(gii) || isempty(mat), continue; end % give up if no gii
+        a = gii_attr(c, 'BrainStructure');
+        ig = strcmp(a, {'CIFTI_STRUCTURE_CORTEX_LEFT' 'CIFTI_STRUCTURE_CORTEX_RIGHT'});
+        if ~any(ig), warning('Unknown BrainStructure: %s', a); continue; end
+        v = gii.vertices{ig}'; v(4,:) = 1;
+        v = round(mat \ v) + 1; %ijk 1-based
+        if gii_attr(c, 'SurfaceNumberOfVertices', 1) ~= size(v,2)
+            fprintf(2, 'CIfTI and GIfTI not match\n'); continue;
+        end
+        ind = gii_element(c, 'VertexIndices', 1) + 1;
+        for i = 1:numel(ind)
+            nii.img(v(1,ind(i)), v(2,ind(i)), v(3,ind(i)), :) = img(:, offset+i);
+        end
+    elseif strcmp(typ, 'CIFTI_MODEL_TYPE_VOXELS')
+        a = gii_element(c, 'VoxelIndicesIJK', 1) + 1;
+        for i = 1:size(a,1)
+            nii.img(a(i,1), a(i,2), a(i,3), :) = img(:, offset+i);
+        end
+    end
+end
+
+typ = gii_attr(xml, 'IndicesMapToDataType');
+if any(strcmp(typ, {'CIFTI_INDEX_TYPE_LABELS' 'CIFTI_INDEX_TYPE_PARCELS'}))
+    nii.hdr.intent_code = 1002;
+end
+nii = nii_tool('update', nii);
+
+%% Return value for cii/gii key
+function val = gii_attr(ch, key, isnum)
+val = regexp(ch, ['(?<=' key '=").*?(?=")'], 'match', 'once');
+if nargin>2 && isnum, val = str2num(val); end %#ok<*ST2NM>
+
+%% Return element for cii/gii key
+function val = gii_element(ch, key, isnum)
+i = regexp(ch, ['<' key '[\s>]'], 'once');
+val = regexp(ch(i:end), ['(?<=<' key '.*?>).*?(?=</' key '>)'], 'match', 'once');
+if nargin>2 && isnum, val = str2num(val); end
+
+%% Return gii struct with DataSpace and vertices (in mm).
+% vertices{1} and {2} for left and right hemispheres. 
+function gii = read_gifti(fname, gii)
+if nargin<2, gii = struct; end
+xml = fileread(fname);
+ind = regexp(xml, '"NIFTI_INTENT_POINTSET"');
+if isempty(ind), return; end
+frms = {'NIFTI_XFORM_UNKNOWN' 'NIFTI_XFORM_SCANNER_ANAT' ...
+    'NIFTI_XFORM_ALIGNED_ANAT' 'NIFTI_XFORM_TALAIRACH' 'NIFTI_XFORM_MNI_152'};
+for i = 1:numel(ind)
+    c = regexp(xml(ind(i):end), '(.*?)</DataArray>', 'match', 'once');
+
+    a = regexp(c, '(?<=GeometricType.*?<Value><).*?(?=></Value>)', 'match', 'once');
+    if isempty(regexp(a, 'Anatomical', 'once')), error('GIfTI must be un-inflated'); end
+
+    DataSpace = regexp(c, '(?<=<DataSpace><![CDATA[).*?(?=]])', 'match', 'once');
+    if isempty(DataSpace), DataSpace = gii_attr(c, 'DataSpace'); end
+    DataSpace = find(strcmp(DataSpace, frms)) - 1;
+    if isfield(gii, 'DataSpace')
+        if DataSpace ~= gii.DataSpace, error('Inconsistent DataSpace'); end
+    else, gii.DataSpace = DataSpace;
+    end
+    % if ~isfield(gii, 'mat'), gii.mat = get_element(c, 'MatrixData', 1); end
+    
+    a = gii_attr(c, 'DataType');
+    if     strcmp(a, 'NIFTI_TYPE_FLOAT32'), dType = 'single';
+    elseif strcmp(a, 'NIFTI_TYPE_INT32'),   dType = 'int32';
+    elseif strcmp(a, 'NIFTI_TYPE_UINT8'),   dType = 'uint8';
+    else, error('Unknown GIfTI DataType: %s', a);
+    end
+    
+    nDim = gii_attr(c, 'Dimensionality', 1); % always 2 for POINTSET?
+    dim = ones(1, nDim);
+    for j = 1:nDim, dim(j) = gii_attr(c, sprintf('Dim%g', j-1), 1); end
+        
+    Endian = gii_attr(c, 'Endian'); % LittleEndian or BigEndian
+    Endian = lower(Endian(1));
+
+    Data = gii_element(c, 'Data');
+    Encoding = gii_attr(c, 'Encoding');
+    if any(strcmp(Encoding, {'Base64Binary' 'GZipBase64Binary'}))
+        Data = javax.xml.bind.DatatypeConverter.parseBase64Binary(Data);
+        Data = typecast(Data, 'uint8');
+        % Data = matlab.net.base64decode(Data); % since 2016b
+        if strcmp(Encoding, 'GZipBase64Binary') % HCP uses this
+            Data = nii_tool('LocalFunc', 'gunzip_mem', Data);
+        end
+        Data = typecast(Data, dType);
+        if Endian == 'b', Data = swapbytes(Data); end
+    elseif strcmp(Encoding, 'ASCII') % untested
+        Data = str2num(Data);
+    elseif strcmp(Encoding, 'ExternalFileBinary') % untested
+        nam = gii_attr(c, 'ExternalFileName');
+        if isempty(fileparts(nam)), nam = fullfile(fileparts(fname), nam); end
+        fid = fopen(nam, 'r', Endian);
+        if fid==-1, error('ExternalFileName %s not exists'); end
+        fseek(fid, gii_attr(c, 'ExternalFileOffset', 1), 'bof');
+        Data = fread(fid, prod(dim), ['*' dType]);
+        fclose(fid);
+    else, error('Unknown Encoding: %s', Encoding);
+    end
+    
+    if strcmp(gii_attr(c, 'ArrayIndexingOrder'), 'RowMajorOrder')
+        Data = reshape(Data, dim(nDim:-1:1));
+        Data = permute(Data, nDim:-1:1);
+    else
+        Data = reshape(Data, dim);        
+    end
+    if ~isempty(regexp(c, 'CortexLeft', 'once'))
+        gii.vertices{1} = Data;
+    elseif ~isempty(regexp(c, 'CortexRight', 'once'))
+        gii.vertices{2} = Data;
+    end
+end
 %%

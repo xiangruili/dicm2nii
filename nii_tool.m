@@ -258,6 +258,7 @@ function varargout = nii_tool(cmd, varargin)
 % 170714 'save': force to version 2 if img dim exceeds 2^15-1.
 % 170716 Add functionSignatures.json file for tab auto-completion.
 % 171031 'LocalFunc' makes eaiser to call local functions.
+% 171206 Allow file name ext other than .nii, .hdr, .img.
 
 persistent C para; % C columns: name, length, format, value, offset
 if isempty(C)
@@ -298,9 +299,7 @@ elseif strcmpi(cmd, 'save')
     % Check file name to save
     if nargin>2
         fname = varargin{2};
-        if numel(fname)<5 || ~ischar(fname)
-            error('Invalid name for NIfTI file: %s', fname);
-        end
+        if ~ischar(fname), error('Invalid name for NIfTI file: %s', fname); end
     elseif isfield(nii.hdr, 'file_name')
         fname = nii.hdr.file_name;
     else
@@ -1000,7 +999,7 @@ for i = 1:numel(ext)
         fclose(fid1);
         deleteMat = onCleanup(@() deleteFile(tmp)); % delete temp file after done
         ext(i).edata_decoded = load(tmp); % load into struct
-    elseif ext(i).ecode == 6 % plain text
+    elseif any(ext(i).ecode == [4 6 32]) % 4 AFNI, 6 plain text, 32 CIfTI
         str = char(ext(i).edata(:)');
         if isempty(strfind(str, 'dicm2nii.m'))
             ext(i).edata_decoded = deblank(str);
@@ -1027,8 +1026,6 @@ for i = 1:numel(ext)
             end
             ext(i).edata_decoded = ss;
         end
-    elseif ext(i).ecode == 4 % AFNI
-        ext(i).edata_decoded = deblank(char(ext(i).edata(:))');
     elseif ext(i).ecode == 2 % dicom
         tmp = [tempname '.dcm'];
         fid1 = fopen(tmp, 'W');
@@ -1103,17 +1100,13 @@ end
 
 %% Return requested fname with ext, useful for .hdr and .img files
 function fname = nii_name(fname, ext)
-[~, f, e] = fileparts(fname);
-n = numel(fname);
-if strcmpi(e, '.gz')
-    n = n - 3; % 3 is numel('.gz')
-    [~, ~, e] = fileparts(f); % .nii/.hdr/.img
+if strcmpi(ext, '.img')
+    i = regexpi(fname, '.hdr(.gz)?$');
+    if ~isempty(i), fname(i(end)+(0:3)) = ext; end
+elseif strcmpi(ext, '.hdr') 
+    i = regexpi(fname, '.img(.gz)?$');
+    if ~isempty(i), fname(i(end)+(0:3)) = ext; end
 end
-if strcmpi(e, '.nii') || strcmpi(e, ext), return; end
-if ~strcmpi(e, '.hdr') && ~strcmpi(e, '.img')
-    error(['Invalid NIfTI file name: ' fname]); 
-end
-fname(n+(-3:0)) = ext; % if not return or error, change it
 
 %% Read NIfTI file as bytes, gunzip if needed, but ignore endian
 function [b, fname] = nii_bytes(fname, nByte)

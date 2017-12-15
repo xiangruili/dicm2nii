@@ -362,6 +362,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 170923 Correct readout (thx Chris R and MH); Always store readout in descrip;
 % 170924 Bug fix for long file name (avoid genvarname now).
 % 170927 Store TE in descrip even if multiple TEs.
+% 171211 Make it work for Siemens multiframe dicom (seems 3D only).
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -496,7 +497,7 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'PixelRepresentation' 'BitsStored' 'HighBit' 'SamplesPerPixel' ...
     'PlanarConfiguration' 'EchoNumber' 'RescaleIntercept' 'RescaleSlope' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
-    'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot'};
+    'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
 % read header for all files, use parpool if available and worthy
@@ -591,13 +592,16 @@ for i = 1:nRun
     end
     
     h{i}{1} = s; % update record in case of full hdr or multiframe
-    if tryGetField(s, 'NumberOfFrames', 1) > 1
-        h{i}(2:end) = []; % remove possibly derived dicom
-        continue; 
+    
+    nFile = numel(h{i});
+    if nFile>1 && tryGetField(s, 'NumberOfFrames', 1) > 1
+        for k = 2:nFile
+            h{i}{k} = dicm_hdr(h{i}{k}.Filename); % full header
+            h{i}{k} = multiFrameFields(h{i}{k});
+        end
     end
     
     % check consistency in 'fldsCk'
-    nFile = numel(h{i});
     nFlds = numel(fldsCk);
     if isfield(s, 'SpacingBetweenSlices'), nFlds = nFlds - 1; end % check 1 of 2
     for k = 1:nFlds
@@ -655,6 +659,7 @@ for i = 1:nRun
     end
         
     if ~keep(i) || nFile<2 || ~isfield(s, 'ImagePositionPatient'), continue; end
+    if tryGetField(s, 'NumberOfFrames', 1) > 1, continue; end % Siemens Vida
     
     ipp = zeros(nFile, 1);
     iSL = xform_mat(s); iSL = iSL(3);
@@ -799,17 +804,21 @@ for i = 1:nRun
             applyRescale = tryGetField(s, 'ApplyRescale', false);
             if applyRescale, img = single(img); end
         else
-            if j==2, img(:,:,:,nFile) = 0; end % pre-allocate for speed
-            img(:,:,:,j) = dicm_img(h{i}{j}, 0);
+            if j==2, img(:,:,:,:,nFile) = 0; end % pre-allocate for speed
+            img(:,:,:,:,j) = dicm_img(h{i}{j}, 0);
         end
         if applyRescale
             slope = tryGetField(h{i}{j}, 'RescaleSlope', 1);
             inter = tryGetField(h{i}{j}, 'RescaleIntercept', 0);
-            img(:,:,:,j) = img(:,:,:,j) * slope + inter;
+            img(:,:,:,:,j) = img(:,:,:,:,j) * slope + inter;
         end
     end
-    if size(img,3)<2, img = permute(img, [1 2 4 3]); end % put frames into dim3
-    
+    sz = size(img); sz(numel(sz)+1:4) = 1;
+    if all(sz(3:4)<2), img = permute(img, [1 2 5 3 4]); % remove dim3,4
+    elseif sz(4)<2, img = permute(img, [1:3 5 4]); % remove dim4
+    elseif sz(3)<2, img = permute(img, [1 2 4 5 3]); % remove dim3
+    end
+
     if tryGetField(s, 'SamplesPerPixel', 1) > 1 % color image
         img = permute(img, [1 2 4:8 3]); % put RGB into dim8 for nii_tool
     elseif tryGetField(s, 'isMos', false) % SIEMENS mosaic
@@ -1113,8 +1122,17 @@ descrip = sprintf('TE=%.4g;%s', TE0, descrip);
 
 % Get dwell time
 if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
-    hz = csa_header(s, 'BandwidthPerPixelPhaseEncode');
-    dwell = 1000 ./ hz / dim(iPhase); % in ms
+    dwell = double(tryGetField(s, 'EffectiveEchoSpacing')) / 1000; % GE
+    % http://www.spinozacentre.nl/wiki/index.php/NeuroWiki:Current_developments
+    if isempty(dwell) % Philips
+        wfs = tryGetField(s, 'WaterFatShift');
+        epiFactor = tryGetField(s, 'EPIFactor');
+        dwell = wfs ./ (434.215 * (double(epiFactor)+1)) * 1000;
+    end
+    if isempty(dwell) % Siemens
+        hz = csa_header(s, 'BandwidthPerPixelPhaseEncode');
+        dwell = 1000 ./ hz / dim(iPhase); % in ms
+    end
     if isempty(dwell) % true for syngo MR 2004A
         % ppf = [1 2 4 8 16] represent [4 5 6 7 8] 8ths PartialFourier
         % ppf = asc_header(s, 'sKSpace.ucPhasePartialFourier');
@@ -1126,15 +1144,7 @@ if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
         dur = csa_header(s, 'RealDwellTime') * 1e-6; % ns to ms
         dwell = dur * asc_header(s, 'sKSpace.lBaseResolution');
     end
-    if isempty(dwell)
-        dwell = double(tryGetField(s, 'EffectiveEchoSpacing')) / 1000; % GE
-    end
-    % http://www.spinozacentre.nl/wiki/index.php/NeuroWiki:Current_developments
-    if isempty(dwell) % Philips
-        wfs = tryGetField(s, 'WaterFatShift');
-        epiFactor = tryGetField(s, 'EPIFactor');
-        dwell = wfs ./ (434.215 * (double(epiFactor)+1)) * 1000;
-    end
+    
     if ~isempty(dwell)
         s.EffectiveEPIEchoSpacing = dwell;
         % https://github.com/rordenlab/dcm2niix/issues/130
@@ -1227,6 +1237,16 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') % GE with invalid RTIA_timer
     s.RefAcqTimes = t;
 end
 
+% Siemens multiframe: read FrameAcquisitionDatetime 1st file
+if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+    s2 = struct('FrameAcquisitionDatetime', {cell(27,1)});
+    s2 = dicm_hdr(s, s2, 1:nSL);
+    try
+        t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
+        t = (t-min(t))*24*3600;
+    end
+end
+
 if isempty(t) % non-mosaic Siemens: create 't' based on ucMode
     ucMode = asc_header(s, 'sSliceArray.ucMode'); % 1/2/4: Asc/Desc/Inter
     if isempty(ucMode), return; end
@@ -1281,14 +1301,25 @@ if isfield(s, 'bvec_original') % from BV or PAR file
     bval = s.B_value;
     bvec = s.bvec_original;
 elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
-    if tryGetField(s, 'Dim3IsVolume', false), iDir = 1:nDir;
-    else, iDir = 1:nSL:nSL*nDir;
+    nFile =  numel(h);
+    if nFile== 1 % all vol in 1 file, for Philips
+        if tryGetField(s, 'Dim3IsVolume', false), iDir = 1:nDir;
+        else, iDir = 1:nSL:nSL*nDir;
+        end
+
+        s2 = struct('B_value', bval', 'DiffusionGradientDirection', bvec');
+        s2 = dicm_hdr(s, s2, iDir); % call search_MF_val
+        bval = s2.B_value';
+        bvec = s2.DiffusionGradientDirection';
+    else % 1 vol per file, e.g. Siemens
+        for i = 1:nFile
+            try
+                s2 = h{i}.PerFrameFunctionalGroupsSequence.Item_1.MRDiffusionSequence.Item_1;
+                bval(i) = s2.B_value;
+                bvec(i,:) = s2.DiffusionGradientDirectionSequence.Item_1.DiffusionGradientDirection;
+            end
+        end
     end
-    
-    s2 = struct('B_value', bval', 'DiffusionGradientDirection', bvec');
-    s2 = dicm_hdr(s, s2, iDir); % call search_MF_val
-    bval = s2.B_value';
-    bvec = s2.DiffusionGradientDirection';
 else % multiple files: order already in slices then volumes
     dict = dicm_dict(s.Manufacturer, {'B_value' 'B_factor' 'SlopInt_6_9' ...
        'DiffusionDirectionX' 'DiffusionDirectionY' 'DiffusionDirectionZ'});
@@ -1385,15 +1416,17 @@ fprintf(fid, [str '\n'], s.bvec); % 3 rows by # direction cols
 fclose(fid);
 
 %% Subfunction, return a parameter from CSA Image/Series header
-function val = csa_header(s, key, dft)
-if isfield(s, 'CSAImageHeaderInfo') && isfield(s.CSAImageHeaderInfo, key)
-    val = s.CSAImageHeaderInfo.(key);
-elseif isfield(s, 'CSASeriesHeaderInfo') && isfield(s.CSASeriesHeaderInfo, key)
-    val = s.CSASeriesHeaderInfo.(key);
-elseif nargin>2
-    val = dft;
-else
-    val = [];
+function val = csa_header(s, key)
+val = [];
+csa = 'CSAImageHeaderInfo';
+asc = 'CSASeriesHeaderInfo';
+if ~isfield(s, csa)
+    try val = s.SharedFunctionalGroupsSequence.Item_1.(asc).Item_1.(key); return; end
+    try val = s.PerFrameFunctionalGroupsSequence.Item_1.(csa).Item_1.(key); end
+elseif isfield(s, csa) && isfield(s.(csa), key)
+    val = s.(csa).(key);
+elseif isfield(s, asc) && isfield(s.(asc), key)
+    val = s.(asc).(key);
 end
 
 %% Subfunction, Convert 3x3 direction cosine matrix to quaternion
@@ -1511,14 +1544,17 @@ end
 %% Subfunction: get a parameter in CSA series ASC header: MrPhoenixProtocol
 function val = asc_header(s, key)
 val = []; 
-fld = 'CSASeriesHeaderInfo';
-if ~isfield(s, fld), return; end
-if isfield(s.(fld), 'MrPhoenixProtocol')
-    str = s.(fld).MrPhoenixProtocol;
-elseif isfield(s.(fld), 'MrProtocol') % older version dicom
-    str = s.(fld).MrProtocol;
+csa = 'CSASeriesHeaderInfo';
+if ~isfield(s, csa)
+    try str = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1.MrPhoenixProtocol; 
+    catch, return;
+    end
+elseif isfield(s.(csa), 'MrPhoenixProtocol')
+    str = s.(csa).MrPhoenixProtocol;
+elseif isfield(s.(csa), 'MrProtocol') % older version dicom
+    str = s.(csa).MrProtocol;
 else % in case of failure to decode CSA header
-    str = char(s.(fld)');
+    str = char(s.(csa)');
     str = regexp(str, 'ASCCONV BEGIN(.*)ASCCONV END', 'tokens', 'once');
     if isempty(str), return; end
     str = str{1};
@@ -1978,7 +2014,10 @@ switch fld
         error('Sequence for %s not set.', fld);
 end
 pffgs = 'PerFrameFunctionalGroupsSequence';
-if nargin<2, val = {'SharedFunctionalGroupsSequence' pffgs sq fld}; return; end
+if nargin<2
+    val = {'SharedFunctionalGroupsSequence' pffgs sq fld 'NumberOfFrames'}; 
+    return;
+end
 try 
     val = s.SharedFunctionalGroupsSequence.Item_1.(sq).Item_1.(fld);
 catch
