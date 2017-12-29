@@ -93,6 +93,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 170803 par_key(): bug fix introduced on 170618.
 % 170910 regexp tweak to work for Octave.
 % 170921 read_ProtocolDataBlock: decode into struct with better performance.
+% 171228 philips_par: bug fix for possible slice flip. thx ShereifH.
 
 persistent dict_full;
 s = []; info = '';
@@ -199,14 +200,14 @@ toSearch = nTag<2 || (nTag<30 && ~any(strcmp(p.dict.vr, 'SQ')) && p.iPixelData<1
 if toSearch % search each tag if header is short and not many tags asked
     if ~isempty(tsUID), s.TransferSyntaxUID = tsUID; end % hope it is 1st tag
     ib = p.iPixelData-1; % will be updated each loop
-    if ~isempty(p.dict.vendor) && any(mod(p.dict.group, 2))
+    if ~isempty(p.dict.vendor) && any(mod(p.dict.group, 2)) % private group
         tg = char([8 0 112 0]); % Manufacturer
         if p.be, tg = tg([2 1 4 3]); end
         if p.expl, tg = [tg 'LO']; end
         i = strfind(char(b8(1:ib)), tg);
         i = i(mod(i,2)==1);
         if ~isempty(i)
-            i = i(1) + 4 + p.expl*2; % Manufacturer should be the earlier one
+            i = i(1) + 4 + p.expl*2; % Manufacturer should be the earliest one
             n = ch2int16(b8(i+(0:1)), p.be);
             dat = dcm_str(b8(i+1+(1:n)));
             [p, dict] = updateVendor(p, dat);
@@ -727,13 +728,19 @@ typ = par_key(str, 'Series Type', 0); typ(isspace(typ)) = '';
 s.ImageType = ['PhilipsPAR\' typ '\' s.ScanningSequence];
 s.RepetitionTime = par_key(str, 'Repetition time');
 s.WaterFatShift = par_key(str, 'Water Fat shift');
+
+a = regexp(str, 'Angulation midslice\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})\)', 'tokens', 'once');
+ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
 rotAngle = par_key(str, 'Angulation midslice'); % (ap,fh,rl) deg
-rotAngle = rotAngle([3 1 2]);
+rotAngle = rotAngle(ax_order);
+
+a = regexp(str, 'Off Centre midslice\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})\)', 'tokens', 'once');
+ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
 posMid = par_key(str, 'Off Centre midslice'); % (ap,fh,rl) [mm]
-s.Stack.Item_1.MRStackOffcentreAP = posMid(1);
-s.Stack.Item_1.MRStackOffcentreFH = posMid(2);
-s.Stack.Item_1.MRStackOffcentreRL = posMid(3);
-posMid = posMid([3 1 2]); % better precision than those in the table
+posMid = posMid(ax_order); % better precision than those in the table
+s.Stack.Item_1.MRStackOffcentreAP = posMid(2);
+s.Stack.Item_1.MRStackOffcentreFH = posMid(3);
+s.Stack.Item_1.MRStackOffcentreRL = posMid(1);
 s.EPIFactor = par_key(str, 'EPI factor');
 % s.DynamicSeries = par_key(str, 'Dynamic scan'); % 0 or 1
 isDTI = par_key(str, 'Diffusion')>0;
@@ -852,8 +859,10 @@ getTableVal('number of averages', 'NumberOfAverages');
 if isDTI
     getTableVal('diffusion_b_factor', 'B_value', iVol);
     fld = 'bvec_original';
+    a = regexp(str, 'diffusion\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})\)', 'tokens', 'once');
+    ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
     getTableVal('diffusion', fld, iVol);
-    if isfield(s, fld), s.(fld) = s.(fld)(:, [3 1 2]); end
+    if isfield(s, fld), s.(fld) = s.(fld)(:, ax_order); end
 end
 getTableVal('TURBO factor', 'TurboFactor');
 
@@ -866,16 +875,17 @@ R = rx * ry * rz; % seems right for Philips
 % R = makehgtform('x', , 'y', , 'z', );
 
 getTableVal('slice orientation', 'SliceOrientation'); % 1/2/3 for TRA/SAG/COR
-iOri = mod(s.SliceOrientation+1, 3) + 1; % [1 2 3] to [3 1 2]
-if iOri == 1 % Sag
+a = regexp(str, 'slice orientation\s*\(\s*(\w{3})\s*/\s*(\w{3})\s*/\s*(\w{3})\s*\)', 'tokens', 'once');
+iOri = find(strcmpi({'SAG' 'COR' 'TRA'}, a{s.SliceOrientation}));
+if iOri == 1 
     s.SliceOrientation = 'SAGITTAL';
     R(:,[1 3]) = -R(:,[1 3]);
     R = R(:, [2 3 1]);
-elseif iOri == 2 % Cor
+elseif iOri == 2
     s.SliceOrientation = 'CORONAL';
     R(:,3) = -R(:,3);
     R = R(:, [1 3 2]);
-else % Tra
+else
     s.SliceOrientation = 'TRANSVERSAL';
 end
 
@@ -896,7 +906,10 @@ s.ImageOrientationPatient = R(1:6)';
 R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
 R = [R posMid; 0 0 0 1]; % 4th col is mid slice center position
 
+a = regexp(str, 'image offcentre\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})', 'tokens', 'once');
+ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
 getTableVal('image offcentre', 'SliceLocation');
+s.SliceLocation = s.SliceLocation(ax_order);
 s.SliceLocation = s.SliceLocation(iOri); % center loc for 1st slice
 if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
     R(:,3) = -R(:,3);
