@@ -255,6 +255,7 @@ function varargout = nii_viewer(fname, overlayName)
 % 171214 Try to convert back to volume in case of CIfTI (need anatomical gii).
 % 171226 Store all info into sag img handle (fix it while it aint broke :)
 % 171228 Surface view for gii (include HCP gii template).
+% 171229 combine into one overlay for surface view.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -466,7 +467,7 @@ end
 hs.ax(4) = axes('Position', plotPos(4,:), 'Parent', hs.frame, 'Ylim', [0 1]);
 colorbar('Location', 'West', 'Units', 'Normalized');
 hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); % trick for early matlab
-set(hs.colorbar, 'Visible', 'off', 'UIContextMenu', '', 'EdgeColor', [1 1 1]);
+set(hs.colorbar, 'Visible', 'off', 'HitTest', 'off', 'EdgeColor', [1 1 1]);
 % hs.colorbar = colorbar(hs.ax(4), 'YTicks', [0 0.5 1], 'Color', [1 1 1], ...
 %     'Location', 'West', 'PickableParts', 'none', 'Visible', 'off');
 
@@ -635,6 +636,7 @@ p = get(hsI(iFile), 'UserData');
 %% callbacks
 function nii_viewer_cb(h, ~, cmd, fh)
 hs = guidata(fh);
+iFile = hs.files.getSelectedIndex+1;
 switch cmd
     case 'ijk' % IJK spinner
         ix = find(h == hs.ijk);
@@ -795,16 +797,14 @@ switch cmd
         hs.files.setSelectedIndex(0);
         set_xyz(hs);
     case 'close' % close selected overlay
-        i = hs.files.getSelectedIndex+1;
-        p = get_para(hs, i);
+        p = get_para(hs, iFile);
         if p.hsI(1) == hs.hsI(1), return; end % no touch to background
         delete(p.hsI); % 3 view
-        hs.files.getModel.remove(i-1);
-        hs.files.setSelectedIndex(max(0, i-2));
+        hs.files.getModel.remove(iFile-1);
+        hs.files.setSelectedIndex(max(0, iFile-2));
         set_xyz(hs);
     case {'hdr' 'ext' 'essential'} % show hdr ext or essential
-        j = hs.files.getSelectedIndex+1;
-        p = get_para(hs, j);
+        p = get_para(hs, iFile);
         if strcmp(cmd, 'hdr')
             hdr = p.nii.hdr;
         elseif strcmp(cmd, 'ext')
@@ -825,7 +825,7 @@ switch cmd
         elseif strcmp(cmd, 'essential')
             hdr = nii_essential(p);
         end
-        nam = hs.files.getModel.get(j-1);
+        nam = hs.files.getModel.get(iFile-1);
         if ~isstrprop(nam(1), 'alpha'), nam = ['x' nam]; end % like genvarname
         nam(~isstrprop(nam, 'alphanum')) = '_'; % make it valid for var name
         nam = [nam '_' cmd];
@@ -862,7 +862,7 @@ switch cmd
         end
         pf = get(hs.pref, 'UserData');
         print(fh, '-dbitmap', '-noui', ['-r' pf.dpi]);
-        % print('-dmeta', '-painters');
+%         print('-dmeta', '-painters');
     case 'save' % save figure as picture
         ext = get(h, 'Label');
         fmt = ext;
@@ -901,7 +901,7 @@ switch cmd
         helpdlg(str, 'About nii_viewer')
     case 'stack'
         uicontrol(hs.focus); % move focus out of buttons
-        i = hs.files.getSelectedIndex+1;
+        i = iFile;
         p = get_para(hs, i);
         n = hs.files.getModel.size;
         switch get(h, 'Tag') % for both uimenu and pushbutton
@@ -934,6 +934,7 @@ switch cmd
         if ~isempty(chk), hs.files.setCheckBoxListSelectedIndices(chk); end
         hs.files.setSelectedIndex(i-1);        
         set_xyz(hs);
+        iFile = ind; % for cii_view_cb
     case 'zoom'
         m = str2double(get(h, 'Label'));
         a = min(hs.dim) / m;
@@ -1035,12 +1036,11 @@ switch cmd
             if ~isnan(val), break; end
         end
         setappdata(h, 'Value', val);
-        jf = hs.files.getSelectedIndex+1;
-        p = get_para(hs, jf);
+        p = get_para(hs, iFile);
         img = p.nii.img(:,:,:, hs.volume.getValue);
         c = find(img(:)==val, 1);
         if isempty(c)
-            nam = strtok(hs.files.getModel.get(jf-1), '(');
+            nam = strtok(hs.files.getModel.get(iFile-1), '(');
             errordlg(sprintf('No value of %g found in %s', val, nam));
             return;
         end
@@ -1090,10 +1090,9 @@ switch cmd
         end
         nii_viewer_cb(hs.lut, [], 'lut', fh);
     case 'tc' % time course
-        i = hs.files.getSelectedIndex+1;
-        p = get_para(hs, i);
+        p = get_para(hs, iFile);
         dim = p.nii.hdr.dim(2:5);
-        nam = strtok(hs.files.getModel.get(i-1), '(');
+        nam = strtok(hs.files.getModel.get(iFile-1), '(');
         if dim(4)<2
             errordlg(['There is only 1 volume for ' nam]);
             return;
@@ -1116,15 +1115,14 @@ switch cmd
         img = reshape(img, [nv prod(dim(4:end))])';
         img = img(:, b);
         img = mean(single(img), 2);
-        fh1 = figure(mod(fh.Number,10)+i);
+        fh1 = figure(mod(fh.Number,10)+iFile);
         plot(img); 
         xlabel('Volume number');
         c = sprintf('(%g,%g,%g)', round(c));
         set(fh1, 'Name', [nam ' time course around voxel ' c]);
     case 'hist' % plot histgram
-        i = hs.files.getSelectedIndex+1;
-        if i<1, return; end
-        p = get_para(hs, i);
+        if iFile<1, return; end
+        p = get_para(hs, iFile);
         img = p.nii.img(:,:,:, hs.volume.getValue);
         img = sort(img(:));
         img(isnan(img)) = [];
@@ -1138,8 +1136,8 @@ switch cmd
         if n == nu, edges = img0;
         else, edges = linspace(0,1,n)*double(img(end)-img(1)) + double(img(1));
         end
-        nam = strtok(hs.files.getModel.get(i-1), '(');
-        fh1 = figure(mod(fh.Number,10)+i);
+        nam = strtok(hs.files.getModel.get(iFile-1), '(');
+        fh1 = figure(mod(fh.Number,10)+iFile);
         set(fh1, 'NumberTitle', 'off', 'Name', nam);
         [y, x] = hist(img, edges);
         bar(x, y/sum(y)/(x(2)-x(1)), 'hist'); % probability density
@@ -1229,7 +1227,7 @@ switch cmd
     otherwise
         error('Unknown Callback: %s', cmd);
 end
-cii_view_cb([], [], cmd, hs);
+drawnow; cii_view_cb([], iFile, cmd, hs);
 
 %% zoom in/out with a factor
 function set_zoom(m, hs)
@@ -2409,9 +2407,9 @@ catch %me, fprintf(2, '%s\n', me.message); assignin('base', 'me', me);
 end
 
 %% update colorbar label
-function set_colorbar(hs, p)
+function set_colorbar(hs)
 if strcmpi(get(hs.colorbar, 'Visible'), 'off'), return; end
-if nargin<2, p = get_para(hs); end
+p = get_para(hs);
 if p.lut == 11, map = lut2map(hs.lut.UserData, hs);
 else, map = lut2map(p.lut, hs);
 end
@@ -2432,6 +2430,16 @@ end
 colormap(hs.ax(end), map);
 set(get(hs.colorbar, 'Children'), 'YData', [0 1]); % Trick for old matlab
 set(hs.colorbar, 'YTickLabel', labls, 'YTick', [0 0.5 1], 'Ylim', [0 1]);
+
+fh = hs.fig.UserData;
+if ishandle(fh) % surface
+    hs = guidata(fh);
+    iFile = hs.hsN.files.getSelectedIndex+1;
+    try, if isempty(hs.frame.UserData{iFile}), return; end; catch, return; end
+    colormap(hs.ax(end), map);
+    set(get(hs.colorbar, 'Children'), 'YData', [0 1]);
+    set(hs.colorbar, 'YTickLabel', labls, 'YTick', [0 0.5 1], 'Ylim', [0 1]);
+end
 
 %% return screen size in pixels
 function res = screen_pixels(id)
@@ -3162,34 +3170,32 @@ if nargin>2 && isnum, val = str2num(val); end
 function val = gii_meta(ch, key)
 val = regexp(ch, ['(?<=' key '.*?<Value>).*?(?=</Value>)'], 'match', 'once');
 
-%% Open surface figure or add cii to it
+%% Open surface view or add cii to it
 function cii_view(hsN)
-p = get_para(hsN, 1); % top one in nii_viewer
+p = get_para(hsN, 1); % top one just opened or added in nii_viewer
 if ~isfield(p.nii, 'gii'), return; end
 cii = cii_index(p.nii);
 
-fh = handle(figure(hsN.fig.Number+100));
-if strncmp(get(fh,'Name'), 'cii_view', 8)
+fh = figure(hsN.fig.Number+100);
+if strncmp(get(fh,'Name'), 'cii_view', 8) % figure exists
     hs = guidata(fh);
-    hp = findobj(hs.ax(1), 'Type', 'Patch', 'FaceColor', 'interp');
-    if numel(hp)>0 ~= numel(cii_in_nii(hsN))
-        cii_view_cb(fh, [], 'closeAll');
-    end
 else % create surface figure
     v = p.nii.gii.Vertices{1};
-    if cii(1).SurfaceNumberOfVertices ~= size(v,1), error('GIfTI and CIfTI not match'); end
-    hs.axisOffset = (max(v)+min(v))/2;
-    v = bsxfun(@minus, v, hs.axisOffset);
+    hs.nVertices = [cii.SurfaceNumberOfVertices];
+    if hs.nVertices(1) ~= size(v,1)
+        close(fh); error('GIfTI and CIfTI not match');
+    end
+    hs.axisOffset = (max(v) + min(v)) / 2;
+    v = bsxfun(@minus, v, hs.axisOffset); % center it for rotation
     lim = [min(v); max(v)]';
     
     set(fh, 'Name', ['cii_view: ' formcode2str(p.nii.gii.DataSpace) ], ...
         'NumberTitle', 'off', 'MenuBar', 'none', 'Renderer', 'opengl');
 	hs.frame = uipanel('Parent', fh, 'Units', 'Normalized', 'Position', [0 0 1 1], ...
-        'BorderType', 'none', 'BackgroundColor', 'k'); % for background color
+        'BorderType', 'none'); % to control background color
     if isnumeric(fh)
         fh = handle(fh);
-        schema.prop(fh, 'Number', 'mxArray');
-        fh.Number = hsN.fig.Number+100;
+        hs.frame = handle(hs.frame);
     end
 
     fh.Position(3:4) = [1 lim(3,2)/lim(2,2)] * 600;
@@ -3197,39 +3203,37 @@ else % create surface figure
     dz = srn(1,4)-60 - sum(fh.Position([2 4]));
     if dz<0, fh.Position(2) = fh.Position(2) + dz; end
 
+    im = ones(size(v,1), 1, 'single') * 0.7;
     hs.ax(1) = axes('Position', [0.01 0.51 0.45 0.5], 'Parent', hs.frame);
     patch('Parent', hs.ax(1), 'Faces', p.nii.gii.Faces{1}+1, 'Vertices', v, ...
-        'FaceColor', [1 1 1]*0.7, 'EdgeColor', 'none', ...
-        'AlphaDataMapping', 'none');
-    set(hs.ax(1), 'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:), 'Visible', 'off');
-    axis equal;
-    view(hs.ax(1), [-1 0 0]); % left hemi lateral
+        'FaceVertexCData', im, 'FaceColor', 'interp', 'EdgeColor', 'none');
+    set(hs.ax(1), 'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:));
+    axis equal; axis off;
     camlight; material dull;
     try, lighting gouraud; catch, lighting phong; end %#ok<*NOCOM>
     
-    hs.ax(2) = copyobj(hs.ax(1), hs.frame);
+    hs.ax(2) = copyobj(hs.ax(1), hs.frame); % copy axis and patch
     set(hs.ax(2), 'Position', [0.01 0.01 0.45 0.5]);
     
     v = p.nii.gii.Vertices{2};
-    if cii(2).SurfaceNumberOfVertices ~= size(v,1), error('GIfTI and CIfTI not match'); end
-    hs.axisOffset(2,:) = (max(v)+min(v))/2;
+    if hs.nVertices(2) ~= size(v,1)
+        close(fh); error('GIfTI and CIfTI not match');
+    end
+    hs.axisOffset(2,:) = (max(v) + min(v)) / 2;
     v = bsxfun(@minus, v, hs.axisOffset(2,:));
     lim = [min(v); max(v)]';
     
     hs.ax(3) = copyobj(hs.ax(1), hs.frame);
-    set(hs.ax(3), 'Position', [0.47 0.5 0.45 0.5]);
-    set(hs.ax(3), 'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:));
-    hp2 = findobj(hs.ax(3), 'Type', 'Patch');
-    set(hp2, 'Faces', p.nii.gii.Faces{2}+1, 'Vertices', v);
+    set(hs.ax(3), 'Position', [0.47 0.5 0.45 0.5], ...
+    	'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:));
     
     hs.ax(4) = copyobj(hs.ax(3), hs.frame);
     set(hs.ax(4), 'Position', [0.47 0.01 0.45 0.5]);
     
     hs.ax(5) = axes('Position', [0.92 0.1 0.08 0.8], 'Ylim', [0 1], ...
         'Visible', 'off', 'Parent', hs.frame);
-    colorbar('Location', 'East', 'Units', 'Normalized', 'Visible', 'off');
+    colorbar('Location', 'East', 'Units', 'Normalized', 'HitTest', 'off');
     hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); % trick for early matlab
-    set(hs.colorbar, 'UIContextMenu', '', 'EdgeColor', [1 1 1]);
 
     cMenu = uicontextmenu('Parent', fh);
     uimenu(cMenu, 'Label', 'Reset view', 'Callback', {@cii_view_cb 'reset'});
@@ -3242,37 +3246,35 @@ else % create surface figure
     set(m, 'Callback', {@nii_viewer_cb 'save' hsN.fig});
     set(hs.frame, 'UIContextMenu', cMenu);
     
-    fh.UserData = struct('xy', [], 'xyz', [], 'deg', [-90 0]);
-    for i = 1:4, hs.light(i) = findobj(hs.ax(i), 'Type', 'light'); end
-    hs.lutStr = hsN.lutStr;
+    for i = 1:4
+        hs.patch(i) = findobj(hs.ax(i), 'Type', 'Patch');
+        set(hs.patch(i), 'ButtonDownFcn', {@cii_view_cb 'buttonDownPatch'}, ...
+            'UIContextMenu', get(hs.frame, 'UIContextMenu'));
+        hs.light(i) = findobj(hs.ax(i), 'Type', 'light');
+    end
+    set(hs.patch(3:4), 'Faces', p.nii.gii.Faces{2}+1, 'Vertices', v);
+    
     set(fh, 'WindowButtonDownFcn', {@cii_view_cb 'buttonDown'}, ...
             'WindowKeyPressFcn', @(h,~)figure(h), ...
             'WindowButtonUpFcn',  {@cii_view_cb 'buttonUp'}, ...
             'WindowButtonMotionFcn', {@cii_view_cb 'buttonMotion'}, ...
-            'HandleVisibility', 'Callback');
+            'HandleVisibility', 'Callback', ...
+            'UserData', struct('xy', [], 'xyz', [], 'deg', [-90 0]));
     hsN.fig.UserData = fh;
+    hs.frame.UserData = cell(1, hsN.files.getModel.size-1);
     hs.fig = fh;
     hs.hsN = hsN;
     guidata(fh, hs);
+    set_cii_view(hs, [-90 0]);
 end
 
-im = zeros(cii(1).SurfaceNumberOfVertices, 1, 'single');
-for i = 4:-1:1 % add overlay
-    hp1 = findobj(hs.ax(i), 'Type', 'Patch');
-    hp = copyobj(hp1(end), hs.ax(i));
-    set(hp, 'FaceVertexCData', im, 'FaceVertexAlpha', im, ...
-        'FaceColor', 'interp', 'FaceAlpha', 'interp');%, 'LineStyle', 'none', 'EdgeColor', 'interp', 'EdgeAlpha', 'interp');
-%     'EdgeColor', 'interp', 'EdgeAlpha', 'interp');
-    set([hp1; hp], 'ButtonDownFcn', {@cii_view_cb 'buttonDownPatch'});
-    set([hp1; hp], 'UIContextMenu', get(hs.frame, 'UIContextMenu'));
+if ~isequal(hs.nVertices, [cii.SurfaceNumberOfVertices]) % useful for add overlay
+    error('GIfTI and CIfTI not match');
 end
-set(hp, 'UserData', cii);
-p.hsI(1).UserData.cii = hp;
-
-cii_view_cb(fh, [], 'reset');
+hs.frame.UserData = [{cii} hs.frame.UserData]; % store cii data
+set_colorbar(hsN);
 cii_view_cb(fh, [], 'lb', hsN);
 cii_view_cb(fh, [], 'background', hsN);
-cii_view_cb(fh, [], 'colorbar', hsN);
 
 %% cii_view callbacks 
 function cii_view_cb(h, ev, cmd, hsN)
@@ -3282,117 +3284,82 @@ if isempty(h)
 end
 hs = guidata(h);
 switch cmd
-case 'buttonMotion' % Rotate gii and set light direction
-    xy = hs.fig.UserData.xy;
-    if isempty(xy), return; end % button not down
-    xy = get(hs.fig, 'CurrentPoint') - xy;
-    d = hs.fig.UserData.deg - xy ./ [1 2]; % /2 less sensitive for elevation
-    d = [d; d(1)+180 -d(2); -d(1) d(2); -d(1)-180 -d(2)];
-    for i = 1:4
-        view(hs.ax(i), d(i,:));
-        camlight(hs.light(i), 'headlight');
-    end
-    hs.fig.UserData.xyz = []; % so not set cursor in nii_viewer
-case 'buttonDownPatch'
-    if isempty(ev), return; end % Matlab too old
-    if ev.Button ~= 1, return; end % left button only
-    isRight = any(get(h, 'Parent') == hs.ax(3:4));
-    hs.fig.UserData.xyz = ev.IntersectionPoint + hs.axisOffset(isRight+1,:);
-case 'buttonDown' % figure button down: get ready for rotation
-    if ~strcmpi(hs.fig.SelectionType, 'normal'), return; end % left button only
-    [az, el] = view(hs.ax(1));
-    hs.fig.UserData.deg = [az el];
-    hs.fig.UserData.xy = get(hs.fig, 'CurrentPoint');
-case 'buttonUp'
-    hs.fig.UserData.xy = []; % so buttonMotion does nothing
-    if isempty(hs.fig.UserData.xyz), return; end
-    c = round(hs.hsN.bg.Ri * [hs.fig.UserData.xyz(:); 1]) + 1;
-    for i = 1:3, hs.hsN.ijk(i).setValue(c(i)); end
-case 'reset'
-    d = [-90 0];
-    d = [d; d(1)+180 -d(2); -d(1) d(2); -d(1)-180 -d(2)];
-    for i = 1:4
-        view(hs.ax(i), d(i,:));
-        camlight(hs.light(i), 'headlight');
-    end    
-case {'lut' 'lb' 'ub' 'alpha' 'volume'}
-    hp = findobj(hs.ax(1), 'Type', 'Patch', 'FaceColor', 'interp'); % overlay
-    if isempty(hp), return; end
-    p = get_para(hsN);
-    iP = p.cii == hp;
-    cii = get(hp(iP), 'UserData');
+    case 'buttonMotion' % Rotate gii and set light direction
+        xy = hs.fig.UserData.xy;
+        if isempty(xy), return; end % button not down
+        xy = get(hs.fig, 'CurrentPoint') - xy;
+        d = hs.fig.UserData.deg - xy ./ [1 2]; % /2 less sensitive for elevation
+        set_cii_view(hs, d);
+        hs.fig.UserData.xyz = []; % so not set cursor in nii_viewer
+        return;
+    case 'buttonDownPatch' % get button xyz: work only for later Matlab
+        if isempty(ev) || ev.Button ~= 1, return; end % old Matlab || button 2 
+        isRight = any(get(h, 'Parent') == hs.ax(3:4));
+        hs.fig.UserData.xyz = ev.IntersectionPoint + hs.axisOffset(isRight+1,:);
+        return;
+    case 'buttonDown' % figure button down: prepare for rotation
+        if ~strcmpi(hs.fig.SelectionType, 'normal'), return; end % button 1 only
+        [az, el] = view(hs.ax(1));
+        hs.fig.UserData.deg = [az el];
+        hs.fig.UserData.xy = get(hs.fig, 'CurrentPoint');
+        return;
+    case 'buttonUp' % set cursor in nii_viewer
+        hs.fig.UserData.xy = []; % stop buttonMotion
+        if isempty(hs.fig.UserData.xyz), return; end
+        c = round(hs.hsN.bg.Ri * [hs.fig.UserData.xyz(:); 1]) + 1;
+        for i = 1:3, hs.hsN.ijk(i).setValue(c(i)); end
+        return;
+    case 'reset'
+        set_cii_view(hs, [-90 0]);
+        return;
+
+    % Rest cases not called by surface callback, but from nii_viewer_cb
+    case 'stack' % nii_viewer_cb pass order to here
+        hs.frame.UserData = hs.frame.UserData(ev);
+    case 'closeAll' % close all overlays
+        hs.frame.UserData = cell(1); % nii_viewer background left
+    case 'close'
+        hs.frame.UserData(ev) = [];
+    case 'background'
+        clr = hsN.frame.BackgroundColor;
+        hs.frame.BackgroundColor = clr;
+        set(hs.colorbar, 'EdgeColor', 1-clr);
+        return;
+    case 'colorbar' % colorbar on/off
+        set(hs.colorbar, 'Visible', get(hsN.colorbar, 'Visible'));
+        return;
+    case {'lb' 'ub' 'lut' 'toggle' 'alpha' 'volume'} % update img only
+    otherwise, return; % ignore other cmd
+end
+
+% compute alpha blending for all images
+imP{1} = ones(hs.nVertices(1), 3, 'single')*0.7; % 0.7 background
+imP{2} = ones(hs.nVertices(2), 3, 'single')*0.7;
+for j = numel(hs.frame.UserData):-1:1 % files
+    cii = hs.frame.UserData{j};
+    if isempty(cii), continue; end
+    p = get_para(hsN, j);
+    if ~p.show, continue; end
     rg = sort([p.lb p.ub]);
-    for i = 1:2
-        img = zeros(cii(i).SurfaceNumberOfVertices, 1, 'single'); % or NaN?
+    for i = 1:2 % hemispheres
+        img = zeros(hs.nVertices(i), 1, 'single'); % or NaN?
         ind = cii(i).VertexIndices;
         img(ind+1) = p.nii.imgG(1,1,1,1, p.volume, cii(i).IndexOffset+(1:numel(ind)));
-        [im, alfa] = lut2img(img, p.lut, rg, hs.lutStr{p.lut});
+        [im, alfa] = lut2img(img, p.lut, rg, hs.hsN.lutStr{p.lut});
+        alfa = p.alpha * single(alfa>0);
         im = permute(im, [1 3 2]); % nVertices x 3
-        for j = i*2+(-1:0)
-            hp = findobj(hs.ax(j), 'Type', 'Patch', 'FaceColor', 'interp');
-            set(hp(iP), 'FaceVertexCData', im, 'FaceVertexAlpha', p.alpha*single(alfa>0));
-        end
+        imP{i} = bsxfun(@times, 1-alfa, imP{i}) + bsxfun(@times, im, alfa);
     end
-    set_colorbar(hs, p);
-case 'stack'
-    hpO = findobj(hs.ax(1), 'Type', 'Patch', 'FaceColor', 'interp'); % old order
-    hpN = cii_in_nii(hsN);
-    if isequal(hpO, hpN), return; end
-    for i1 = 1:numel(hpO) % find the one needs to move
-        if isequal(setdiff(hpO, hpO(i1)), setdiff(hpN, hpO(i1))), break; end
-    end
-    i2 = find(hpN == hpO(i1));
-    for i = 1:4
-        hpO = findobj(hs.ax(i), 'Type', 'Patch', 'FaceColor', 'interp');
-        if i1>i2, uistack(hpO(i1), 'up',   i1-i2); 
-        else,     uistack(hpO(i1), 'down', i2-i1);
-        end
-    end
-case 'closeAll' % close all overlays
-    for i = 1:4
-        hp = findobj(hs.ax(i), 'Type', 'Patch', 'FaceColor', 'interp');
-        delete(hp);
-    end
-case 'close'
-    hpO = findobj(hs.ax(1), 'Type', 'Patch', 'FaceColor', 'interp');
-    hpN = cii_in_nii(hsN);
-    for i = 1:numel(hpO)
-        if any(hpO(i) == hpN), continue; end
-        for j = 1:4            
-            hp = findobj(hs.ax(j), 'Type', 'Patch', 'FaceColor', 'interp');
-            delete(hp(i));
-        end
-    end
-case 'background'
-    if isequal(hsN.frame.BackgroundColor, [0 0 0])
-        set(hs.frame, 'BackgroundColor', [0 0 0]);
-        set(hs.colorbar, 'EdgeColor', [1 1 1]);
-    else
-        set(hs.frame, 'BackgroundColor', [1 1 1]);
-        set(hs.colorbar, 'EdgeColor', [0 0 0]);
-    end
-case 'toggle'
-    hpO = findobj(hs.ax(1), 'Type', 'Patch', 'FaceColor', 'interp');
-    [~, ind] = cii_in_nii(hsN);
-    for i = 1:numel(hpO)
-        p = get_para(hsN, ind(i));
-        isOn = p.show;
-        if strcmpi(get(hpO(i), 'Visible'), 'on') == isOn, continue; end
-        for j = 1:4            
-            hp = findobj(hs.ax(j), 'Type', 'Patch', 'FaceColor', 'interp');
-            if isOn, set(hp(i), 'Visible', 'on');
-            else, set(hp(i), 'Visible', 'off');
-            end
-        end
-    end    
-case 'colorbar' % colorbar on/off
-    if strcmpi(get(hsN.colorbar, 'Visible'), 'off')
-        set(hs.colorbar, 'Visible', 'off'); 
-    else
-        set(hs.colorbar, 'Visible', 'on'); 
-        set_colorbar(hs, get_para(hsN));
-    end
-otherwise, return; % ignore
+end
+set(hs.patch(1:2), 'FaceVertexCData', imP{1});
+set(hs.patch(3:4), 'FaceVertexCData', imP{2});
+
+%% set surface view
+function set_cii_view(hs, ae)
+ae = [ae; ae(1)+180 -ae(2); -ae(1) ae(2); -ae(1)-180 -ae(2)];
+for i = 1:4
+    view(hs.ax(i), ae(i,:));
+    camlight(hs.light(i), 'headlight');
 end
 
 %% Return cii surface parameters from nii.ext
@@ -3411,16 +3378,5 @@ for j = regexp(xml, '<BrainModel')
     cii(ind).VertexIndices = int32(cii(ind).VertexIndices);
     cii(ind).IndexOffset = gii_attr(c(1:i0), 'IndexOffset', 1); % 0-based
     cii(ind).SurfaceNumberOfVertices = gii_attr(c(1:i0), 'SurfaceNumberOfVertices', 1);
-end
-
-%% Return patch handles and file list index stored in nii_viewer
-function [hp, ind] = cii_in_nii(hs)
-hp = []; ind = [];
-for i = 1:hs.files.getModel.size
-    p = get_para(hs, i);
-    if ~isfield(p, 'cii') || ~ishandle(p.cii), continue; end
-    if isempty(hp), hp = p.cii; ind = i;
-    else, hp(end+1) = p.cii; ind(end+1) = i; %#ok
-    end
 end
 %%

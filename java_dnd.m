@@ -32,7 +32,7 @@ setComplete = onCleanup(@()jEvent.dropComplete(true));
 % All OS: ctrlDn 1, shiftDn 2, both Dn 1073741824 (2^30)
 % This fails to report CtrlDn if user releases shift between DragEnter and Drop.
 evt.ControlDown = jEvent.getDropAction()==1073741824; % ACTION_LINK 1<<30
-% evt.Location = [jEvent.getLocation.x jEvent.getLocation.y]; % top-left [0 0]
+evt.Location = [jEvent.getLocation.x jEvent.getLocation.y]; % top-left [0 0]
 java.awt.Robot().keyRelease(16); % shift up
 if jSource.getDropType() == 1 % String dropped
     evt.DropType = 'string';
