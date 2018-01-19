@@ -1032,7 +1032,7 @@ s.PixelSpacing = abs(foo(1:2));
 % s.SpacingBetweenSlices = foo(3);
 s.SliceThickness = abs(foo(3));
 foo = afni_key('BRICK_STATS');
-foo = reshape(foo, [2 numel(foo)/2]);
+foo = reshape(foo, 2, []);
 mn = min(foo(1,:)); mx = max(foo(2,:));
 s.WindowCenter = (mx+mn)/2;
 s.WindowWidth = mx-mn;

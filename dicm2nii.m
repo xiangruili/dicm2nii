@@ -363,6 +363,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 170924 Bug fix for long file name (avoid genvarname now).
 % 170927 Store TE in descrip even if multiple TEs.
 % 171211 Make it work for Siemens multiframe dicom (seems 3D only).
+% 180116 Bug fix for EchoTime1 for phase image (thx DylanW)
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -1106,17 +1107,15 @@ foo = tryGetField(s, 'AcquisitionDateTime');
 descrip = sprintf('time=%s;', foo(1:min(18,end))); 
 TE0 = asc_header(s, 'alTE[0]')/1000; % s.EchoTime stores only 1 TE
 if isempty(TE0), TE0 = tryGetField(s, 'EchoTime'); end % GE, philips
-if isPhase(s)
-    TE1 = asc_header(s, 'alTE[1]')/1000;
-    if ~isempty(TE1), s.SecondEchoTime = TE1; end
-    dTE = abs(TE1 - TE0); % TE difference
-    if isempty(dTE) && tryGetField(s, 'NumberOfEchoes', 1)>1
-        dTE = tryGetField(s, 'SecondEchoTime') - TE0; % need to update
-    end
-    if ~isempty(dTE)
-        descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
-        s.deltaTE = dTE;
-    end
+TE1 = asc_header(s, 'alTE[1]')/1000;
+if ~isempty(TE1), s.SecondEchoTime = TE1; s.EchoTime = TE0; end
+dTE = abs(TE1 - TE0); % TE difference
+if isempty(dTE) && tryGetField(s, 'NumberOfEchoes', 1)>1
+    dTE = tryGetField(s, 'SecondEchoTime') - TE0; % need to update
+end
+if ~isempty(dTE)
+    descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
+    s.deltaTE = dTE;
 end
 descrip = sprintf('TE=%.4g;%s', TE0, descrip);
 

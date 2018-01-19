@@ -79,7 +79,7 @@ if nargin<3 || isempty(ref) % pick a good vol as ref: similar to next vol
     n = min(10, nVol);
     mss = diff(nii.img(:,:,:,1:n), 1, 4);
     mss = double(mss) .^ 2;
-    mss = reshape(mss, [prod(d) n-1]);
+    mss = reshape(mss, [], n-1);
     mss = sum(mss);
     [~, p.ref] = min(mss);
     p.ref = p.ref + 1; % later one less affected by spin history?
@@ -185,7 +185,7 @@ if doXform
     I = ones([d 4], 'single');
     [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
     I = permute(I, [4 1 2 3]);
-    I = reshape(I, [4 prod(d)]); % ijk in 4 by nVox for original dim
+    I = reshape(I, 4, []); % ijk in 4 by nVox for original dim
     I = Rm * I; % xyz now
 end
 

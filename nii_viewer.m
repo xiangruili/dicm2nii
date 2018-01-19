@@ -5,9 +5,10 @@ function varargout = nii_viewer(fname, overlayName)
 %  NII_VIEWER('background.nii', 'overlay.nii')
 %  NII_VIEWER('background.nii', {'overlay1.nii' 'overlay2.nii'})
 % 
-% If no input is provided, the viewer will load MNI_2mm brain as background
-% NIfTI. Although the preferred format is NIfTI, NII_VIEWER accepts any files
-% that can be converted into NIfTI by dicm2nii.
+% If no input is provided, the viewer will load included MNI_2mm brain as
+% background NIfTI. Although the preferred format is NIfTI, NII_VIEWER accepts
+% any files that can be converted into NIfTI by dicm2nii. In case of CIfTI file,
+% it will show both the volume view and surface view if GIfTI is available.
 % 
 % Here are some features and usage.
 % 
@@ -67,13 +68,13 @@ function varargout = nii_viewer(fname, overlayName)
 % .feat/reg/example_func2standard.mat for linear transformation or better use
 % .feat/reg/example_func2standard_warp.nii.gz if available for alignment.
 % 
-% When the mouse pointer is moved onto a voxel, the voxel indices, corresponding
-% x/y/z coordinates and voxel value will show on the panel. If there is an
-% overlay, the overlay voxel value will also show up, unless its display is off.
-% When the pointer moves onto the panel or the bottom-right quadrant, the
-% information for the voxel at crosshair will be displayed. The display format
-% is as following with val of the top image displayed first:
-%  (i,j,k)=(x,y,z): val_1 val_2 val_3
+% When the mouse pointer is moved onto a voxel, the x/y/z coordinates and voxel
+% value will show on the panel. If there is an overlay, the overlay voxel value
+% will also show up, unless its display is off. When the pointer moves onto the
+% panel or out of an image, the information for the voxel at crosshair will be
+% displayed. The display format is as following with val of the top image
+% displayed first:
+%  (x,y,z): val_1 val_2 val_3 ...
 %
 % Note that although the x/y/z coordinates are shared by background and overlay
 % images, IJK indices are always for background image (name shown on title bar).
@@ -99,8 +100,9 @@ function varargout = nii_viewer(fname, overlayName)
 % Moving the mouse onto a parameter will show the meaning of the parameter.
 % 
 % The lastly added overlay is on the top of display and top of the file list.
-% The background and overlay order can be changed by the two small buttons next
-% to the list, or from Overlay -> Move selected image ...
+% This also applies in case there is surface figure for CIfTI files. The
+% background and overlay order can be changed by the two small arrows next to
+% the list, or from Overlay -> Move selected image ...
 % 
 % Each NIfTI display can be turned on/off by clicking the small checkbox at the
 % left side of the file (or pressing spacebar for the selected NIfTI). This
@@ -125,8 +127,11 @@ function varargout = nii_viewer(fname, overlayName)
 % and or press < or > key, to simulate movie play. It is better to open the 4D
 % data as background, since it may be slower to map it to the background image.
 % 
-% Popular LUT options are implemented. Custom LUT can be added by File -> Load
-% custom LUT. The color coding can be shown by View -> Show colorbar. There are
+% Popular LUT options are implemented. Custom LUT can be added by Overlay ->
+% Load LUT for selected overlay. The custom LUT file can be in text format (each
+% line represents an RGB triplet, while the first line corresponds to the value
+% 0 in the image data), or binary format (uint8 for all red, then green then
+% blue). The color coding can be shown by View -> Show colorbar. There are
 % several special LUTs. The "two-sided" allows to show both positive and
 % negative data in one view. For example, if the display range is 3 to 10 for a
 % t-map, positive T above 3 will be coded as red-yellow, and T below -3 will be
@@ -256,6 +261,8 @@ function varargout = nii_viewer(fname, overlayName)
 % 171226 Store all info into sag img handle (fix it while it aint broke :)
 % 171228 Surface view for gii (include HCP gii template).
 % 171229 combine into one overlay for surface view.
+% 180103 Allow inflated surface while mapping to correct location in volume.
+% 180108 set_file back to nii_viewer_cb for cii_view_cb convenience.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -351,7 +358,7 @@ hs.focus = uicontrol(hs.panel, 'Style', 'text'); % dummy uicontrol for focus
 % file list by JIDE CheckBoxList: check/selection independent
 mdl = handle(javax.swing.DefaultListModel, 'CallbackProperties'); % dynamic item
 mdl.add(0, niiName);
-mdl.IntervalAddedCallback = cb('width'); % seems not needed
+mdl.IntervalAddedCallback   = cb('width');
 mdl.IntervalRemovedCallback = cb('width');
 mdl.ContentsChangedCallback = cb('width'); % add '(mask)' etc
 h = handle(com.jidesoft.swing.CheckBoxList(mdl), 'CallbackProperties');
@@ -360,7 +367,7 @@ h.setFont(java.awt.Font('Tahoma', 0, 11));
 h.setSelectionMode(0); % single selection
 h.setSelectedIndex(0); % 1st highlighted
 h.addCheckBoxListSelectedIndex(0); % check it
-h.ValueChangedCallback = {@set_file fh}; % selection change
+h.ValueChangedCallback = cb('file'); % selection change
 h.Focusable = false;
 h.setToolTipText(['<html>Select image to show/modify its display ' ...
     'parameters.<br>Click checkbox to turn on/off image']);
@@ -390,7 +397,7 @@ set(hs.overlay(2), 'Callback', cb('stack'), ...
 
 hs.value = uicontrol(ph, 'Style', 'text', 'Position', [208 38 pos(3)-208 20], ...
     'BackgroundColor', clr, 'FontSize', 8+(~ispc && ~ismac), ...
-    'TooltipString', '(i,j,k)=(x,y,z): top ... bottom');
+    'TooltipString', '(x,y,z): top ... bottom');
 
 % IJK java spinners
 labls = 'IJK';
@@ -405,7 +412,7 @@ for i = 1:3
 end
 
 % Controls for each file
-uipanel('Parent', ph, 'Units', 'pixels', 'Position', [1 2 408 34], ...
+uipanel('Parent', ph, 'Units', 'pixels', 'Position', [1 2 412 34], ...
     'BorderType', 'etchedin', 'BorderWidth', 2);
 hs.lb = java_spinner([7 8 52 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
@@ -414,18 +421,18 @@ hs.ub = java_spinner([59 8 52 22], [p.ub -inf inf p.ub_step], ph, ...
 hs.lutStr = {'grayscale' 'red' 'green' 'blue' 'violet' 'yellow' 'cyan' ...
     'red-yellow' 'blue-green' 'two-sided'  '<html><font color="red">lines' ...
     'parula' 'jet' 'hsv' 'hot' 'cool' 'spring' 'summer' 'autumn' 'winter' ...
-    'bone' 'copper' 'pink' 'prism' 'flag' 'phase' 'phase3' 'phase6' 'RGB'};
+    'bone' 'copper' 'pink' 'prism' 'flag' 'phase' 'phase3' 'phase6' 'RGB' 'custom'};
 hs.lut = uicontrol(ph, 'Style', 'popup', 'Position', [113 8 74 22], ...
     'String', hs.lutStr, 'BackgroundColor', 'w', 'Callback', cb('lut'), ...
     'Value', p.lut, 'TooltipString', 'Lookup table options for non-RGB data');
+if p.lut==numel(hs.lutStr), set(hs.lut, 'Enable', 'off'); end
 
 hs.alpha = java_spinner([187 8 44 22], [1 0 1 0.1], ph, cb('alpha'), '#.#', ...
     'Alpha: 0 transparent, 1 opaque');
 
 hs.smooth = uicontrol(ph, 'Style', 'checkbox', 'Value', p.smooth, ...
-    'Position', [231 8 60 22], 'String', 'smooth', ...
-    'BackgroundColor', clr, 'Callback', cb('smooth'), ...
-    'TooltipString', 'Smooth image in 3D');
+    'Position', [231 8 60 22], 'String', 'smooth', 'BackgroundColor', clr, ...
+    'Callback', cb('smooth'), 'TooltipString', 'Smooth image in 3D');
 hs.interp = uicontrol(ph, 'Style', 'popup', 'Position', [291 8 68 22], ...
     'String', {'nearest' 'linear' 'cubic' 'spline'}, 'Value', p.interp, ...
     'Callback', cb('interp'), 'Enable', 'off', 'BackgroundColor', 'w', ... 
@@ -464,12 +471,15 @@ for i = 1:numel(labls)
 end
 
 % early matlab's colormap works only for axis, so ax(4) is needed.
-hs.ax(4) = axes('Position', plotPos(4,:), 'Parent', hs.frame, 'Ylim', [0 1]);
-colorbar('Location', 'West', 'Units', 'Normalized');
-hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); % trick for early matlab
-set(hs.colorbar, 'Visible', 'off', 'HitTest', 'off', 'EdgeColor', [1 1 1]);
-% hs.colorbar = colorbar(hs.ax(4), 'YTicks', [0 0.5 1], 'Color', [1 1 1], ...
-%     'Location', 'West', 'PickableParts', 'none', 'Visible', 'off');
+hs.ax(4) = axes('Position', plotPos(4,:), 'Parent', hs.frame);
+try
+    hs.colorbar = colorbar(hs.ax(4), 'YTicks', [0 0.5 1], 'Color', [1 1 1], ...
+        'Location', 'West', 'PickableParts', 'none', 'Visible', 'off');
+catch % for early matlab
+    colorbar('peer', hs.ax(4), 'Location', 'West', 'Units', 'Normalized');
+    hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); 
+    set(hs.colorbar, 'Visible', 'off', 'HitTest', 'off', 'EdgeColor', [1 1 1]);
+end
 
 % image() reverses YDir. Turn off ax and ticks
 set(hs.ax, 'YDir', 'normal', 'Visible', 'off');
@@ -484,7 +494,6 @@ uimenu(h, 'Label', 'Open', 'Accelerator', 'O', 'UserData', pName, 'Callback', cb
 uimenu(h, 'Label', 'Open in new window', 'Callback', cb('open'));
 uimenu(h, 'Label', 'Apply mask', 'Callback', @addMask);
 uimenu(h, 'Label', 'Apply modulation', 'Callback', @addMask);
-uimenu(h, 'Label', 'Load custom LUT', 'Callback', cb('custom'));
 h_savefig = uimenu(h, 'Label', 'Save figure as');
 h_saveas = uimenu(h, 'Label', 'Save NIfTI as');
 uimenu(h, 'Label', 'Save volume as ...', 'Callback', cb('saveVolume'));
@@ -529,6 +538,7 @@ hs.overlay(5) = uimenu(h_over, 'Label', 'Remove overlay', 'Accelerator', 'R', ..
     'Callback', cb('close'), 'Enable', 'off');
 hs.overlay(4) = uimenu(h_over, 'Label', 'Remove overlays', ...
     'Callback', cb('closeAll'), 'Enable', 'off');
+uimenu(h_over, 'Label', 'Load LUT for current overlay', 'Callback', cb('custom'));
 
 h_view = uimenu(fh, 'Label', '&View');
 h = uimenu(h_view, 'Label', 'Zoom in by');
@@ -601,11 +611,11 @@ catch
     warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
     jFrame = fh.JavaFrame.getAxisComponent;
 end
-try java_dnd(jFrame, {@javaDropFcn fh}); catch me, disp(me.message); end
+try java_dnd(jFrame, cb('drop')); catch me, disp(me.message); end
 
 set(fh, 'ResizeFcn', cb('resize'), ... % 'SizeChangedFcn' for later matlab
     'WindowKeyPressFcn', @KeyPressFcn, 'CloseRequestFcn', cb('closeFig'), ...
-    'PaperPositionMode', 'auto', 'HandleVisibility', 'Callback');
+    'PaperPositionMode', 'auto', 'InvertHardcopy', 'off', 'HandleVisibility', 'Callback');
 nii_viewer_cb(fh, [], 'resize', fh); % avoid some weird problem
 
 if pf.mouseOver, set(fh, 'WindowButtonMotionFcn', cb('mousemove')); end
@@ -625,18 +635,17 @@ if hs.form_code(1)<1
     warndlg(['There is no valid form code in NIfTI. The orientation ' ...
         'labeling is likely meaningless.']);
 end
-try, cii_view(hs); catch me, errordlg(me.message); end
+if isfield(p.nii, 'cii'), cii_view(hs); end
 
 %% Get info from sag img UserData
 function p = get_para(hs, iFile)
-if nargin<2, iFile = hs.files.getSelectedIndex+1; end
+if nargin<2, iFile = hs.files.getSelectedIndex + 1; end
 hsI = findobj(hs.ax(1), 'Type', 'image', '-or', 'Type', 'quiver');
 p = get(hsI(iFile), 'UserData');
 
 %% callbacks
-function nii_viewer_cb(h, ~, cmd, fh)
+function nii_viewer_cb(h, evt, cmd, fh)
 hs = guidata(fh);
-iFile = hs.files.getSelectedIndex+1;
 switch cmd
     case 'ijk' % IJK spinner
         ix = find(h == hs.ijk);
@@ -680,12 +689,15 @@ switch cmd
             elseif val == 29 % RGB
                 err = size(p.nii.img,4)~=3;
                 if err, errordlg('RGB LUT requres 3-volume data.'); end
+            elseif val == numel(hs.lutStr)
+                err = true;
+                errordlg('Custom LUT is used be NIfTI itself');
             end
             if err, hs.lut.Value = p.lut; return; end % undo selection
         end
         
         p.hsI(1).UserData.(cmd) = val;
-        if any(strcmp(cmd, {'lut' 'lb' 'ub'})), set_colorbar(hs); end
+        if any(strcmp(cmd, {'lut' 'lb' 'ub' 'volume'})), set_colorbar(hs); end
         if strcmp(cmd, 'volume'), set_xyz(hs); end
         set_cdata(hs);
     case 'resize'
@@ -766,6 +778,7 @@ switch cmd
         if strcmp(get(h, 'Label'), 'Open in new window'), nii_viewer(fname);
         else, nii_viewer(fname, fh);
         end
+        return;
     case 'add' % add overlay
         pName = get(hs.add, 'UserData');
         label = get(h, 'Label');
@@ -797,14 +810,16 @@ switch cmd
         hs.files.setSelectedIndex(0);
         set_xyz(hs);
     case 'close' % close selected overlay
-        p = get_para(hs, iFile);
+        jf = hs.files.getSelectedIndex+1;
+        p = get_para(hs, jf);
         if p.hsI(1) == hs.hsI(1), return; end % no touch to background
         delete(p.hsI); % 3 view
-        hs.files.getModel.remove(iFile-1);
-        hs.files.setSelectedIndex(max(0, iFile-2));
+        hs.files.getModel.remove(jf-1);
+        hs.files.setSelectedIndex(max(0, jf-2));
         set_xyz(hs);
     case {'hdr' 'ext' 'essential'} % show hdr ext or essential
-        p = get_para(hs, iFile);
+        jf = hs.files.getSelectedIndex+1;
+        p = get_para(hs, jf);
         if strcmp(cmd, 'hdr')
             hdr = p.nii.hdr;
         elseif strcmp(cmd, 'ext')
@@ -825,7 +840,7 @@ switch cmd
         elseif strcmp(cmd, 'essential')
             hdr = nii_essential(p);
         end
-        nam = hs.files.getModel.get(iFile-1);
+        nam = hs.files.getModel.get(jf-1);
         if ~isstrprop(nam(1), 'alpha'), nam = ['x' nam]; end % like genvarname
         nam(~isstrprop(nam, 'alphanum')) = '_'; % make it valid for var name
         nam = [nam '_' cmd];
@@ -855,13 +870,13 @@ switch cmd
         guidata(fh, hs);
         set_cross(hs, 1:3);
     case 'copy' % copy figure into clipboard
-        fh = ancestor(h, 'figure');
-        if fh == hs.fig % nii_viewer
+        fh1 = ancestor(h, 'figure');
+        if strncmp(get(fh1, 'Name'), 'nii_viewer', 10)
             set(hs.panel, 'Visible', 'off');
             clnObj = onCleanup(@() set(hs.panel, 'Visible', 'on'));
         end
         pf = get(hs.pref, 'UserData');
-        print(fh, '-dbitmap', '-noui', ['-r' pf.dpi]);
+        print(fh1, '-dbitmap', '-noui', ['-r' pf.dpi]);
 %         print('-dmeta', '-painters');
     case 'save' % save figure as picture
         ext = get(h, 'Label');
@@ -878,12 +893,12 @@ switch cmd
         else, render = '-opengl';
         end
         pf = get(hs.pref, 'UserData');
-        fh = ancestor(h, 'figure');
-        if fh == hs.fig % nii_viewer
+        fh1 = ancestor(h, 'figure');
+        if strncmp(get(fh1, 'Name'), 'nii_viewer', 10)
             set(hs.panel, 'Visible', 'off');
             clnObj = onCleanup(@() set(hs.panel, 'Visible', 'on'));
         end
-        print(fh, fname, render, '-noui', ['-d' fmt], ['-r' pf.dpi], '-cmyk');
+        print(fh1, fname, render, '-noui', ['-d' fmt], ['-r' pf.dpi], '-cmyk');
     case 'colorbar' % colorbar on/off
         if strcmpi(get(hs.colorbar, 'Visible'), 'on')
             set(hs.colorbar, 'Visible', 'off'); 
@@ -901,40 +916,40 @@ switch cmd
         helpdlg(str, 'About nii_viewer')
     case 'stack'
         uicontrol(hs.focus); % move focus out of buttons
-        i = iFile;
-        p = get_para(hs, i);
+        jf = hs.files.getSelectedIndex+1;
+        p = get_para(hs, jf);
         n = hs.files.getModel.size;
         switch get(h, 'Tag') % for both uimenu and pushbutton
             case 'up' % one level up
-                if i==1, return; end
+                if jf==1, return; end
                 for j = 1:3, uistack(p.hsI(j)); end
-                ind = [1:i-2 i i-1 i+1:n]; i = i-1;
+                ind = [1:jf-2 jf jf-1 jf+1:n]; jf = jf-1;
             case 'down' % one level down
-                if i==n, return; end
+                if jf==n, return; end
                 for j = 1:3, uistack(p.hsI(j), 'down'); end
-                ind = [1:i-1 i+1 i i+2:n]; i = i+1;
+                ind = [1:jf-1 jf+1 jf jf+2:n]; jf = jf+1;
             case 'top'
-                if i==1, return; end
-                for j = 1:3, uistack(p.hsI(j), 'up', i-1); end
-                ind = [i 1:i-1 i+1:n]; i = 1;
+                if jf==1, return; end
+                for j = 1:3, uistack(p.hsI(j), 'up', jf-1); end
+                ind = [jf 1:jf-1 jf+1:n]; jf = 1;
             case 'bottom'
-                if i==n, return; end
-                for j = 1:3, uistack(p.hsI(j), 'down', n-i); end
-                ind = [1:i-1 i+1:n i]; i = n;
+                if jf==n, return; end
+                for j = 1:3, uistack(p.hsI(j), 'down', n-jf); end
+                ind = [1:jf-1 jf+1:n jf]; jf = n;
             otherwise
                 error('Unknown stack level: %s', get(h, 'Tag'));
         end
         
-        chk = false(1,n);
-        chk(hs.files.getCheckBoxListSelectedIndices+1) = true;
-        chk = find(chk(ind)) - 1;
         str = cell(hs.files.getModel.toArray);
         str = str(ind);
         for j = 1:n, hs.files.getModel.set(j-1, str{j}); end
+
+        chk = false(1,n);
+        chk(hs.files.getCheckBoxListSelectedIndices+1) = true;
+        chk = find(chk(ind)) - 1;
         if ~isempty(chk), hs.files.setCheckBoxListSelectedIndices(chk); end
-        hs.files.setSelectedIndex(i-1);        
+        hs.files.setSelectedIndex(jf-1);        
         set_xyz(hs);
-        iFile = ind; % for cii_view_cb
     case 'zoom'
         m = str2double(get(h, 'Label'));
         a = min(hs.dim) / m;
@@ -1036,11 +1051,12 @@ switch cmd
             if ~isnan(val), break; end
         end
         setappdata(h, 'Value', val);
-        p = get_para(hs, iFile);
+        jf = hs.files.getSelectedIndex+1;
+        p = get_para(hs, jf);
         img = p.nii.img(:,:,:, hs.volume.getValue);
         c = find(img(:)==val, 1);
         if isempty(c)
-            nam = strtok(hs.files.getModel.get(iFile-1), '(');
+            nam = strtok(hs.files.getModel.get(jf-1), '(');
             errordlg(sprintf('No value of %g found in %s', val, nam));
             return;
         end
@@ -1058,6 +1074,10 @@ switch cmd
     case 'maximum' % crosshair to img max
         p = get_para(hs);
         img = p.nii.img(:,:,:,hs.volume.getValue);
+        if numel(unique(img(:)))==1
+            errordlg('All value are the same. No maximum!');
+            return;
+        end
         img = smooth23(img, 'gaussian', 5);
         img(isnan(img)) = 0;
         img = abs(img);
@@ -1069,30 +1089,34 @@ switch cmd
         for i = 1:3, hs.ijk(i).setValue(c(i)); end
     case 'custom' % add custom lut
         pName = get(hs.add, 'UserData');
-        [fname, pName] = uigetfile([pName '/*.lut'], 'Select a LUT file');
+        [fname, pName] = uigetfile([pName '/*.lut'], 'Select LUT file for current overlay');
         if ~ischar(fname), return; end
-        [~, nam] = fileparts(fname);
-        nam = strtok(nam, '.');
-        str = hs.lut.String;
-        ind = find(strcmp(str, nam));
-        if ~isempty(ind)
-            set(hs.lut, 'Value', ind);
+        p = get_para(hs);
+        fid = fopen(fullfile(pName, fname));
+        p.map = fread(fid, '*uint8');
+        fclose(fid);
+        if mod(numel(p.map),3)>0 || sum(p.map<8)<3 % guess text file
+            try, p.map = str2num(char(p.map'));
+            catch, errordlg('Unrecognized LUT file'); return;
+            end
+            if max(p.map(:)>1), p.map = single(p.map) / 255; end
         else
-            fname = fullfile(pName, fname);
-            fid = fopen(fname);
-            lut = fread(fid, '*uint8');
-            fclose(fid);
-            lut = reshape(lut, [numel(lut)/3 3]);
-            lut = single(lut) / 255;
-            hs.lutStr{end+1} = lut;
-            guidata(fh, hs);
-            set(hs.lut, 'String', [str; nam], 'Value', numel(str)+1);
+            p.map = reshape(p.map, [], 3);
+            p.map = single(p.map) / 255;
         end
-        nii_viewer_cb(hs.lut, [], 'lut', fh);
+        if isequal(p.nii.img, round(p.nii.img))
+            try, p.map = p.map(1:max(p.nii.img(:))+1, :); end
+        end
+        p.lut = numel(hs.lutStr);
+        p.hsI(1).UserData = p;
+        set(hs.lut, 'Value', p.lut, 'Enable', 'off');
+        set_cdata(hs);
+        set_colorbar(hs);
     case 'tc' % time course
-        p = get_para(hs, iFile);
+        jf = hs.files.getSelectedIndex+1;
+        p = get_para(hs, jf);
         dim = p.nii.hdr.dim(2:5);
-        nam = strtok(hs.files.getModel.get(iFile-1), '(');
+        nam = strtok(hs.files.getModel.get(jf-1), '(');
         if dim(4)<2
             errordlg(['There is only 1 volume for ' nam]);
             return;
@@ -1107,22 +1131,21 @@ switch cmd
         c = hs.bg.R * [c-1 1]'; % in mm now
         c = c(1:3);
         b = xyzr2roi(c, r, p.nii.hdr); % overlay space
-        nv = prod(dim(1:3));
-        b = reshape(b, [1 nv]);
         
         img = nii_tool('img', p.nii.hdr.file_name); % may be re-oriented
         dim = size(img);
-        img = reshape(img, [nv prod(dim(4:end))])';
-        img = img(:, b);
+        img = reshape(img, [], prod(dim(4:end)))';
+        img = img(:, b(:));
         img = mean(single(img), 2);
-        fh1 = figure(mod(fh.Number,10)+iFile);
+        fh1 = figure(mod(fh.Number,10)+jf);
         plot(img); 
         xlabel('Volume number');
         c = sprintf('(%g,%g,%g)', round(c));
         set(fh1, 'Name', [nam ' time course around voxel ' c]);
     case 'hist' % plot histgram
-        if iFile<1, return; end
-        p = get_para(hs, iFile);
+        jf =hs.files.getSelectedIndex+1;
+        if jf<1, return; end
+        p = get_para(hs, jf);
         img = p.nii.img(:,:,:, hs.volume.getValue);
         img = sort(img(:));
         img(isnan(img)) = [];
@@ -1136,8 +1159,8 @@ switch cmd
         if n == nu, edges = img0;
         else, edges = linspace(0,1,n)*double(img(end)-img(1)) + double(img(1));
         end
-        nam = strtok(hs.files.getModel.get(iFile-1), '(');
-        fh1 = figure(mod(fh.Number,10)+iFile);
+        nam = strtok(hs.files.getModel.get(jf-1), '(');
+        fh1 = figure(mod(fh.Number,10)+jf);
         set(fh1, 'NumberTitle', 'off', 'Name', nam);
         [y, x] = hist(img, edges);
         bar(x, y/sum(y)/(x(2)-x(1)), 'hist'); % probability density
@@ -1210,24 +1233,63 @@ switch cmd
         I = ones([d 4], 'single');
         [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
         I = permute(I, [4 1 2 3]);
-        I = reshape(I, [4 prod(d)]); % ijk in 4 by nVox
+        I = reshape(I, 4, []); % ijk in 4 by nVox
         R = nii_xform_mat(p.nii.hdr, hs.form_code); % original R
         k = hs.bg.Ri * R * I; % background ijk
         
         nii = nii_tool('load', nam);
         d = size(nii.img);
-        n = prod(d(1:3));
-        nii.img = reshape(nii.img, [n prod(d)/n]);
+        nii.img = reshape(nii.img, prod(d(1:3)), []);
         nii.img(k(3,:)<k0, :) = 0;
         nii.img = reshape(nii.img, d);
         nii_tool('save', nii, fname);
     case 'closeFig'
         try close(fh.UserData); end % cii_view
-        delete(fh);
+        delete(fh); return;
+    case 'file'
+        if ~isempty(evt) && evt.getValueIsAdjusting, return; end
+        p = get_para(hs);
+        
+        nam = {'lb' 'ub' 'alpha' 'volume' 'lut' 'smooth' 'interp' };
+        cb = cell(4,1);
+        for j = 1:4 % avoid firing spinner callback
+            cb{j} = hs.(nam{j}).StateChangedCallback;
+            hs.(nam{j}).StateChangedCallback = '';
+        end
+        
+        for j = 1:numel(nam)
+            set(hs.(nam{j}), 'Value', p.(nam{j}));
+        end
+        set(hs.lb.Model, 'StepSize', p.lb_step);
+        set(hs.ub.Model, 'StepSize', p.ub_step);
+        nVol = size(p.nii.img, 4);
+        str = sprintf('Volume number, 1:%g', nVol);
+        set(hs.volume, 'Enable', nVol>1, 'ToolTipText', str);
+        set(hs.volume.Model, 'Maximum', nVol);
+        
+        for j = 1:4 % restore spinner callback
+            hs.(nam{j}).StateChangedCallback = cb{j};
+        end
+        set_colorbar(hs);
+        
+        off_on = {'off' 'on'};
+        set(hs.interp, 'Enable', off_on{isfield(p, 'R0')+1});
+        set(hs.overlay(1:4), 'Enable', off_on{(hs.files.getModel.size>1)+1}); % stack & Close overlays
+        set(hs.overlay(5), 'Enable', off_on{(p.hsI(1) ~= hs.hsI(1))+1}); % Close overlay
+        set(hs.lut, 'Enable', off_on{2-(p.lut==numel(hs.lutStr))});
+    case 'drop'
+        try
+            nii = get_nii(evt.Data);
+            if evt.ControlDown, addOverlay(nii, fh); % overlay
+            else, nii_viewer(nii, fh); return; % background
+            end
+        catch me
+            errordlg(me.message);
+        end
     otherwise
         error('Unknown Callback: %s', cmd);
 end
-drawnow; cii_view_cb([], iFile, cmd, hs);
+try, cii_view_cb(fh.UserData, [], cmd); end
 
 %% zoom in/out with a factor
 function set_zoom(m, hs)
@@ -1321,17 +1383,6 @@ switch evt.Key
         set(0, 'PointerLocation', mousexy); % restore mouse location
 end
 
-%% Drop callback: drop as background, Ctrl-drop as overlay
-function javaDropFcn(~, evt, fh)
-try
-    nii = get_nii(evt.Data);
-    if evt.ControlDown, addOverlay(nii, fh);
-    else, nii_viewer(nii, fh);
-    end
-catch me
-    errordlg(me.message);
-end
-
 %% update CData/AlphaData for 1 or 3 of the sag/cor/tra views
 function set_cdata(hs, iaxis)
 if nargin<2, iaxis = 1:3; end
@@ -1390,13 +1441,13 @@ for i = 1:hs.files.getModel.size
             I = ones([d 4], 'single');
             [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
             I = permute(I, [4 1 2 3]);
-            I = reshape(I, [4 prod(d)]); % ijk grids of background img
+            I = reshape(I, 4, []); % ijk grids of background img
             I(ix,:) = ind-1;
             
             if isfield(p, 'warp')
                 iw = {':' ':' ':' ':'}; iw{ix} = ind;
                 warp = p.warp(iw{:});
-                warp = reshape(warp, [prod(d) 3])'; warp(4,:) = 0;
+                warp = reshape(warp, [], 3)'; warp(4,:) = 0;
                 I = p.Ri * (p.R0 * I + warp) + 1;
             else
                 I = p.Ri * p.R0 * I + 1; % ijk+1 for overlay img
@@ -1442,9 +1493,7 @@ for i = 1:hs.files.getModel.size
         end
         
         if ~isRGB % not NIfTI RGB
-            rg = sort([p.lb p.ub]);
-            if lut==29 && p.nii.hdr.datatype==2, rg = [0 255]; end % uint8
-            [im, alfa] = lut2img(im, lut, rg, hs.lutStr{lut});
+            [im, alfa] = lut2img(im, p, hs.lutStr{p.lut});
         elseif dim4 == 3 % NIfTI RGB
             if max(im(:))>2, im = im / 255; end % guess uint8
             im(im>1) = 1; im(im<0) = 0;
@@ -1546,7 +1595,7 @@ else
         p.flip = hs.bg.flip;
         warndlg(['There is no valid coordinate system for the overlay. ' ...
          'The viewer supposes the same coordinate as the background.'], ...
-         'Transform Inconsistent');
+         'Missing valid tranformation');
     elseif frm ~= 2 && ~any(frm == hs.form_code)
         warndlg(['There is no matching coordinate system between the overlay ' ...
          'image and the background image. The overlay is likely meaningless.'], ...
@@ -1557,21 +1606,38 @@ end
 singleVol = 0;
 nv = size(p.nii.img, 4);
 if nv>1 && numel(p.nii.img)>1e7 % load all or a single volume
-    str = ['Input ''all'' or a number from 1 to ' num2str(nv)];
-    while 1
-        a = inputdlg(str, 'Volumes to load', 1, {'all'});
-        if isempty(a), return; end
-        a = strtrim(a{1});
-        if ~isstrprop(a, 'digit'), break; end
-        a = str2num(a);
-        if isequal(a,1:nv) || (numel(a)==1 && a>=1 && a<=nv && mod(a,1)==0)
-            break; 
+    if isfield(p.nii, 'NamedMap')
+        nams = cell(1, numel(p.nii.NamedMap));
+        for i = 1:numel(nams), nams{i} = p.nii.NamedMap{i}.MapName; end
+        a = listdlg('PromptString', 'Load "All" or one of the map:', ...
+            'SelectionMode', 'single', 'ListString', ['All' nams]);
+        if a==1, a = 'All'; else, a = a - 1; end
+    else
+        str = ['Input ''all'' or a number from 1 to ' num2str(nv)];
+        while 1
+            a = inputdlg(str, 'Volumes to load', 1, {'all'});
+            if isempty(a), return; end
+            a = strtrim(a{1});
+            if ~isstrprop(a, 'digit'), break; end
+            a = str2num(a);
+            if isequal(a,1:nv) || (numel(a)==1 && a>=1 && a<=nv && mod(a,1)==0)
+                break;
+            end
         end
     end
     if isnumeric(a) && numel(a)==1
     	singleVol = a;
         p.nii.img = p.nii.img(:,:,:,a);
-        if isfield(p.nii, 'imgG'), p.nii.imgG = p.nii.imgG(1,1,1,1,a,:); end
+        if isfield(p.nii, 'cii')
+            p.nii.cii{1} = p.nii.cii{1}(:,a);
+            p.nii.cii{2} = p.nii.cii{2}(:,a);
+        end
+        if isfield(p.nii, 'NamedMap')
+            try,   p.nii.NamedMap = p.nii.NamedMap(a); %#ok<*NOCOM>
+            catch, p.nii.NamedMap = p.nii.NamedMap(1);
+            end
+            try, p.map = p.nii.NamedMap{1}.map; end
+        end
         rg = get_range(p.nii);
     end
 end
@@ -1607,7 +1673,7 @@ if singleVol, niiName = [niiName '(' num2str(singleVol) ')']; end
 
 try
     checked = [0; hs.files.getCheckBoxListSelectedIndices+1];
-    mdl.insertElementAt(niiName, 0); pause(0.05); drawnow;
+    mdl.insertElementAt(niiName, 0);
     hs.files.setCheckBoxListSelectedIndices(checked);
     hs.files.setSelectedIndex(0); hs.files.updateUI;
 catch me
@@ -1617,10 +1683,9 @@ catch me
 end
 set(hs.add, 'UserData', pName);
 
-set_file([], [], fh);
 set_cdata(hs);
 set_xyz(hs);
-try, cii_view(hs); catch me, errordlg(me.message); end
+if isfield(p.nii, 'cii'), cii_view(hs); end
 
 %% Reorient 4x4 R
 function [R, perm, flp] = reorient(R, dim, leftHand)
@@ -1647,12 +1712,12 @@ R = R / rotM; % xform matrix after flip
 %% Load, re-orient nii, extract essential nii stuff
 % nii.img may be re-oriented, but nii.hdr is not touched
 function [p, frm, rg, dim] = read_nii(fname, ask_code, reOri)
+if nargin<2, ask_code = []; end
 if ischar(fname), p.nii = nii_tool('load', fname);
 else, p.nii = fname; fname = p.nii.hdr.file_name;
 end
-
-if p.nii.hdr.intent_code>=3000 && p.nii.hdr.intent_code<=3012 && ...
-        isfield(p.nii, 'ext') && any([p.nii.ext.ecode] == 32)
+c = p.nii.hdr.intent_code;
+if c>=3000 && c<=3012 && isfield(p.nii, 'ext') && any([p.nii.ext.ecode] == 32)
     p.nii = cii2nii(p.nii);
 end
 
@@ -1668,7 +1733,6 @@ if ndim>4 % 4+ dim, put all into dim4
     p.nii.img = reshape(p.nii.img, [dim size(p.nii.img, 8)]);
 end
 
-if nargin<2, ask_code = []; end
 [p.R, frm] = nii_xform_mat(p.nii.hdr, ask_code);
 dim = dim(1:3);
 p.pixdim = p.nii.hdr.pixdim(2:4);
@@ -1700,9 +1764,7 @@ if p.nii.hdr.scl_slope~=1 || p.nii.hdr.scl_inter~=0
 end
 
 % check if ROI labels available: the same file name with .txt extension
-if isfield(p.nii, 'labels')
-    p.labels = p.nii.labels;
-elseif p.nii.hdr.intent_code == 1002 % Label
+if c == 1002 % Label
     [pth, nam, ext] = fileparts(p.nii.hdr.file_name);
     nam1 = fullfile(pth, [nam '.txt']);
     if strcmpi(ext, '.gz') && ~exist(nam1, 'file')
@@ -1722,6 +1784,9 @@ elseif p.nii.hdr.intent_code == 1002 % Label
     end
 end
 rg = get_range(p.nii, isfield(p, 'labels'));
+if isfield(p.nii, 'NamedMap')
+    try, p.map = p.nii.NamedMap{1}.map; end
+end
 
 %% Return xform mat and form_code: form_code may have two if not to ask_code
 function [R, frm] = nii_xform_mat(hdr, ask_code)
@@ -1798,6 +1863,9 @@ function rg = get_range(nii, isLabel)
 if size(nii.img, 8)>2 || any(nii.hdr.datatype == [128 511 2304]) % RGB / RGBA
     if max(nii.img(:))>2, rg = [0 255]; else, rg = [0 1]; end
     return;
+elseif nii.hdr.cal_max~=0 && nii.hdr.cal_max>min(nii.img(:))
+    rg = [nii.hdr.cal_min nii.hdr.cal_max];
+    return;
 end
 
 img = nii.img(:,:,:,1);
@@ -1838,7 +1906,7 @@ if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
     delete(p.hsI);
     lut = hs.lut.UserData; % last lut
     if isempty(lut), lut = 2; end % default red
-    clr = lut2map(lut, hs); clr = clr(end,:);
+    clr = lut2map(p, hs.lutStr{lut}); clr = clr(end,:);
     cb = get(hs.hsI(1), 'ButtonDownFcn');
     for j = 1:3
         p.hsI(j) = quiver(hs.ax(j), 1, 1, 0, 0, 'Color', clr, ...
@@ -1851,7 +1919,7 @@ if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
         I = ones([d(1:3) 4], 'single');
         [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
         I = permute(I, [4 1 2 3]);
-        I = reshape(I, [4 prod(d(1:3))]);
+        I = reshape(I, 4, []);
         I = p.R0 \ (p.R * I) + 1;
         p.ivec = reshape(I(1:3,:)', d);
 
@@ -1878,7 +1946,7 @@ if any(abs(diff(hs.bg.pixdim))>1e-4) % non isovoxel background
 end
 
 if isfield(p, 'Rvec')
-    img = reshape(img, [prod(d(1:3)) d(4)]);
+    img = reshape(img, [], d(4));
     img = img * p.Rvec;
     img = reshape(img, d);
 end
@@ -1927,7 +1995,17 @@ for i = 1:3
 end
 
 %% Compute color map for LUT
-function map = lut2map(lut, hs)
+function map = lut2map(p, lutStr)
+persistent parula64;
+if isfield(p, 'map')
+    if isfield(p.nii, 'NamedMap')
+        try, map = p.nii.NamedMap{p.volume}.map; end
+    else, map = p.map;
+    end
+    return;
+end
+
+lut = p.lut;
 map = linspace(0,1,64)'*[1 1 1]; % gray
 if     lut == 1, return; % gray
 elseif lut == 2, map(:,2:3) = 0; % red
@@ -1946,10 +2024,13 @@ elseif lut == 10 % two-sided
     map = [map_neg(end:-1:1,:); map];
 elseif lut == 11, map(:,2:3) = 0; % vector lines
 elseif lut == 12 % parula not in old matlab, otherwise this can be omitted
-    fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
-    a = load(fname, 'parula'); map = a.parula;
+    if isempty(parula64)
+        fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
+        a = load(fname, 'parula'); parula64 = a.parula;
+    end
+    map = parula64;
 elseif lut < 26 % matlab LUT
-    map = feval(hs.lutStr{lut}, 64);
+    map = feval(lutStr, 64);
 elseif lut == 27 % phase3: red-yellow-green-yellow-red
     a = map(:,1);
     map(1:32,3) = 0; map(1:16,1) = 1; map(17:32,2) = 1;
@@ -1962,8 +2043,6 @@ elseif lut == 28 % phase6: red-yellow-green/violet-blue-cyan
     map(33:48,2) = 0; map(33:48,3) = 1; map(33:48,1) = a(64:-4:1);
     map(49:64,1) = 0; map(49:64,3) = 1; map(49:64,2) = a(1:4:64);
 elseif lut == 29 % RGB
-else % custom
-    map = hs.lutStr{lut};
 end
 
 %% Preference dialog
@@ -2140,7 +2219,7 @@ in = [repmat(in(1,:), [k(1) 1]); in; repmat(in(end,:), [k(1) 1])];
 in = [repmat(in(:,1), [1 k(2)])  in  repmat(in(:,end), [1 k(2)])];
 out = conv2(in, kernal, 'valid');
 
-%% Show ijk/xyz and value
+%% Show xyz and value
 function xyz = set_xyz(hs, I)
 if nargin<2
     for i=3:-1:1, I(i) = get(hs.ijk(i), 'Value'); end
@@ -2149,7 +2228,7 @@ end
 I = round(I);
 xyz = round(hs.bg.R * [I-1 1]');
 xyz = xyz(1:3);
-str = sprintf('(%g,%g,%g)=(%i,%i,%i): ', I, xyz);
+str = sprintf('(%i,%i,%i): ', xyz);
 
 for i = 1:hs.files.getModel.size % show top one first
     p = get_para(hs, i);
@@ -2179,7 +2258,13 @@ for i = 1:hs.files.getModel.size % show top one first
             labl = p.labels{val};
             str = sprintf('%s %s', str, labl);
             continue; % skip numeric val assignment
-        catch
+        end
+    end
+    if isfield(p.nii, 'NamedMap')
+        try
+            labl = p.nii.NamedMap{p.volume}.labels{val};
+            str = sprintf('%s %s', str, labl);
+            continue;
         end
     end
     
@@ -2410,36 +2495,41 @@ end
 function set_colorbar(hs)
 if strcmpi(get(hs.colorbar, 'Visible'), 'off'), return; end
 p = get_para(hs);
-if p.lut == 11, map = lut2map(hs.lut.UserData, hs);
-else, map = lut2map(p.lut, hs);
-end
+map = lut2map(p, hs.lutStr{p.lut});
 rg = sort([p.lb p.ub]);
+tickLoc = [0 0.5 1];
 if any(p.lut == 26:28)
     labls = [0 180 360];
-elseif p.lut~=10
+elseif p.lut==10
+    rg = sort(abs(rg));
+    labls = {num2str(-rg(2),'%.2g') num2str(rg(1),'+/-%.2g') num2str(rg(2),'%.2g')};
+elseif p.lut==numel(hs.lutStr) % custom
+    im = p.nii.img(:,:,:,p.volume);
+    im(isnan(im) | im==0) = [];
+    im = unique(im);
+    if max(im)<=size(map,1) && isequal(im, round(im)) % integer
+        try, map = map(im+1, :); rg = [im(1) im(end)]; end
+    end
+    labls = [rg(1) rg(2)];
+    tickLoc = [0 1];
+else
     if rg(2)<0, rg = rg([2 1]); end
     mn = str2double(num2str(mean(rg), '%.4g'));
     labls = [rg(1) mn rg(2)];
-else
-    rg = sort(abs(rg));
-    labls = {num2str(-rg(2),'%.2g') num2str(rg(1),'+/-%.2g') num2str(rg(2),'%.2g')};
 end
 % colormap in earlier matlab version changes values in colorbar.
 % So we have to set those values each time.
+colormap(hs.ax(end), map); % map must be double for old matlab
 % set(hs.colorbar, 'YTickLabel', labls); % new matlab
-colormap(hs.ax(end), map);
 set(get(hs.colorbar, 'Children'), 'YData', [0 1]); % Trick for old matlab
-set(hs.colorbar, 'YTickLabel', labls, 'YTick', [0 0.5 1], 'Ylim', [0 1]);
+set(hs.colorbar, 'YTickLabel', labls, 'YTick', tickLoc, 'Ylim', [0 1]);
 
 fh = hs.fig.UserData;
-if ishandle(fh) % surface
-    hs = guidata(fh);
-    iFile = hs.hsN.files.getSelectedIndex+1;
-    try, if isempty(hs.frame.UserData{iFile}), return; end; catch, return; end
-    colormap(hs.ax(end), map);
-    set(get(hs.colorbar, 'Children'), 'YData', [0 1]);
-    set(hs.colorbar, 'YTickLabel', labls, 'YTick', [0 0.5 1], 'Ylim', [0 1]);
-end
+if isempty(fh) || ~ishandle(fh) || ~isfield(p.nii, 'cii'), return; end
+hs = guidata(fh);
+colormap(hs.ax(end), map);
+set(get(hs.colorbar, 'Children'), 'YData', [0 1]);
+set(hs.colorbar, 'YTickLabel', labls, 'YTick', tickLoc, 'Ylim', [0 1]);
 
 %% return screen size in pixels
 function res = screen_pixels(id)
@@ -2488,7 +2578,7 @@ d(numel(d)+1:3) = 1; d = d(1:3);
 I = ones([d 4], 'single');
 [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
 I = permute(I, [4 1 2 3]);
-I = reshape(I, [4 prod(d)]); % ijk grids of target img
+I = reshape(I, 4, []); % ijk grids of target img
 I = inv(R) * R0 * I + 1; %#ok ijk+1 for mask
 I = round(I * 100) / 100;
 
@@ -2564,39 +2654,6 @@ for i = ix
         set([h(1,4) h(2,4)], 'YData', [c+g hs.dim(3)+1]);
     end
 end
-
-%% Switch display parameters to selected file
-function set_file(~, evt, fh)
-if ~isempty(evt) && evt.getValueIsAdjusting, return; end
-hs = guidata(fh);
-p = get_para(hs);
-
-nam = {'lb' 'ub' 'alpha' 'volume' 'lut' 'smooth' 'interp' };
-cb = cell(4,1);
-for j = 1:4 % avoid firing spinner callback
-    cb{j} = hs.(nam{j}).StateChangedCallback;
-    hs.(nam{j}).StateChangedCallback = '';
-end
-
-for j = 1:numel(nam)
-    set(hs.(nam{j}), 'Value', p.(nam{j}));
-end
-set(hs.lb.Model, 'StepSize', p.lb_step);
-set(hs.ub.Model, 'StepSize', p.ub_step);
-nVol = size(p.nii.img, 4);
-set(hs.volume, 'Enable', nVol>1, 'ToolTipText', ['Volume number, 1:' num2str(nVol)]);
-set(hs.volume.Model, 'Maximum', nVol);
-
-for j = 1:4 % restore spinner callback
-    hs.(nam{j}).StateChangedCallback = cb{j};
-end
-set_colorbar(hs);
-cii_view_cb([], [], 'colorbar', hs);
-
-off_on = {'off' 'on'};
-set(hs.interp, 'Enable', off_on{isfield(p, 'R0')+1});
-set(hs.overlay(1:4), 'Enable', off_on{(hs.files.getModel.size>1)+1}); % stack & Close overlays
-set(hs.overlay(5), 'Enable', off_on{(p.hsI(1) ~= hs.hsI(1))+1}); % Close overlay
 
 %% Duplicate image handles, inlcuding ButtonDownFcn for new matlab
 function h = copyimg(hs)
@@ -2730,36 +2787,37 @@ else
 end
 
 %% Return 3-layer RGB, called by set_cdata
-function [im, alfa] = lut2img(im, lut, rg, lutStr)
-if any(lut == 26:28)
+function [im, alfa] = lut2img(im, p, lutStr)
+rg = sort([p.lb p.ub]);
+if isfield(p.nii, 'NamedMap')
+    try, p.map = p.nii.NamedMap{p.volume}.map; end
+end
+if any(p.lut == 26:28)
     im = im(:,:,2) .* single(im(:,:,1)>min(abs(rg))); % mag as mask
-    rg = [0 1]; % disable later scaling
-elseif isnumeric(lutStr) % custom LUT
-    rg = [0 255]; % this seems right for aal and brodmann
 end
 if rg(2)<0 % asking for negative data
     rg = -rg([2 1]);
-    if lut~=10, im = -im; end
+    if p.lut~=10, im = -im; end
 end
-if lut == 10 % two-sided, store negative value
+
+alfa = single(0); % override for lut=10
+if p.lut == 10 % two-sided, store negative value
     rg = sort(abs(rg));
     im_neg = -single(im) .* (im<0);
     im_neg = (im_neg-rg(1)) / (rg(2)-rg(1));
     im_neg(im_neg>1) = 1; im_neg(im_neg<0) = 0;
     alfa = im_neg; % add positive part later
     im_neg = repmat(im_neg, [1 1 3]); % gray now
-else
-    alfa = single(0);
 end
 
-if lut ~= 29 % not forced into RGB
+if p.lut < 26 % no scaling for 3 phase LUTs, RGB, custom
     im = (im-rg(1)) / (rg(2)-rg(1));
     im(im>1) = 1; im(im<0) = 0;
     alfa = im + alfa;
-    im = repmat(im, [1 1 3]); % gray now
 end
+if p.lut ~= 29, im = repmat(im, [1 1 3]); end % gray now
 
-switch lut
+switch p.lut
     case 1 % gray do nothing
     case 2, im(:,:,2:3) = 0; % red
     case 3, im(:,:,[1 3]) = 0; % green
@@ -2779,7 +2837,7 @@ switch lut
         im_neg(:,:,1) = 0;
         a = im_neg(:,:,3); a(a==0) = 1; a = 1 - a; im_neg(:,:,3) = a;
         im = im + im_neg;
-    case 15 % hot
+    case 15 % hot, Matlab colormap can be omitted, but faster than mapping
         a = im(:,:,1); a = a/0.375; a(a>1) = 1; im(:,:,1) = a;
         a = im(:,:,2); a = a/0.375-1;
         a(a<0) = 0; a(a>1) = 1; im(:,:,2) = a;
@@ -2840,36 +2898,37 @@ switch lut
         a(b3 | b4) = 1;
         im(:,:,3) = a;
     case 29 % disp non-NIfTI RGB as RGB
-        if min(im(:)) < 0 % use abs if there is negative value
-            rg(1) = 0;
-            im = abs(im);
-        end
-        if max(im(:)) > 1
-            im = (im-rg(1)) / (rg(2)-rg(1));
-        end
-        im(im>1) = 1; im(im<0) = 0;
-        alfa = sum(im,3)/3;
+        im = abs(im); % e.g. DTI V1
+        if max(im(:)) > 1, im = im / 255; end % it should be unit8
+        alfa = sum(im,3) / 3;
     otherwise % parula(12), jet(13), hsv(14), bone(21), pink(23), custom
-        if lut <= 25
-            try
-                map = feval(lutStr, 256);
+        alfa = im(:,:,1);
+        if isfield(p, 'map') % custom
+            map = p.map;            
+        else
+            try, map = feval(lutStr, 256);
             catch me
-                if lut == 12 % parula is not in old matlab
-                    map = lut2map(lut);
-                else
-                    rethrow(me);
+                if p.lut == 12, map = lut2map(p); % parula for old matlab
+                else, rethrow(me);
                 end
             end
-            a = round(im(:,:,1) * size(map,1));
-        else % custom
-            map = lutStr; % LUT for custom actually
-            a = round(im(:,:,1) * (size(map,1)-1)) + 1; % 1st is bkgrnd
         end
-        
-        for j = 1:size(a,1)
-            for k = 1:size(a,2)
-                if a(j,k)>0, im(j,k,:) = map(a(j,k),:); end
-            end
+        if p.lut ~= 30 % normalized previously
+            a = floor(im(:,:,1) * (size(map,1)-1)) + 1; % 1st for bkgrnd
+        elseif max(p.nii.img(:)) <= size(map,1)
+            alfa = alfa / max(alfa(:));
+            a = round(im(:,:,1)) + 1; % custom or uint8, round to be safe
+        else
+            a = (im(:,:,1) - rg(1)) / (rg(2)-rg(1));
+            a(a<0) = 0 ; a(a>1) = 1;
+            alfa = a;
+            a = round(a * (size(map,1)-1)) + 1;
+        end
+        a(isnan(a)) = 1;
+        aa = a;
+        for i = 1:3
+            aa(:) = map(a, i);
+            im(:,:,i) = aa;
         end
 end
 
@@ -2882,7 +2941,7 @@ d = single(hdr.dim(2:4));
 I = ones([d 4], 'single');
 [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
 I = permute(I, [4 1 2 3]);
-I = reshape(I, [4 prod(d)]); % ijk in 4 by nVox
+I = reshape(I, 4, []); % ijk in 4 by nVox
 R = nii_xform_mat(hdr);
 I = R * I; % xyz in 4 by nVox
 
@@ -2911,18 +2970,19 @@ end
 function p = dispPara(p, luts)
 if nargin<2, luts = []; end
 p.show = true; % img on
-if any(p.nii.hdr.datatype == [32 1792]) % complex
+if isfield(p, 'map')
+    p.lut = 30; % numel(hs.lutStr)
+elseif any(p.nii.hdr.datatype == [32 1792]) % complex
     p.lut = 26; % phase
     p.lb = str2double(sprintf('%.2g', p.ub/2));
 elseif any(p.nii.hdr.intent_code == [1002 3007]) % Label
     p.lut = 24; % prism
 elseif p.nii.hdr.intent_code > 0 % some stats
     if p.lb < 0
-        p.lb = str2double(sprintf('%.2g', p.ub/2));
         p.lut = 10; % two-sided
     else
-        a = setdiff(7:8, luts); % red-yellow & blue-green
-        if isempty(a), a = 7; end % red-yellow
+        a = setdiff(8:9, luts); % red-yellow & blue-green
+        if isempty(a), a = 8; end % red-yellow
         p.lut = a(1);
     end
 elseif isempty(luts)
@@ -2984,102 +3044,122 @@ siz = siz / max(siz) * 800;
 
 %% Return nii struct from cii and gii
 function nii = cii2nii(nii)
-if any(nii.hdr.dim(7) == [91282 64984]) % HCP gray or cortex
-    fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
-    gii = load(fname, 'gii'); gii = gii.gii;
-else
-    [gii_nam, pth] = uigetfile([fileparts(nii.hdr.file_name) '/*.surf.gii'], ...
-        ['CIfTI needs corresponding GIfTI to map to NIfTI. ' ...
-        'Select un-inflated GIfTI as template for both hemispheres'], ...
-        'MultiSelect', 'on');
-    if isnumeric(gii_nam), gii_nam = [];
-    else, gii_nam = strcat([pth '/'], gii_nam);
-    end
-    if isempty(gii_nam), gii = [];
-    else
-        gii_nam = cellstr(gii_nam);
-        for i = 1:numel(gii_nam)
-            a = read_gifti(gii_nam{i});
-            gii.DataSpace = a.DataSpace;
-            if     strcmp(a.AnatomicalStructurePrimary, 'CortexLeft')
-                gii.Vertices{1} = a.Vertices; gii.Faces{1} = a.Faces;
-            elseif strcmp(a.AnatomicalStructurePrimary, 'CortexRight')
-                gii.Vertices{2} = a.Vertices; gii.Faces{2} = a.Faces;
-            end
-        end
-    end
-end
+persistent gii; % Anatomical surface
+if nargin<1, nii = gii; return; end
 
 ind = find([nii.ext.ecode]==32, 1);
 xml = nii.ext(ind).edata_decoded;
+expr = '(?<=((SurfaceNumberOfVertices)|(SurfaceNumberOfNodes))=").*?(?=")';
+nVer = str2double(regexp(xml, expr, 'match', 'once'));
+if isempty(nVer), error('SurfaceNumberOfVertices not found'); end
+if isempty(gii), gii = get_surfaces(nVer, 'Anatomical'); end
+if isempty(gii) || numel(gii.Vertices) ~=2, error('Not valid GIfTI'); end
+if nVer ~= size(gii.Vertices{1},1), error('GIfTI and CIfTI don''t match'); end
+
+dim = nii.hdr.dim(2:8); dim(dim<1) = 1;
+if any(dim(5) == [91282 64984 59412]) % this is ugly
+    dim(5:6) = dim([6 5]);
+    nii.img = reshape(nii.img, dim); % error?
+end
+
 dim = gii_attr(xml, 'VolumeDimensions', 1);
-if isempty(dim), dim = [91 109 91]; end % 2x2x2 mm
+if isempty(dim), dim = [91 109 91]; end % HCP 2x2x2 mm
 TR = gii_attr(xml, 'SeriesStep', 1);
 if ~isempty(TR), nii.hdr.pixdim(5) = TR; end
 mat = gii_element(xml, 'TransformationMatrixVoxelIndicesIJKtoXYZ', 1);
 
-nVol = nii.hdr.dim(6);
-nii.hdr.dim = [(nVol>1)+3 dim nVol 1 1 1];
 if isempty(mat) % some cii miss 'mat' and 'dim'
-    mat = [-2 0 0 90; 0 2 0 -126; 0 0 2 -72; 0 0 0 1]; % HCP template
-    nii.hdr.sform_code = 0;
+    mat = [-2 0 0 90; 0 2 0 -126; 0 0 2 -72; 0 0 0 1]; % best guess from HCP
 else
     pow = gii_attr(xml, 'MeterExponent', 1);
     mat(1:3,:) = mat(1:3,:) / 10^(3+pow);
-    nii.hdr.sform_code = gii.DataSpace;
 end
+nii.hdr.sform_code = gii.DataSpace;
 nii.hdr.srow_x = mat(1,:);
 nii.hdr.srow_y = mat(2,:);
 nii.hdr.srow_z = mat(3,:);
 nii.hdr.pixdim(2:4) = sqrt(sum(mat(1:3,1:3).^2));
 
-nii.imgG = nii.img;
-nii.img = zeros([dim nVol], class(nii.imgG));
+nVol = size(nii.img, 5);
+imgG = permute(nii.img, [6 5 1:4]);
+nii.img = zeros([prod(dim) nVol], class(imgG));
 
-iMdl = regexp(xml, '<BrainModel');
-for j = 1:numel(iMdl)
-    c = regexp(xml(iMdl(j):end), '.*?(?=</BrainModel>)', 'match', 'once');
-    offset = gii_attr(c, 'IndexOffset', 1); % 0-based
+iMdl = regexp(xml, '<BrainModel[\s>]'); iMdl(end+1) = numel(xml);
+for j = 1:numel(iMdl)-1
+    c = xml(iMdl(j):iMdl(j+1));
+    offset = gii_attr(c, 'IndexOffset', 1);
     typ = gii_attr(c, 'ModelType');
     if strcmp(typ, 'CIFTI_MODEL_TYPE_SURFACE')
-        if isempty(gii) || isempty(mat), continue; end % give up if no gii
         a = gii_attr(c, 'BrainStructure');
         ig = find(strcmp(a, {'CIFTI_STRUCTURE_CORTEX_LEFT' 'CIFTI_STRUCTURE_CORTEX_RIGHT'}));
         if isempty(ig), warning('Unknown BrainStructure: %s', a); continue; end
-        if numel(gii.Vertices)<ig || isempty(gii.Vertices{ig}), continue; end
-        v = gii.Vertices{ig}'; v(4,:) = 1;
-        v = round(mat \ v) + 1; %ijk 1-based
-        if gii_attr(c, 'SurfaceNumberOfVertices', 1) ~= size(v,2)
-            fprintf(2, 'CIfTI and GIfTI not match\n'); continue;
-        end
         ind = gii_element(c, 'VertexIndices', 1) + 1;
-        for i = 1:numel(ind)
-            nii.img(v(1,ind(i)), v(2,ind(i)), v(3,ind(i)), :) = nii.imgG(1,1,1,1,:, offset+i);
-        end
+        if isempty(ind), ind = 1:gii_attr(c, 'IndexCount', 1); end
+        nii.cii{ig} = zeros(nVer, nVol, 'single');
+        nii.cii{ig}(ind,:) = imgG((1:numel(ind))+offset, :);
     elseif strcmp(typ, 'CIFTI_MODEL_TYPE_VOXELS')
         a = gii_element(c, 'VoxelIndicesIJK', 1) + 1;
-        for i = 1:size(a,1)
-            nii.img(a(i,1), a(i,2), a(i,3), :) = nii.imgG(1,1,1,1,:, offset+i);
-        end
+        a = sub2ind(dim, a(:,1), a(:,2), a(:,3));
+        nii.img(a, :) = imgG((1:numel(a))+offset, :);
     end
 end
 
-% <Label Key="0" Red="1" Green="1" Blue="1" Alpha="0">???</Label>
-tok = regexp(xml, '<Label Key="(\d+)".*?>(.*?)</Label>', 'tokens');
-if ~isempty(tok)
-    n = max(nii.img(:));
-    nii.labels = cell(1, n);
-    for i = 1:numel(tok)
-        j = str2double(tok{i}{1});
-        if j<1 || j>n, continue; end
-        nii.labels{j} = tok{i}{2};
-    end
+for ig = 1:2 % map surface back to volume
+    v = gii.Vertices{ig}'; v(4,:) = 1;
+    v = round(mat \ v) + 1; % ijk 1-based
+    ind = sub2ind(dim, v(1,:), v(2,:), v(3,:));
+    nii.img(ind, :) = nii.cii{ig};
 end
+nii.img = reshape(nii.img, [dim nVol]);
 nii = nii_tool('update', nii);
-if ~isempty(gii), nii.gii = gii; end
 
-%% Return gii struct with DataSpace, Vertices (in mm) and Faces.
-function gii = read_gifti(fname)
+expr = '<Label\s+Key="(.*?)"\s+Red="(.*?)"\s+Green="(.*?)"\s+Blue="(.*?)".*?>(.*?)</Label>';
+ind = regexp(xml, '<NamedMap'); ind(end+1) = numel(xml);
+for k = 1:numel(ind)-1
+    nii.NamedMap{k}.MapName = gii_element(xml(ind(k):ind(k+1)), 'MapName');
+    tok = regexp(xml(ind(k):ind(k+1)), expr, 'tokens');
+    if numel(tok)<2, continue; end
+    tok = reshape([tok{:}], 5, [])'; % Key R G B nam
+    a = str2double(tok(:, 1:4));
+    nii.NamedMap{k}.map(a(:,1)+1, :) = a(:,2:4);
+    if a(1,1) == 0 % key="0"
+        nii.NamedMap{k}.labels(a(2:end, 1)) = tok(2:end, 5); % drop Key="0"
+    else
+        nii.NamedMap{k}.map = [0 0 0; nii.NamedMap{k}.map];
+        nii.NamedMap{k}.labels(a(:, 1)) = tok(:, 5);
+    end
+end
+
+%% Return gii for both hemesperes
+function gii = get_surfaces(nVer, surfType)
+persistent pth;
+if nargin>1 && strcmpi(surfType, 'Anatomical') && nVer == 32492 % HCP 2mm surface
+    fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat');
+    a = load(fname, 'gii'); gii = a.gii;
+    return;
+end
+if nargin>1, surfType = [surfType ' ']; else, surfType = ''; end
+prompt = ['Select ' surfType 'GIfTI surface files for both hemispheres'];
+if isempty(pth), pth = pwd; end
+[nam, pth] = uigetfile([pth '/*.surf.gii'],  prompt, 'MultiSelect', 'on');
+if isnumeric(nam), gii = []; return; end
+nam = cellstr(strcat([pth '/'], nam));
+for i = 1:numel(nam)
+    a = read_gii(nam{i});
+    if ~isempty(surfType) && ~strcmpi(surfType, a.GeometryType)
+        error('Surface is not of required type: %s', surfType);
+    end
+    gii.DataSpace = a.DataSpace;
+    if all(a.Vertices(:,3)==0), a.Vertices = a.Vertices(:,[3 1 2]); end % flat
+    if     strcmp(a.AnatomicalStructurePrimary, 'CortexLeft')
+        gii.Vertices{1} = a.Vertices; gii.Faces{1} = a.Faces;
+    elseif strcmp(a.AnatomicalStructurePrimary, 'CortexRight')
+        gii.Vertices{2} = a.Vertices; gii.Faces{2} = a.Faces;
+    end
+end
+
+%% Return gii struct with DataSpace, Vertices and Faces.
+function gii = read_gii(fname)
 xml = fileread(fname); % text file basically
 for i = regexp(xml, '<DataArray[\s>]') % often 2 of them
     c = regexp(xml(i:end), '.*?</DataArray>', 'match', 'once');
@@ -3102,9 +3182,9 @@ for i = regexp(xml, '<DataArray[\s>]') % often 2 of them
 
     Encoding = gii_attr(c, 'Encoding');
     if any(strcmp(Encoding, {'Base64Binary' 'GZipBase64Binary'}))
+        % Data = matlab.net.base64decode(Data); % since 2016b
         Data = javax.xml.bind.DatatypeConverter.parseBase64Binary(Data);
         Data = typecast(Data, 'uint8');
-        % Data = matlab.net.base64decode(Data); % since 2016b
         if strcmp(Encoding, 'GZipBase64Binary') % HCP uses this
             Data = nii_tool('LocalFunc', 'gunzip_mem', Data);
         end
@@ -3168,215 +3248,253 @@ if nargin>2 && isnum, val = str2num(val); end
 
 %% Return MetaData value for cii/gii 'Name'
 function val = gii_meta(ch, key)
-val = regexp(ch, ['(?<=' key '.*?<Value>).*?(?=</Value>)'], 'match', 'once');
+val = regexp(ch, ['(?<=>' key '<.*?<Value>).*?(?=</Value>)'], 'match', 'once');
 
 %% Open surface view or add cii to it
 function cii_view(hsN)
-p = get_para(hsN, 1); % top one just opened or added in nii_viewer
-if ~isfield(p.nii, 'gii'), return; end
-cii = cii_index(p.nii);
-
-fh = figure(hsN.fig.Number+100);
-if strncmp(get(fh,'Name'), 'cii_view', 8) % figure exists
-    hs = guidata(fh);
-else % create surface figure
-    v = p.nii.gii.Vertices{1};
-    hs.nVertices = [cii.SurfaceNumberOfVertices];
-    if hs.nVertices(1) ~= size(v,1)
-        close(fh); error('GIfTI and CIfTI not match');
-    end
-    hs.axisOffset = (max(v) + min(v)) / 2;
-    v = bsxfun(@minus, v, hs.axisOffset); % center it for rotation
-    lim = [min(v); max(v)]';
-    
-    set(fh, 'Name', ['cii_view: ' formcode2str(p.nii.gii.DataSpace) ], ...
-        'NumberTitle', 'off', 'MenuBar', 'none', 'Renderer', 'opengl');
-	hs.frame = uipanel('Parent', fh, 'Units', 'Normalized', 'Position', [0 0 1 1], ...
-        'BorderType', 'none'); % to control background color
-    if isnumeric(fh)
-        fh = handle(fh);
-        hs.frame = handle(hs.frame);
-    end
-
-    fh.Position(3:4) = [1 lim(3,2)/lim(2,2)] * 600;
-    srn = get(0, 'MonitorPositions');
-    dz = srn(1,4)-60 - sum(fh.Position([2 4]));
-    if dz<0, fh.Position(2) = fh.Position(2) + dz; end
-
-    im = ones(size(v,1), 1, 'single') * 0.7;
-    hs.ax(1) = axes('Position', [0.01 0.51 0.45 0.5], 'Parent', hs.frame);
-    patch('Parent', hs.ax(1), 'Faces', p.nii.gii.Faces{1}+1, 'Vertices', v, ...
-        'FaceVertexCData', im, 'FaceColor', 'interp', 'EdgeColor', 'none');
-    set(hs.ax(1), 'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:));
-    axis equal; axis off;
-    camlight; material dull;
-    try, lighting gouraud; catch, lighting phong; end %#ok<*NOCOM>
-    
-    hs.ax(2) = copyobj(hs.ax(1), hs.frame); % copy axis and patch
-    set(hs.ax(2), 'Position', [0.01 0.01 0.45 0.5]);
-    
-    v = p.nii.gii.Vertices{2};
-    if hs.nVertices(2) ~= size(v,1)
-        close(fh); error('GIfTI and CIfTI not match');
-    end
-    hs.axisOffset(2,:) = (max(v) + min(v)) / 2;
-    v = bsxfun(@minus, v, hs.axisOffset(2,:));
-    lim = [min(v); max(v)]';
-    
-    hs.ax(3) = copyobj(hs.ax(1), hs.frame);
-    set(hs.ax(3), 'Position', [0.47 0.5 0.45 0.5], ...
-    	'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:));
-    
-    hs.ax(4) = copyobj(hs.ax(3), hs.frame);
-    set(hs.ax(4), 'Position', [0.47 0.01 0.45 0.5]);
-    
-    hs.ax(5) = axes('Position', [0.92 0.1 0.08 0.8], 'Ylim', [0 1], ...
-        'Visible', 'off', 'Parent', hs.frame);
-    colorbar('Location', 'East', 'Units', 'Normalized', 'HitTest', 'off');
-    hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); % trick for early matlab
+fh = hsN.fig.UserData;
+if isempty(fh) || ~ishandle(fh) % create surface figure
+    fh = figure(hsN.fig.Number+100);
+    set(fh, 'NumberTitle', 'off', 'MenuBar', 'none', 'Renderer', 'opengl', ...
+        'Color', 'k', 'HandleVisibility', 'Callback', 'InvertHardcopy', 'off');
+    if isnumeric(fh), fh = handle(fh); end
 
     cMenu = uicontextmenu('Parent', fh);
     uimenu(cMenu, 'Label', 'Reset view', 'Callback', {@cii_view_cb 'reset'});
+    uimenu(cMenu, 'Label', 'Zoom in' , 'Callback', {@cii_view_cb 'zoomG'});
+    uimenu(cMenu, 'Label', 'Zoom out', 'Callback', {@cii_view_cb 'zoomG'});
+    uimenu(cMenu, 'Label', 'Change cortex color', 'Callback', {@cii_view_cb 'cortexColor'}, 'Separator', 'on');
+    uimenu(cMenu, 'Label', 'Change surface', 'Callback', {@cii_view_cb 'changeSurface'});
+    saveAs = findobj(hsN.fig, 'Type', 'uimenu', 'Label', 'Save figure as');
+    m = copyobj(saveAs, cMenu);
+    set(m, 'Separator', 'on');
+    m = get(m, 'Children'); delete(m(1:3)); m = m(4:end); % pdf/eps etc too slow
+    set(m, 'Callback', {@nii_viewer_cb 'save' hsN.fig});
     if ispc || ismac
         uimenu(cMenu, 'Label', 'Copy figure', 'Callback', {@nii_viewer_cb 'copy' hsN.fig});
     end
-    saveAs = findobj(hsN.fig, 'Type', 'uimenu', 'Label', 'Save figure as');
-    m = copyobj(saveAs, cMenu);
-    m = get(m, 'Children'); delete(m(1:3)); m = m(4:end); % pdf/eps etc too slow
-    set(m, 'Callback', {@nii_viewer_cb 'save' hsN.fig});
-    set(hs.frame, 'UIContextMenu', cMenu);
+    set(fh, 'UIContextMenu', cMenu);
     
-    for i = 1:4
-        hs.patch(i) = findobj(hs.ax(i), 'Type', 'Patch');
-        set(hs.patch(i), 'ButtonDownFcn', {@cii_view_cb 'buttonDownPatch'}, ...
-            'UIContextMenu', get(hs.frame, 'UIContextMenu'));
-        hs.light(i) = findobj(hs.ax(i), 'Type', 'light');
+    r = 0.96; % width of two columns, remaining for colorbar
+    pos = [0 1 r 1; 0 0 r 1; r 1 r 1; r 0 r 1] / 2;
+    gii = cii2nii(); % get buffered Anatomical gii
+    for ig = 1:2
+        v = gii.Vertices{ig};
+        lim = [min(v)' max(v)'];
+        im = ones(size(v,1), 3, 'single') * 0.667;
+        for i = ig*2+[-1 0]
+            hs.ax(i) = axes('Parent', fh, 'Position', pos(i,:), 'CameraViewAngle', 6.8);
+            axis vis3d; axis equal; axis off;
+            set(hs.ax(i), 'XLim', lim(1,:), 'YLim', lim(2,:), 'ZLim', lim(3,:));
+            hs.patch(i) = patch('Parent', hs.ax(i), 'EdgeColor', 'none', ...
+                'Faces', gii.Faces{ig}+1, 'Vertices', v, ...
+                'FaceVertexCData', im, 'FaceColor', 'interp', 'FaceLighting', 'gouraud');
+            hs.light(i) = camlight('infinite'); material dull;
+        end
     end
-    set(hs.patch(3:4), 'Faces', p.nii.gii.Faces{2}+1, 'Vertices', v);
+    set(hs.patch, 'ButtonDownFcn', {@cii_view_cb 'buttonDownPatch'}, 'UIContextMenu', cMenu);
     
-    set(fh, 'WindowButtonDownFcn', {@cii_view_cb 'buttonDown'}, ...
-            'WindowKeyPressFcn', @(h,~)figure(h), ...
-            'WindowButtonUpFcn',  {@cii_view_cb 'buttonUp'}, ...
-            'WindowButtonMotionFcn', {@cii_view_cb 'buttonMotion'}, ...
-            'HandleVisibility', 'Callback', ...
-            'UserData', struct('xy', [], 'xyz', [], 'deg', [-90 0]));
+    hs.ax(5) = axes('Position', [r 0.1 1-r 0.8], 'Visible', 'off', 'Parent', fh);
+    try
+        hs.colorbar = colorbar(hs.ax(5), 'PickableParts', 'none');
+    catch % for early matlab
+        colorbar('peer', hs.ax(5), 'Units', 'Normalized', 'HitTest', 'off');
+        hs.colorbar = findobj(fh, 'Tag', 'Colorbar'); 
+    end
+    set(hs.colorbar, 'Location', 'East', 'Visible', get(hsN.colorbar, 'Visible'));
+            
+    fh.Position(3:4) = [1/r diff(lim(3,:))/diff(lim(2,:))] * 600;
+    srn = get(0, 'MonitorPositions');
+    dz = srn(1,4)- 60 - sum(fh.Position([2 4]));
+    if dz<0, fh.Position(2) = fh.Position(2) + dz; end
+
+    fh.ResizeFcn           = {@cii_view_cb 'resizeG'};
+    fh.WindowButtonUpFcn   = {@cii_view_cb 'buttonUp'};
+    fh.WindowButtonDownFcn = {@cii_view_cb 'buttonDown'};
+    fh.WindowButtonMotionFcn={@cii_view_cb 'buttonMotion'};
+    fh.WindowKeyPressFcn   = {@cii_view_cb 'keyFcn'};
+    fh.UserData = struct('xy', [], 'xyz', [], 'hemi', [], 'deg', [-90 0], ...
+                         'color', [1 1 1]*0.667);
     hsN.fig.UserData = fh;
-    hs.frame.UserData = cell(1, hsN.files.getModel.size-1);
+    hs.gii = gii.Vertices;
     hs.fig = fh;
     hs.hsN = hsN;
     guidata(fh, hs);
     set_cii_view(hs, [-90 0]);
+    try % drawnow then set manual, not exist for earlier Matlab
+        set(hs.patch, 'VertexNormalsMode', 'auto');
+        drawnow; set(hs.patch, 'VertexNormalsMode', 'manual'); % faster update
+    end
 end
 
-if ~isequal(hs.nVertices, [cii.SurfaceNumberOfVertices]) % useful for add overlay
-    error('GIfTI and CIfTI not match');
-end
-hs.frame.UserData = [{cii} hs.frame.UserData]; % store cii data
 set_colorbar(hsN);
-cii_view_cb(fh, [], 'lb', hsN);
-cii_view_cb(fh, [], 'background', hsN);
+cii_view_cb(fh, [], 'volume');
+cii_view_cb(fh, [], 'background');
 
 %% cii_view callbacks 
-function cii_view_cb(h, ev, cmd, hsN)
-if isempty(h)
-    try, h = hsN.fig.UserData; end
-    if isempty(h) || ~ishandle(h), return; end
-end
+function cii_view_cb(h, ev, cmd)
+if isempty(h) || ~ishandle(h), return; end
 hs = guidata(h);
 switch cmd
     case 'buttonMotion' % Rotate gii and set light direction
-        xy = hs.fig.UserData.xy;
-        if isempty(xy), return; end % button not down
-        xy = get(hs.fig, 'CurrentPoint') - xy;
-        d = hs.fig.UserData.deg - xy ./ [1 2]; % /2 less sensitive for elevation
+        if isempty(hs.fig.UserData.xy), return; end % button not down
+        d = get(hs.fig, 'CurrentPoint') - hs.fig.UserData.xy; % location change
+        d = hs.fig.UserData.deg - d; % new azimuth and elevation
         set_cii_view(hs, d);
         hs.fig.UserData.xyz = []; % so not set cursor in nii_viewer
-        return;
-    case 'buttonDownPatch' % get button xyz: work only for later Matlab
-        if isempty(ev) || ev.Button ~= 1, return; end % old Matlab || button 2 
-        isRight = any(get(h, 'Parent') == hs.ax(3:4));
-        hs.fig.UserData.xyz = ev.IntersectionPoint + hs.axisOffset(isRight+1,:);
-        return;
+    case 'buttonDownPatch' % get button xyz
+        if ~strcmpi(hs.fig.SelectionType, 'normal') % button 1 only
+            hs.fig.UserData.xyz = []; return; 
+        end
+        hs.fig.UserData.hemi = 1 + any(get(h, 'Parent') == hs.ax(3:4));
+        try,   hs.fig.UserData.xyz = ev.IntersectionPoint;
+        catch, hs.fig.UserData.xyz = get(gca, 'CurrentPoint'); % old Matlab
+        end
     case 'buttonDown' % figure button down: prepare for rotation
-        if ~strcmpi(hs.fig.SelectionType, 'normal'), return; end % button 1 only
-        [az, el] = view(hs.ax(1));
-        hs.fig.UserData.deg = [az el];
+        if ~strcmpi(hs.fig.SelectionType, 'normal'), return; end % not button 1
         hs.fig.UserData.xy = get(hs.fig, 'CurrentPoint');
-        return;
+        hs.fig.UserData.deg = get(hs.ax(1), 'View');
     case 'buttonUp' % set cursor in nii_viewer
-        hs.fig.UserData.xy = []; % stop buttonMotion
-        if isempty(hs.fig.UserData.xyz), return; end
-        c = round(hs.hsN.bg.Ri * [hs.fig.UserData.xyz(:); 1]) + 1;
+        hs.fig.UserData.xy = []; % disable buttonMotion
+        xyz = hs.fig.UserData.xyz;
+        if isempty(xyz), return; end
+        ig = hs.fig.UserData.hemi;
+        v = get(hs.patch(ig*2), 'Vertices');
+        
+        % xyz = get(gca, 'CurrentPoint'); % test
+        if size(xyz,1) > 1 % for Matlab without IntersectionPoint
+            ln = [linspace(xyz(1,1), xyz(2,1), 200);
+                  linspace(xyz(1,2), xyz(2,2), 200);
+                  linspace(xyz(1,3), xyz(2,3), 200)]; % line between box edges
+            ln = permute(ln, [3 1 2]);
+            d = sum(bsxfun(@minus, v, ln) .^ 2, 2); % distance squared
+            a = permute(min(d), [3 1 2]); % min along the line
+            a = sum([a a([2:end end]) a([1 1:end-1])], 2) / 3; % smooth
+            i = find((diff(a)>0) & (a(1:end-1)<8), 1); % find 1st valley
+            i = max(1, i-1);
+            d = d(:,:, i:i+3); % use a couple of samples along the line
+            [~, ind] = min(d(:));
+            [iv, ~, ~] = ind2sub(size(d), ind);
+            xyz = v(iv,:); % may find 2nd intersection for Anatomical surface
+            % disp(xyz-hs.fig.UserData.xyz);
+            if ~isequal(v, hs.gii{ig}), xyz = hs.gii{ig}(iv,:); end        
+        elseif ~isequal(v, hs.gii{ig})
+            v = bsxfun(@minus, v, xyz);
+            [~, iv] = min(sum(v.^2, 2));
+            xyz = hs.gii{ig}(iv,:);
+        end
+        c = round(hs.hsN.bg.Ri * [xyz(:); 1]) + 1;
         for i = 1:3, hs.hsN.ijk(i).setValue(c(i)); end
-        return;
     case 'reset'
         set_cii_view(hs, [-90 0]);
-        return;
+    case 'cortexColor'
+        c = uisetcolor(hs.fig.UserData.color, 'Set cortical surface color');
+        if numel(c) ~= 3, return; end
+        hs.fig.UserData.color = c;
+        set_cdata_cii(hs);
+    case 'changeSurface'
+        gii = get_surfaces(size(hs.gii{1}, 1));
+        if isempty(gii), return; end
+        if size(gii.Vertices{1},1) ~= size(hs.gii{1},1)
+            errordlg('GIfTI has different number of vertices from CIfTI');
+            return;
+        end
+        ind = [isequal(gii.Vertices{1}, get(hs.patch(1), 'Vertices')) ...
+               isequal(gii.Vertices{2}, get(hs.patch(3), 'Vertices'))];
+        if all(ind), return; end % no change
 
+        for i = find(~ind)
+            ip = i*2+(-1:0);
+            set(hs.patch(ip), 'Vertices', gii.Vertices{i}, 'Faces', gii.Faces{i}+1);
+            lim = [min(gii.Vertices{i})' max(gii.Vertices{i})'];
+            set(hs.ax(ip), 'ZLim', lim(3,:), 'YLim', lim(2,:));
+            try, set(hs.ax(ip), 'XLim', lim(1,:)); end % avoid error for flat
+        end
+        
+        set_cdata_cii(hs);
+        try
+            set(hs.patch, 'VertexNormalsMode', 'auto');
+            drawnow; set(hs.patch, 'VertexNormalsMode', 'manual');
+        end
+    case 'resizeG'
+        sz = getpixelposition(h); % asked position
+        cb = hs.fig.ResizeFcn;
+        hs.fig.ResizeFcn = []; drawnow; % avoid weird effect
+        r = get(hs.ax(5), 'Position');
+        r = diff(get(hs.ax(1), 'ZLim')) / diff(get(hs.ax(1), 'YLim')) * r(1);
+        if sz(3)/sz(4) < r, sz = sz(3) * [1 r];
+        else, sz = sz(4) * [1/r 1];
+        end
+        hs.fig.Position(3:4) = sz;
+        hs.fig.ResizeFcn = cb;
+    case 'zoomG'
+        va = get(hs.ax(1), 'CameraViewAngle'); 
+        if strcmp(get(h, 'Label'), 'Zoom in'), va = va * 0.9;
+        else, va = va * 1.1;
+        end
+        set(hs.ax(1:4), 'CameraViewAngle', va);
+    case 'keyFcn'
+        if any(strcmp(ev.Key, ev.Modifier)), return; end % only modifier
+        figure(hs.fig); % avoid focus to Command Window
+        if ~isempty(intersect({'control' 'command'}, ev.Modifier))
+            if any(strcmp(ev.Key, {'add' 'equal'}))
+                h = findobj(hs.fig, 'Type', 'uimenu', 'Label', 'Zoom in');
+                cii_view_cb(h, [], 'zoomG');
+            elseif any(strcmp(ev.Key, {'subtract' 'hyphen'}))
+                h = findobj(hs.fig, 'Type', 'uimenu', 'Label', 'Zoom out');
+                cii_view_cb(h, [], 'zoomG');
+            elseif any(strcmp(ev.Key, {'a' 'r'}))
+                figure(hs.hsN.fig);
+                key = java.awt.event.KeyEvent.(['VK_' upper(ev.Key)]);
+                java.awt.Robot().keyPress(key);
+                java.awt.Robot().keyRelease(key);
+            end
+        elseif strcmp(ev.Key, 'space')
+            KeyPressFcn(hs.hsN.fig, ev);
+        end
+        
     % Rest cases not called by surface callback, but from nii_viewer_cb
-    case 'stack' % nii_viewer_cb pass order to here
-        hs.frame.UserData = hs.frame.UserData(ev);
-    case 'closeAll' % close all overlays
-        hs.frame.UserData = cell(1); % nii_viewer background left
-    case 'close'
-        hs.frame.UserData(ev) = [];
+    case {'lb' 'ub' 'lut' 'toggle' 'alpha' 'volume' 'stack' 'close' 'closeAll'}
+        set_cdata_cii(hs);
+        if strcmp(cmd, 'volume'), cii_view_cb(h, [], 'file'); end
+    case 'file' % update MapName if available
+        p = get_para(hs.hsN);
+        try, mName = p.nii.NamedMap{p.volume}.MapName; catch, mName = ''; end
+        frm = formcode2str(p.nii.hdr.sform_code);
+        hs.fig.Name = ['cii_view - ' mName ' (' frm ')'];
     case 'background'
-        clr = hsN.frame.BackgroundColor;
-        hs.frame.BackgroundColor = clr;
+        clr = hs.hsN.frame.BackgroundColor;
+        hs.fig.Color = clr;
         set(hs.colorbar, 'EdgeColor', 1-clr);
-        return;
     case 'colorbar' % colorbar on/off
-        set(hs.colorbar, 'Visible', get(hsN.colorbar, 'Visible'));
-        return;
-    case {'lb' 'ub' 'lut' 'toggle' 'alpha' 'volume'} % update img only
-    otherwise, return; % ignore other cmd
+        set(hs.colorbar, 'Visible', get(hs.hsN.colorbar, 'Visible'));
+    otherwise, return; % ignore other nii_viewer_cb cmd
 end
 
-% compute alpha blending for all images
-imP{1} = ones(hs.nVertices(1), 3, 'single')*0.7; % 0.7 background
-imP{2} = ones(hs.nVertices(2), 3, 'single')*0.7;
-for j = numel(hs.frame.UserData):-1:1 % files
-    cii = hs.frame.UserData{j};
-    if isempty(cii), continue; end
-    p = get_para(hsN, j);
-    if ~p.show, continue; end
-    rg = sort([p.lb p.ub]);
+%% set surface FaceVertexCData
+function set_cdata_cii(hs)
+imP{1} = ones(size(hs.gii{1},1), 1, 'single') * hs.fig.UserData.color;
+imP{2} = ones(size(hs.gii{2},1), 1, 'single') * hs.fig.UserData.color;
+for j = hs.hsN.files.getModel.size:-1:1
+    p = get_para(hs.hsN, j);
+    if ~p.show || ~isfield(p.nii, 'cii'), continue; end
     for i = 1:2 % hemispheres
-        img = zeros(hs.nVertices(i), 1, 'single'); % or NaN?
-        ind = cii(i).VertexIndices;
-        img(ind+1) = p.nii.imgG(1,1,1,1, p.volume, cii(i).IndexOffset+(1:numel(ind)));
-        [im, alfa] = lut2img(img, p.lut, rg, hs.hsN.lutStr{p.lut});
+        [im, alfa] = lut2img(p.nii.cii{i}(:, p.volume), p, hs.hsN.lutStr{p.lut});
         alfa = p.alpha * single(alfa>0);
         im = permute(im, [1 3 2]); % nVertices x 3
-        imP{i} = bsxfun(@times, 1-alfa, imP{i}) + bsxfun(@times, im, alfa);
+        im = bsxfun(@times, im, alfa);
+        imP{i} = bsxfun(@times, imP{i}, 1-alfa) + im;
     end
 end
 set(hs.patch(1:2), 'FaceVertexCData', imP{1});
 set(hs.patch(3:4), 'FaceVertexCData', imP{2});
+% tic; drawnow; toc
 
 %% set surface view
 function set_cii_view(hs, ae)
 ae = [ae; ae(1)+180 -ae(2); -ae(1) ae(2); -ae(1)-180 -ae(2)];
 for i = 1:4
-    view(hs.ax(i), ae(i,:));
+    set(hs.ax(i), 'View', ae(i,:));
     camlight(hs.light(i), 'headlight');
-end
-
-%% Return cii surface parameters from nii.ext
-function cii = cii_index(nii)
-cii = struct;
-ind = find([nii.ext.ecode]==32, 1);
-if isempty(ind), return; end
-xml = nii.ext(ind).edata_decoded;
-
-for j = regexp(xml, '<BrainModel')
-    c = regexp(xml(j:end), '.*?(?=</BrainModel>)', 'match', 'once');
-    ind = find(strcmp(gii_attr(c, 'BrainStructure'), ...
-            {'CIFTI_STRUCTURE_CORTEX_LEFT' 'CIFTI_STRUCTURE_CORTEX_RIGHT'}));
-    if isempty(ind), continue; end
-    [cii(ind).VertexIndices, i0] = gii_element(c, 'VertexIndices', 1);
-    cii(ind).VertexIndices = int32(cii(ind).VertexIndices);
-    cii(ind).IndexOffset = gii_attr(c(1:i0), 'IndexOffset', 1); % 0-based
-    cii(ind).SurfaceNumberOfVertices = gii_attr(c(1:i0), 'SurfaceNumberOfVertices', 1);
 end
 %%

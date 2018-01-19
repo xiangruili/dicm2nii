@@ -78,7 +78,7 @@ function varargout = nii_tool(cmd, varargin)
 % type or dimension. The 'save' command calls this internally, so it is not
 % necessary to call this before 'save'. A useful case to call 'update' is that
 % one likes to use nii struct without saving it to a file, and 'update' will
-% make nii.hdr.dim correct.
+% make nii.hdr.dim and others correct.
 % 
 % 
 % hdr = nii_tool('hdr', filename);
@@ -259,6 +259,8 @@ function varargout = nii_tool(cmd, varargin)
 % 170716 Add functionSignatures.json file for tab auto-completion.
 % 171031 'LocalFunc' makes eaiser to call local functions.
 % 171206 Allow file name ext other than .nii, .hdr, .img.
+% 180104 check_gzip: add /usr/local/bin to PATH for unix if needed.
+% 180119 use jsystem for better speed.
 
 persistent C para; % C columns: name, length, format, value, offset
 if isempty(C)
@@ -618,10 +620,18 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
     nii.hdr.bitpix = para.bitpix(ind);
     nii.hdr.dim = [ndim dim];
     
-    if nii.hdr.sizeof_hdr == 348
-        nii.hdr.glmax = round(double(max(nii.img(:)))); % we may remove these
-        nii.hdr.glmin = round(double(min(nii.img(:))));
+    
+    mx = double(max(nii.img(:)));
+    mn = double(min(nii.img(:)));
+    if nii.hdr.cal_min>mx || nii.hdr.cal_max>mn % reset wrong value
+        nii.hdr.cal_min = 0;
+        nii.hdr.cal_max = 0;
     end
+    
+    if nii.hdr.sizeof_hdr == 348
+        nii.hdr.glmax = round(mx); % we may remove these
+        nii.hdr.glmin = round(mn);
+    end    
     
     if isfield(nii, 'ext')
         try swap = nii.hdr.swap_endian; catch, swap = false; end
@@ -779,13 +789,7 @@ persistent cmd; % command to gzip
 if isempty(cmd)
     cmd = check_gzip('gzip');
     if ischar(cmd)
-        if ispc
-            cmd = @(nam) sprintf('%s -nf "%s"', cmd, nam);
-            %cmd = @(nam) sprintf('start "" /B %s -nf "%s"', cmd, nam);%background
-        else
-            cmd = @(nam) sprintf('%s -nf "%s"', cmd, nam);
-            %cmd = @(nam) sprintf('%s -nf "%s" &', cmd, nam); % background
-        end
+        cmd = @(nam){cmd '-nf' nam};
     elseif islogical(cmd) && ~cmd
         fprintf(2, ['None of system pigz, gzip or Matlab gzip available. ' ...
             'Files are not compressed into gz.\n']);
@@ -797,7 +801,7 @@ if islogical(cmd)
     return;
 end
 
-[err, str] = system(cmd(fname));
+[err, str] = jsystem(cmd(fname));
 if err
     try
         gzip(fname); deleteFile(fname);
@@ -812,8 +816,16 @@ m_dir = fileparts(which(mfilename));
 % away from pwd, so use OS pigz if both exist. Avoid error if pwd changed later
 if strcmpi(pwd, m_dir), cd ..; clnObj = onCleanup(@() cd(m_dir)); end
 
+if isunix
+    pth1 = getenv('PATH');
+    if isempty(strfind(pth1, '/usr/local/bin'))
+        pth1 = [pth1 ':/usr/local/bin'];
+        setenv('PATH', pth1);
+    end
+end
+
 % first, try system pigz
-[err, ~] = system('pigz -V 2>&1');
+[err, ~] = jsystem({'pigz' '-V'});
 if ~err, cmd = 'pigz'; return; end
 
 % next, try pigz included with nii_tool
@@ -839,12 +851,11 @@ else % linux
 end
 
 cmd = fullfile(m_dir, 'pigz');
-cmd = ['"' cmd '"'];
-[err, ~] = system([cmd ' -V 2>&1']);
+[err, ~] = jsystem({cmd '-V'});
 if ~err, return; end
 
 % Third, try system gzip/gunzip
-[err, ~] = system([gz_unzip ' -V 2>&1']); % gzip/gunzip on system path?
+[err, ~] = jsystem({gz_unzip '-V'}); % gzip/gunzip on system path?
 if ~err, cmd = gz_unzip; return; end
 
 % Lastly, try Matlab gzip/gunzip
@@ -856,7 +867,7 @@ cmd = true; % use slower matlab gzip.m/gunzip.m
 
 %% check dd command, return empty if not available
 function dd = check_dd
-[err, ~] = system('dd --version 2>&1');
+[err, ~] = jsystem({'dd' '--version'});
 if ~err, dd = 'dd'; return; end % dd with linix/mac, and maybe windows
 
 if ispc % rename it as exe
@@ -866,8 +877,8 @@ if ispc % rename it as exe
     if exist(fname, 'file') % first time after download
         try movefile(fname, [m_dir '\dd.exe'], 'f'); end
     end
-    dd = ['"' fullfile(m_dir, 'dd') '"'];
-    [err, ~] = system([dd ' --version 2>&1']);
+    dd = fullfile(m_dir, 'dd');
+    [err, ~] = jsystem({dd '--version'});
     if ~err, return; end
 end
 dd = '';
@@ -878,14 +889,14 @@ persistent cmd dd pth uid; % command to run gupzip, dd tool, and temp_path
 if isempty(cmd)
     cmd = check_gzip('gunzip'); % gzip -dc has problem in PC
     if ischar(cmd)
-        cmd = @(nam)sprintf('%s -nfdc "%s" ', cmd, nam); % f for overwrite
+        cmd = @(nam)sprintf('"%s" -nfdc "%s" ', cmd, nam); % f for overwrite
     elseif islogical(cmd) && ~cmd
         cmd = [];
         error('None of system pigz, gunzip or Matlab gunzip is available');
     end
     dd = check_dd;
     if ~isempty(dd)
-        dd = @(n,out)sprintf('| %s count=%g of="%s"', dd, ceil(n/512), out);
+        dd = @(n,out)sprintf('| "%s" count=%g of="%s"', dd, ceil(n/512), out);
     end
     
     if ispc % matlab tempdir could be slow due to cd in and out
@@ -900,6 +911,7 @@ end
 
 if islogical(cmd)
     outName = gunzip(fname, pth);
+    outName = outName{1};
     return;
 end
 
@@ -1163,11 +1175,14 @@ function bytes = gunzip_mem(gz_bytes, fname, nByte)
 bytes = [];
 try
     bais = java.io.ByteArrayInputStream(gz_bytes);
-    gzis = java.util.zip.GZIPInputStream(bais);
+    try, gzis = java.util.zip.GZIPInputStream(bais); %#ok<*NOCOM>
+    catch, try, gzis = java.util.zip.InflaterInputStream(bais); catch me; end
+    end
     buff = java.io.ByteArrayOutputStream;
-    try org.apache.commons.io.IOUtils.copy(gzis, buff); end
+    try org.apache.commons.io.IOUtils.copy(gzis, buff); catch me; end
     gzis.close;
-    bytes = typecast(buff.toByteArray, 'uint8'); % faster than uint8()
+    bytes = typecast(buff.toByteArray, 'uint8');
+    if isempty(bytes), error(me.message); end
 catch
     if nargin<3 || isempty(nByte), nByte = inf; end
     if nargin<2 || isempty(fname)
@@ -1193,4 +1208,33 @@ function deleteFile(fname)
 if ispc, system(['start "" /B del "' fname '"']);
 else, system(['rm "' fname '" &']);
 end
+
+%% faster than system: based on https://github.com/avivrosenberg/matlab-jsystem
+function [err, out] = jsystem(cmd)
+try
+    pb = java.lang.ProcessBuilder(cmd);
+%     pb = javaObjectEDT(pb);
+catch me % fallback to builtin if java not available
+    fprintf(2, '%s', me.message);
+    ind = find(cellfun(@(x)~isempty(strfind(x, ' ')), cmd));
+    for i = ind, cmd{i} = ['"' cmd{i} '"']; end % add quotes to name with space
+    [err, out] = builtin('system', sprintf('%s ', cmd{:}));
+    return;
+end
+try
+    process = pb.start();
+    err = process.waitFor();
+catch me
+    err = 1;
+    out = me.message;
+    return;
+end
+
+if nargout<1, return; end
+out = '';
+if nargout<2, return; end
+if err, scanner = java.util.Scanner(process.getErrorStream).useDelimiter('\\A');
+else,   scanner = java.util.Scanner(process.getInputStream).useDelimiter('\\A');
+end
+if scanner.hasNext(), out = strtrim(char(scanner.next())); end
 %%
