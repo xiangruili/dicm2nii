@@ -1,4 +1,4 @@
-function varargout = nii_viewer(fname, overlayName)
+function varargout = nii_viewer(fname, varargin)
 % Basic tool to visualize NIfTI images.
 % 
 %  NII_VIEWER('/data/subj2/fileName.nii.gz')
@@ -8,7 +8,7 @@ function varargout = nii_viewer(fname, overlayName)
 % If no input is provided, the viewer will load included MNI_2mm brain as
 % background NIfTI. Although the preferred format is NIfTI, NII_VIEWER accepts
 % any files that can be converted into NIfTI by dicm2nii. In case of CIfTI file,
-% it will show both the volume view and surface view if GIfTI is available.
+% it will show the volume view, as well as surface view if GIfTI is available.
 % 
 % Here are some features and usage.
 % 
@@ -28,8 +28,9 @@ function varargout = nii_viewer(fname, overlayName)
 % Navigation in 4D can be by mouse click, dialing IJK and volume numbers, or
 % using keys (arrow keys and [ ] for 3D, and < > for volume).
 % 
-% After the viewer is open, dragging and dropping a NIfTI file will open it as
-% background, while dropping with Ctrl key down will add it as overlay.
+% After the viewer is open, one can drag-and-drop a NIfTI file into the viewer
+% to open as background, or drop a NIfTI with Control key down to add it as
+% overlay.
 % 
 % By default, the viewer shows full view of the background image data. The
 % zoom-in always applies to three views together, and enlarges around the
@@ -263,25 +264,18 @@ function varargout = nii_viewer(fname, overlayName)
 % 171229 combine into one overlay for surface view.
 % 180103 Allow inflated surface while mapping to correct location in volume.
 % 180108 set_file back to nii_viewer_cb for cii_view_cb convenience.
+% 180128 Preference stays for current window, and applies to new window only.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
-    varargout{1} = str2func(overlayName);
+    varargout{1} = str2func(varargin{1});
+    return;
+elseif nargin>0 && ischar(fname) && strcmp(fname, 'LocalFunc')
+    [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
 
-pf = getpref('nii_viewer_para');
-if isempty(pf) || ~isfield(pf, 'mouseOver')
-    pf = struct('openPath', pwd, 'addPath', pwd, 'interp', 'linear', 'extraV', NaN, ...
-        'dpi', '0', 'rightOnLeft', false, 'mouseOver', true, 'layout', 2);
-    setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
-end
-if ~isfield(pf, 'layout')
-    pf.layout = 2;
-    setpref('nii_viewer_para', 'layout', 2);
-end
-
-if nargin<1
+if nargin<1 % open the included standard_2mm
     fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
     fname = load(fname, 'nii'); fname = fname.nii;
 end
@@ -304,7 +298,6 @@ if ~isreal(p.nii.img)
 end
 hs.dim = single(dim); % single saves memory for ndgrid
 hs.pixdim = p.pixdim;
-[siz, plotPos] = plot_pos(dim.*hs.pixdim, pf.layout);
 hs.gap = min(hs.pixdim) ./ hs.pixdim * 3; % in unit of smallest pixdim
 
 p.lb = rg(1); p.ub = rg(2);
@@ -312,36 +305,42 @@ p = dispPara(p);
 [pName, niiName, ext] = fileparts(p.nii.hdr.file_name);
 if strcmpi(ext, '.gz'), [~, niiName] = fileparts(niiName); end
 
-res = screen_pixels(1); % use 1st screen
-if nargin>1 && all(ishandle(overlayName)) % internal call by 'open' or dnd
-    fh = overlayName;
+if nargin>1 && any(ishandle(varargin{1})) % called by Open or dnd
+    fh = varargin{1};
+    hsN = guidata(fh);
+    pf = hsN.pref.UserData; % use the current pref for unless new figure
     fn = get(fh, 'Number');
-    pos = fh.Position(1:2);
-    close(fh); 
+    close(fh);
 else
-    pos = round((res-siz)/2);
-
+    pf = getpref('nii_viewer_para');
+    if isempty(pf) || ~isfield(pf, 'layout') % check lastly-added field
+        pf = struct('openPath', pwd, 'addPath', pwd, 'interp', 'linear', ...
+            'extraV', NaN, 'dpi', '0', 'rightOnLeft', false, ...
+            'mouseOver', true, 'layout', 2);
+        setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
+    end
+    
     set(0, 'ShowHiddenHandles', 'on');
     a = handle(findobj('Type', 'figure', 'Tag', 'nii_viewer'));
     set(0, 'ShowHiddenHandles', 'off');
     if isempty(a)
         fn = 'ni' * 256.^(1:2)'; % start with a big number for figure
     elseif numel(a) == 1
-        fn = get(a, 'Number') + 1;
+        fn = get(a, 'Number') + 1; % this needs handle() to work
     else
         fn = max(cell2mat(get(a, 'Number'))) + 1;
     end
 end
+[siz, axPos, figPos] = plot_pos(dim.*hs.pixdim, pf.layout);
+
 fh = figure(fn);
 hs.fig = handle(fh); % have to use numeric for uipanel for older matlab
 figNam = p.nii.hdr.file_name;
 if numel(figNam)>40, figNam = [figNam(1:40) '...']; end
 figNam = ['nii_viewer - ' figNam ' (' formcode2str(hs.form_code(1)) ')'];
-if pos(1)+siz(1) > res(1), pos(1) = res(1)-siz(1)-10; end
-if pos(2)+siz(2) > res(2)-130, pos(2) = min(pos(2), 50); end
 set(fh, 'Toolbar', 'none', 'Menubar', 'none', 'Renderer', 'opengl', ...
     'NumberTitle', 'off', 'Tag', 'nii_viewer', 'DockControls', 'off', ...
-    'Position', [pos siz+[0 64]], 'Name', figNam);
+    'Position', [figPos siz+[0 64]], 'Name', figNam);
 cb = @(cmd) {@nii_viewer_cb cmd hs.fig}; % callback shortcut
 xyz = [0 0 0]; % start cursor location
 c = round(p.Ri * [xyz 1]'); c = c(1:3)' + 1; % 
@@ -448,7 +447,7 @@ hs.frame = uipanel(fh, 'Units', 'pixels', 'Position', [1 1 siz], ...
 
 for i = 1:3
     j = 1:3; j(j==i) = [];
-    hs.ax(i) = axes('Position', plotPos(i,:), 'Parent', hs.frame);
+    hs.ax(i) = axes('Position', axPos(i,:), 'Parent', hs.frame);
     hs.hsI(i) = handle(image(zeros(dim(j([2 1])), 'single')));
     hold(hs.ax(i), 'on');
     
@@ -471,7 +470,7 @@ for i = 1:numel(labls)
 end
 
 % early matlab's colormap works only for axis, so ax(4) is needed.
-hs.ax(4) = axes('Position', plotPos(4,:), 'Parent', hs.frame);
+hs.ax(4) = axes('Position', axPos(4,:), 'Parent', hs.frame);
 try
     hs.colorbar = colorbar(hs.ax(4), 'YTicks', [0 0.5 1], 'Color', [1 1 1], ...
         'Location', 'West', 'PickableParts', 'none', 'Visible', 'off');
@@ -523,8 +522,7 @@ if ispc || ismac
 end
 
 h_over = uimenu(fh, 'Label', '&Overlay');
-hs.add = uimenu(h_over, 'Label', 'Add overlay', 'Accelerator', 'A', ...
-    'UserData', pf.addPath, 'Callback', cb('add'));
+uimenu(h_over, 'Label', 'Add overlay', 'Accelerator', 'A', 'Callback', cb('add'));
 uimenu(h_over, 'Label', 'Add aligned overlay', 'Callback', cb('add'));
 
 h = uimenu(h_over, 'Label', 'Move selected image', 'Enable', 'off');
@@ -583,8 +581,7 @@ setappdata(th, 'radius', 6);
 uimenu(h, 'Label', 'Histogram', 'Callback', cb('hist'));
 
 h = uimenu(fh, 'Label', '&Help');
-hs.pref = uimenu(h, 'Label', 'Preferences', 'UserData', pf, ...
-    'Callback', @(~,~)pref_dialog(gcbo));
+hs.pref = uimenu(h, 'Label', 'Preferences', 'UserData', pf, 'Callback', @pref_dialog);
 uimenu(h, 'Label', 'Key shortcut', 'Callback', cb('keyHelp'));
 uimenu(h, 'Label', 'Show help text', 'Callback', 'doc nii_viewer');
 checkUpdate = dicm2nii('', 'checkUpdate', 'func_handle');
@@ -598,9 +595,10 @@ if isnumeric(fh) % for older matlab
     hs.lut = handle(hs.lut);
     hs.frame = handle(hs.frame);
     hs.value = handle(hs.value);
-    hs.panel = handle(hs.panel);                   
-    hs.params = handle(hs.params);                   
-    hs.scroll = handle(hs.scroll);                   
+    hs.panel = handle(hs.panel);
+    hs.params = handle(hs.params);
+    hs.scroll = handle(hs.scroll);
+    hs.pref = handle(hs.pref);
 end
 guidata(fh, hs); % store handles and data
 
@@ -624,10 +622,10 @@ set_cdata(hs);
 set_xyz(hs);
 
 if nargin>1
-    if ischar(overlayName)
-        addOverlay(overlayName, fh);
-    elseif iscellstr(overlayName)
-        for i=1:numel(overlayName), addOverlay(overlayName{i}, fh); end
+    if ischar(varargin{1})
+        addOverlay(varargin{1}, fh);
+    elseif iscellstr(varargin{1})
+        for i=1:numel(varargin{1}), addOverlay(varargin{1}{i}, fh); end
     end
 end
 
@@ -770,8 +768,8 @@ switch cmd
         end
         set_xyz(hs, I);
     case 'open' % open on current fig or new fig
-        pf = get(hs.pref, 'UserData');
-        [fname, pName] = uigetfile([pf.openPath '/*.nii; *.hdr;*.nii.gz; *.hdr.gz'], ...
+        pName = hs.pref.UserData.openPath;
+        [fname, pName] = uigetfile([pName '/*.nii; *.hdr;*.nii.gz; *.hdr.gz'], ...
             'Select a NIfTI to view', 'MultiSelect', 'on');
         if isnumeric(fname), return; end
         fname = strcat([pName '/'], fname);
@@ -780,7 +778,7 @@ switch cmd
         end
         return;
     case 'add' % add overlay
-        pName = get(hs.add, 'UserData');
+        pName = hs.pref.UserData.addPath;
         label = get(h, 'Label');
         if strcmp(label, 'Add aligned overlay')
             [fname, pName] = uigetfile([pName '/*.nii; *.hdr;*.nii.gz;' ...
@@ -875,8 +873,7 @@ switch cmd
             set(hs.panel, 'Visible', 'off');
             clnObj = onCleanup(@() set(hs.panel, 'Visible', 'on'));
         end
-        pf = get(hs.pref, 'UserData');
-        print(fh1, '-dbitmap', '-noui', ['-r' pf.dpi]);
+        print(fh1, '-dbitmap', '-noui', ['-r' hs.pref.UserData.dpi]);
 %         print('-dmeta', '-painters');
     case 'save' % save figure as picture
         ext = get(h, 'Label');
@@ -892,13 +889,12 @@ switch cmd
         if any(strcmp(ext, {'eps' 'pdf' 'emf'})), render = '-painters';
         else, render = '-opengl';
         end
-        pf = get(hs.pref, 'UserData');
         fh1 = ancestor(h, 'figure');
         if strncmp(get(fh1, 'Name'), 'nii_viewer', 10)
             set(hs.panel, 'Visible', 'off');
             clnObj = onCleanup(@() set(hs.panel, 'Visible', 'on'));
         end
-        print(fh1, fname, render, '-noui', ['-d' fmt], ['-r' pf.dpi], '-cmyk');
+        print(fh1, fname, render, '-noui', ['-d' fmt], ['-r' hs.pref.UserData.dpi], '-cmyk');
     case 'colorbar' % colorbar on/off
         if strcmpi(get(hs.colorbar, 'Visible'), 'on')
             set(hs.colorbar, 'Visible', 'off'); 
@@ -967,7 +963,8 @@ switch cmd
         end
         set_cdata(hs);
     case 'flipLR'
-        if strcmp(get(h, 'Checked'), 'on')
+        hs.pref.UserData.rightOnLeft = strcmp(get(h, 'Checked'), 'on');
+        if hs.pref.UserData.rightOnLeft
             set(h, 'Checked', 'off');
             set(hs.ax([2 3]), 'XDir', 'normal');
             set(hs.ras([3 5]), 'String', 'L');
@@ -979,29 +976,18 @@ switch cmd
     case 'layout'
         submenu = {'one-row' 'two-row sag on right' 'two-row sag on left'};
         layout = find(strcmp(get(h, 'Label'), submenu));
-        hLayout = findobj(hs.fig, 'Type', 'uimenu', 'Label', 'Layout');
-        if get(hLayout, 'UserData') == layout, return; end
+        if hs.pref.UserData.layout == layout, return; end
         
         cb = hs.fig.ResizeFcn;
         hs.fig.ResizeFcn = ''; drawnow;
         clnObj = onCleanup(@() set(hs.fig, 'ResizeFcn', cb));
         
-        res = screen_pixels(1) - [60 92];
-        oldSiz = hs.frame.Position(3:4);
-        [siz, plotPos] = plot_pos(hs.dim.*hs.pixdim, layout);
-        if siz(1)<oldSiz(1), siz = siz/siz(1)*oldSiz(1); end
-        if siz(2)+64>res(2), siz = siz/siz(2)*(res(2)-64); end
-        pos = hs.fig.Position;
-        pos(2) = pos(2) + oldSiz(2) - siz(2);
-        pos(3:4) = siz+[0 64];
-        d = pos(2)+pos(4) - res(2); 
-        if d>0, pos(2) = pos(2) - d; end 
-        hs.fig.Position = pos;
+        [siz, axPos, figPos] = plot_pos(hs.dim.*hs.pixdim, layout);
+        hs.fig.Position = [figPos siz+[0 64]];
         hs.frame.Position(3:4) = siz;
         hs.panel.Position(2) =  hs.fig.Position(4) - 64;
-        for i = 1:4, set(hs.ax(i), 'Position', plotPos(i,:)); end
-        set(hLayout, 'UserData', layout);
-        drawnow;
+        for i = 1:4, set(hs.ax(i), 'Position', axPos(i,:)); end
+        hs.pref.UserData.layout = layout;
     case 'keyHelp'
         str = sprintf([ ...
            'Key press available when focus is not in a number dialer:\n\n' ...
@@ -1088,10 +1074,10 @@ switch cmd
         c = round(hs.bg.Ri * (p.R * [c-1; 1])) + 1;
         for i = 1:3, hs.ijk(i).setValue(c(i)); end
     case 'custom' % add custom lut
-        pName = get(hs.add, 'UserData');
+        p = get_para(hs);
+        pName = fileparts(p.nii.hdr.file_name);
         [fname, pName] = uigetfile([pName '/*.lut'], 'Select LUT file for current overlay');
         if ~ischar(fname), return; end
-        p = get_para(hs);
         fid = fopen(fullfile(pName, fname));
         p.map = fread(fid, '*uint8');
         fclose(fid);
@@ -1172,7 +1158,7 @@ switch cmd
         x = hs.files.getPreferredScrollableViewportSize.getWidth;
         x = max(60, min(x+20, width-408)); % 408 width of the little panel
         hs.scroll.Position(3) = x;
-        hs.params.Position(1) = x+2;
+        hs.params.Position([1 3]) = [x+2 width-x-2];
         hs.value.Position(3) = max(1, width-x-hs.value.Position(1));
     case 'saveVolume' % save 1 or more volumes as a nifti
         p = get_para(hs);
@@ -1209,13 +1195,13 @@ switch cmd
             if numel(c) == 3, break; end
         end
         
-        pName = get(hs.add, 'UserData');
+        p = get_para(hs);
+        pName = fileparts(p.nii.hdr.file_name);
         [fname, pName] = uiputfile([pName '/*.nii;*.nii.gz'], ...
             'Input file name to save ROI into');
         if ~ischar(fname), return; end
         fname = fullfile(pName, fname);
         
-        p = get_para(hs);
         b = xyzr2roi(c, r, p.nii.hdr);        
         p.nii.img = single(b); % single better supported by FSL
         nii_tool('save', p.nii, fname);
@@ -1523,7 +1509,7 @@ hs = guidata(fh);
 frm = hs.form_code;
 aligned = nargin>2;
 R_back = hs.bg.R;
-if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
+if ~exist('flip', 'builtin'), eval('flip=@flipdim'); end
 if aligned % aligned mtx: do it in special way
     [p, ~, rg, dim] = read_nii(fname, frm, 0); % no re-orient
     R0 = nii_xform_mat(hs.bg.hdr, frm(1)); % original background R
@@ -1681,7 +1667,7 @@ catch me
     errordlg(me.message);
     return;
 end
-set(hs.add, 'UserData', pName);
+hs.pref.UserData.addPath = pName;
 
 set_cdata(hs);
 set_xyz(hs);
@@ -1717,7 +1703,7 @@ if ischar(fname), p.nii = nii_tool('load', fname);
 else, p.nii = fname; fname = p.nii.hdr.file_name;
 end
 c = p.nii.hdr.intent_code;
-if c>=3000 && c<=3012 && isfield(p.nii, 'ext') && any([p.nii.ext.ecode] == 32)
+if c>=3000 && c<=3099 && isfield(p.nii, 'ext') && any([p.nii.ext.ecode] == 32)
     p.nii = cii2nii(p.nii);
 end
 
@@ -1743,7 +1729,7 @@ if nargin<3 || reOri
         p.pixdim = p.pixdim(p.perm);
         p.nii.img = permute(p.nii.img, [p.perm 4:8]);
     end
-    if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
+    if ~exist('flip', 'builtin'), eval('flip=@flipdim'); end
     for i = 1:3, if p.flip(i), p.nii.img = flip(p.nii.img, i); end; end
 else
     p.perm = 1:3;
@@ -2046,22 +2032,22 @@ elseif lut == 29 % RGB
 end
 
 %% Preference dialog
-function pref_dialog(pref)
-pf = get(pref, 'UserData');
+function pref_dialog(h, ~)
+pf = getpref('nii_viewer_para');
 d = dialog('Name', 'Preferences', 'Visible', 'off');
 pos = getpixelposition(d);
 pos(3:4) = [396 332];
-h.fig = ancestor(pref, 'figure');  
+hs.fig = ancestor(h, 'figure');
 
 uicontrol(d, 'Style', 'text', 'Position', [8 306 300 22], ...
     'String', 'Background (template) image folder:', 'HorizontalAlignment', 'left');
-h.openPath = uicontrol(d, 'Style', 'edit', 'String', pf.openPath, ...
+hs.openPath = uicontrol(d, 'Style', 'edit', 'String', pf.openPath, ...
     'Position', [8 288 350 22], 'BackgroundColor', 'w', 'HorizontalAlignment', 'left', ...
     'TooltipString', 'nii_viewer will point to this folder when you "Open" image');
 uicontrol('Parent', d, 'Position', [358 289 30 22], 'Tag', 'browse', ...
     'String', '...', 'Callback', @pref_dialog_cb);
 
-h.rightOnLeft = uicontrol(d, 'Style', 'popup', 'BackgroundColor', 'w', ...
+hs.rightOnLeft = uicontrol(d, 'Style', 'popup', 'BackgroundColor', 'w', ...
     'Position', [8 252 380 22], 'Value', pf.rightOnLeft+1, ...
     'String', {'Neurological orientation (left on left side)' ...
                'Radiological orientation (right on left side)'}, ...
@@ -2074,12 +2060,12 @@ uicontrol(d, 'Style', 'text', 'Position', [8 210 40 22], ...
 % iconsFolder = fullfile(matlabroot,'/toolbox/matlab/icons/');
 % iconUrl = strrep(['file:/' iconsFolder 'matlabicon.gif'],'\','/');
 % str = ['<html><img src="' iconUrl '"/></html>'];
-h.layout = uicontrol(d, 'Style', 'popup', 'BackgroundColor', 'w', ...
+hs.layout = uicontrol(d, 'Style', 'popup', 'BackgroundColor', 'w', ...
     'Position', [50 214 338 22], 'Value', pf.layout, ...
     'String', {'one-row' 'two-row sag on right' 'two-row sag on left'}, ...
     'TooltipString', 'Layout for three views');
 
-h.mouseOver = uicontrol(d, 'Style', 'checkbox', ...
+hs.mouseOver = uicontrol(d, 'Style', 'checkbox', ...
     'Position', [8 182 380 22], 'Value', pf.mouseOver, ...
     'String', 'Show coordinates and intensity when mouse moves over image', ...
     'TooltipString', 'Also apply to future use');
@@ -2090,12 +2076,12 @@ str = {'nearest' 'linear' 'cubic' 'spline'};
 val = find(strcmp(str, pf.interp));
 uicontrol('Parent', d, 'Style', 'text', 'Position', [8 116 140 22], ...
     'String', 'Interpolation method:', 'HorizontalAlignment', 'right');
-h.interp = uicontrol(d, 'Style', 'popup', 'String', str, ...
+hs.interp = uicontrol(d, 'Style', 'popup', 'String', str, ...
     'Position', [150 120 68 22], 'Value', val, 'BackgroundColor', 'w');
 
 uicontrol('Parent', d, 'Style', 'text', 'Position', [230 116 90 22], ...
     'String', 'Missing value:', 'HorizontalAlignment', 'right');
-h.extraV = uicontrol(d, 'Style', 'edit', 'String', num2str(pf.extraV), ...
+hs.extraV = uicontrol(d, 'Style', 'edit', 'String', num2str(pf.extraV), ...
     'Position', [324 120 60 22], 'BackgroundColor', 'w', ...
     'TooltipString', 'NaN or 0 is typical, but can be any number');
 
@@ -2105,39 +2091,33 @@ uipanel(d, 'Units', 'Pixels', 'Position', [4 40 390 56], 'BorderType', 'etchedin
     'BorderWidth', 2, 'Title', 'For "Save figure as" and "Copy figure"');
 uicontrol('Parent', d, 'Style', 'text', 'Position', [8 46 90 22], ...
     'String', 'Resolution:', 'HorizontalAlignment', 'right');
-h.dpi = uicontrol(d, 'Style', 'popup', 'String', str, ...
+hs.dpi = uicontrol(d, 'Style', 'popup', 'String', str, ...
     'Position', [110 50 50 22], 'Value', val, 'BackgroundColor', 'w', ...
     'TooltipString', 'in DPI (0 means screen resolution)');
 
 uicontrol('Parent', d, 'Position', [300 10 70 24], 'Tag', 'OK', ...
-    'String', 'OK', 'Callback', {@pref_dialog_cb, pref});
+    'String', 'OK', 'Callback', @pref_dialog_cb);
 uicontrol('Parent', d, 'Position',[200 10 70 24], ...
     'String', 'Cancel', 'Callback', 'delete(gcf)');
 
 set(d, 'Position', pos, 'Visible', 'on');
-guidata(d, h);
+guidata(d, hs);
 
 %% Preference dialog callback
-function pref_dialog_cb(h, ~, pref)
+function pref_dialog_cb(h, ~)
 hs = guidata(h);
 if strcmp(get(h, 'Tag'), 'OK') % done
-    pf = get(pref, 'UserData');
     fh = hs.fig;
+    pf = getpref('nii_viewer_para');
     
-    pf.rightOnLeft = get(hs.rightOnLeft, 'Value')==2;
-    hLR = findobj(fh, 'Type', 'uimenu', 'Label', 'Right on left side');
-    if strcmp(get(hLR, 'Checked'), 'off') == pf.rightOnLeft
-        nii_viewer_cb(hLR, [], 'flipLR', fh);
-    end
-    
+    pf.layout = get(hs.layout, 'Value'); % 1:3
+    pf.rightOnLeft = get(hs.rightOnLeft, 'Value')==2;    
     pf.mouseOver = get(hs.mouseOver, 'Value');
-    if pf.mouseOver
+    if pf.mouseOver % this is the only one we update current fig
         set(fh, 'WindowButtonMotionFcn', {@nii_viewer_cb 'mousemove' fh});
     else
         set(fh, 'WindowButtonMotionFcn', '');        
     end
-    
-    pf.layout = get(hs.layout, 'Value'); % 0 or 1
     
     i = get(hs.interp, 'Value');
     str = get(hs.interp, 'String');
@@ -2150,7 +2130,6 @@ if strcmp(get(h, 'Tag'), 'OK') % done
     str = get(hs.dpi, 'String');
     pf.dpi = str{i}; 
         
-    set(pref, 'UserData', pf);
     setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
     delete(get(h, 'Parent'));
 elseif strcmp(get(h, 'Tag'), 'browse') % set openPath
@@ -2674,7 +2653,7 @@ if isempty(pName), pName = pwd; end
 try nii = nii_tool('load', nam); % re-load to be safe
 catch % restore reoriented img
     nii = p.nii;
-    if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
+    if ~exist('flip', 'builtin'), eval('flip=@flipdim'); end
     for k = 1:3, if p.flip(k), nii.img = flip(nii.img, k); end; end
     nii.img = permute(nii.img, [p.perm 4:8]); % all vol in dim(4)
     slope = nii.hdr.scl_slope; if slope==0, slope = 1; end
@@ -2754,8 +2733,7 @@ elseif ~isempty(strfind(c, 'new resolution'))
         'Input result name for the new resolution file');
     if ~ischar(fname), return; end
     fname = fullfile(pName, fname);
-    pf = get(hs.pref, 'UserData');
-    nii_xform(nii, res, fname, pf.interp, pf.extraV)
+    nii_xform(nii, res, fname, hs.pref.UserData.interp, hs.pref.UserData.extraV)
 elseif ~isempty(strfind(c, 'matching background'))
     if p.hsI(1) == hs.hsI(1)
         errordlg('You selected background image');
@@ -2765,8 +2743,7 @@ elseif ~isempty(strfind(c, 'matching background'))
         'Input result file name');
     if ~ischar(fname), return; end
     fname = fullfile(pName, fname);
-    pf = get(hs.pref, 'UserData');
-    nii_xform(nii, hs.bg.hdr.file_name, fname, pf.interp, pf.extraV)
+    nii_xform(nii, hs.bg.hdr, fname, hs.pref.UserData.interp, hs.pref.UserData.extraV)
 elseif ~isempty(strfind(c, 'aligned template'))
     [temp, pName] = uigetfile([pName '/*.nii;*.nii.gz'], ...
         'Select the aligned template file');
@@ -2780,8 +2757,7 @@ elseif ~isempty(strfind(c, 'aligned template'))
         'Input result file name');
     if ~ischar(fname), return; end
     fname = fullfile(pName, fname);
-    pf = get(hs.pref, 'UserData');
-    nii_xform(nii, {temp mtx}, fname, pf.interp, pf.extraV)
+    nii_xform(nii, {temp mtx}, fname, hs.pref.UserData.interp, hs.pref.UserData.extraV)
 else
     errordlg(sprintf('%s not implemented yet.', c));
 end
@@ -2945,10 +2921,10 @@ I = reshape(I, 4, []); % ijk in 4 by nVox
 R = nii_xform_mat(hdr);
 I = R * I; % xyz in 4 by nVox
 
-I = bsxfun(@minus, I(1:3,:), c(:)); % dist in x y z direction from center
-I = sum(I .* I); % dist to center squared, 1 by nVox
+b = bsxfun(@minus, I(1:3,:), c(:)); % dist in x y z direction from center
+b = sum(b .* b); % dist to center squared, 1 by nVox
 
-b = I <= r*r; % within sphere
+b = b <= r*r; % within sphere
 b = reshape(b, d);
 
 %% Return center of gravity of an image
@@ -3013,34 +2989,48 @@ if isstruct(fname), nii = fname; return;
 elseif iscellstr(fname), nam = fname{1};
 else, nam = fname;
 end
-try nii = nii_tool('load', strtrim(nam));
-catch, nii = dicm2nii(fname, pwd, 'no_save');
+try 
+    nii = nii_tool('load', strtrim(nam));
+catch me
+    try, nii = dicm2nii(fname, pwd, 'no_save');
+    catch, errordlg(me.message); return;
+    end
 end
 
 %% Get figure/plot position from FoV for layout
 % siz is in pixels, while pos is normalized.
-function [siz, pos] = plot_pos(mm, layout)
+function [siz, axPos, figPos] = plot_pos(mm, layout)
 if layout==1 % 1x3
     siz = [sum(mm([2 1 1]))+mm(1)/4 max(mm(2:3))]; % image area width/height
     y0 = mm(2) / siz(1); % normalized width of sag images
     x0 = mm(1) / siz(1); % normalized width of cor/tra image
     z0 = mm(3) / siz(2); % normalized height of sag/cor images
     y1 = mm(2) / siz(2); % normalized height of tra image
-    pos = [0 0 y0 z0;  y0 0 x0 z0;  y0+x0 0 x0 y1;  y0+x0*2 0 mm(1)/4/siz(1) min(z0,y1)];
+    axPos = [0 0 y0 z0;  y0 0 x0 z0;  y0+x0 0 x0 y1;  y0+x0*2 0 mm(1)/4/siz(1) min(z0,y1)];
 elseif layout==2 || layout==3 % 2x2
     siz = [sum(mm(1:2)) sum(mm(2:3))]; % image area width/height
     x0 = mm(1) / siz(1); % normalized width of cor/tra images
     y0 = mm(2) / siz(2); % normalized height of tra image
     z0 = mm(3) / siz(2); % normalized height of sag/cor images
     if layout == 2 % 2x2 sag at (1,2)
-        pos = [x0 y0 1-x0 z0;  0 y0 x0 z0;  0 0 x0 y0;  x0 0 1-x0 y0];
+        axPos = [x0 y0 1-x0 z0;  0 y0 x0 z0;  0 0 x0 y0;  x0 0 1-x0 y0];
     else % ==3:      2x2 sag at (1,2)
-        pos = [0 y0 1-x0 z0;  1-x0 y0 x0 z0;  1-x0 0 x0 y0;  0 0 1-x0 y0];
+        axPos = [0 y0 1-x0 z0;  1-x0 y0 x0 z0;  1-x0 0 x0 y0;  0 0 1-x0 y0];
     end
 else
     error('Unknown layout parameter');
 end
 siz = siz / max(siz) * 800;
+
+res = screen_pixels(1); % use 1st screen
+maxH = res(2) - 160;
+maxW = res(1) - 100;
+if siz(1)>maxW, siz = siz / siz(1) * maxW; end
+if siz(2)>maxH, siz = siz / siz(2) * maxH; end
+
+figPos = round((res-siz)/2);
+if figPos(1)+siz(1) > res(1), figPos(1) = res(1)-siz(1)-10; end
+if figPos(2)+siz(2) > res(2)-130, figPos(2) = min(figPos(2), 50); end
 
 %% Return nii struct from cii and gii
 function nii = cii2nii(nii)
@@ -3056,10 +3046,9 @@ if isempty(gii), gii = get_surfaces(nVer, 'Anatomical'); end
 if isempty(gii) || numel(gii.Vertices) ~=2, error('Not valid GIfTI'); end
 if nVer ~= size(gii.Vertices{1},1), error('GIfTI and CIfTI don''t match'); end
 
-dim = nii.hdr.dim(2:8); dim(dim<1) = 1;
-if any(dim(5) == [91282 64984 59412]) % this is ugly
-    dim(5:6) = dim([6 5]);
-    nii.img = reshape(nii.img, dim); % error?
+if gii_attr(xml, 'CIFTI Version', 1) == 1
+    dim = size(nii.img);
+    nii.img = reshape(nii.img, dim([1:4 6 5]));
 end
 
 dim = gii_attr(xml, 'VolumeDimensions', 1);
@@ -3263,7 +3252,8 @@ if isempty(fh) || ~ishandle(fh) % create surface figure
     uimenu(cMenu, 'Label', 'Reset view', 'Callback', {@cii_view_cb 'reset'});
     uimenu(cMenu, 'Label', 'Zoom in' , 'Callback', {@cii_view_cb 'zoomG'});
     uimenu(cMenu, 'Label', 'Zoom out', 'Callback', {@cii_view_cb 'zoomG'});
-    uimenu(cMenu, 'Label', 'Change cortex color', 'Callback', {@cii_view_cb 'cortexColor'}, 'Separator', 'on');
+    uimenu(cMenu, 'Label', 'Change cortex color', ...
+        'Callback', {@cii_view_cb 'cortexColor'}, 'Separator', 'on');
     uimenu(cMenu, 'Label', 'Change surface', 'Callback', {@cii_view_cb 'changeSurface'});
     saveAs = findobj(hsN.fig, 'Type', 'uimenu', 'Label', 'Save figure as');
     m = copyobj(saveAs, cMenu);
@@ -3449,7 +3439,7 @@ switch cmd
                 java.awt.Robot().keyPress(key);
                 java.awt.Robot().keyRelease(key);
             end
-        elseif strcmp(ev.Key, 'space')
+        elseif any(strcmp(ev.Key, {'space' 'comma' 'period'}))
             KeyPressFcn(hs.hsN.fig, ev);
         end
         
