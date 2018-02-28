@@ -1211,30 +1211,17 @@ end
 
 %% faster than system: based on https://github.com/avivrosenberg/matlab-jsystem
 function [err, out] = jsystem(cmd)
+% cmd is cell str, no quote needed for file names with space.
 try
     pb = java.lang.ProcessBuilder(cmd);
-%     pb = javaObjectEDT(pb);
-catch me % fallback to builtin if java not available
-    fprintf(2, '%s', me.message);
+    pb.redirectErrorStream(true); % ErrorStream to InputStream
+    process = pb.start();
+    scanner = java.util.Scanner(process.getInputStream).useDelimiter('\\A');
+    if scanner.hasNext(), out = char(scanner.next()); else, out = ''; end
+    err = process.exitValue; % waitFor may hang. Error if not exited
+    if err, error(out); end
+catch % fallback to system if error
     ind = find(cellfun(@(x)~isempty(strfind(x, ' ')), cmd));
     for i = ind, cmd{i} = ['"' cmd{i} '"']; end % add quotes to name with space
-    [err, out] = builtin('system', sprintf('%s ', cmd{:}));
-    return;
+    [err, out] = system(sprintf('%s ', cmd{:}));
 end
-try
-    process = pb.start();
-    err = process.waitFor();
-catch me
-    err = 1;
-    out = me.message;
-    return;
-end
-
-if nargout<1, return; end
-out = '';
-if nargout<2, return; end
-if err, scanner = java.util.Scanner(process.getErrorStream).useDelimiter('\\A');
-else,   scanner = java.util.Scanner(process.getInputStream).useDelimiter('\\A');
-end
-if scanner.hasNext(), out = strtrim(char(scanner.next())); end
-%%
