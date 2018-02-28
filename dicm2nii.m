@@ -364,6 +364,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 170927 Store TE in descrip even if multiple TEs.
 % 171211 Make it work for Siemens multiframe dicom (seems 3D only).
 % 180116 Bug fix for EchoTime1 for phase image (thx DylanW)
+% 180219 json: PhaseEncodingDirection use ijk, fix pf.save_PatientName (thx MichaelD)
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -817,7 +818,7 @@ for i = 1:nRun
     sz = size(img); sz(numel(sz)+1:4) = 1;
     if all(sz(3:4)<2), img = permute(img, [1 2 5 3 4]); % remove dim3,4
     elseif sz(4)<2, img = permute(img, [1:3 5 4]); % remove dim4
-    elseif sz(3)<2, img = permute(img, [1 2 4 5 3]); % remove dim3
+    elseif sz(3)<2, img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
     end
 
     if tryGetField(s, 'SamplesPerPixel', 1) > 1 % color image
@@ -898,7 +899,7 @@ for i = 1:nRun
     [nii, h{i}{1}] = set_nii_header(nii, h{i}{1}, pf); % set most nii hdr
     h{i}{1}.ConversionSoftware = converter;
     nii.ext = set_nii_ext(h{i}{1}, pf); % NIfTI extension
-    if pf.save_json, save_json(h{i}{1}, fname); end
+    if pf.save_json, save_json(h{i}{1}, fname, pf); end
 
     % Save bval and bvec files after bvec perm/sign adjusted in set_nii_header
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
@@ -1038,7 +1039,7 @@ end
 rotM = diag([1-flp*2 1]); % 1 or -1 on diagnal
 rotM(1:3, 4) = (dim-1) .* flp; % 0 or dim-1
 R = R / rotM; % xform matrix after flip
-if ~exist('flip', 'builtin'), eval('flip=@(img,d)flipdim(img,d);'); end
+if ~exist('flip', 'builtin'), eval('flip = @flipdim'); end
 for k = 1:3, if flp(k), nii.img = flip(nii.img, k); end; end
 if flp(iPhase), phPos = ~phPos; end
 if isfield(s, 'bvec'), s.bvec(:, flp) = -s.bvec(:, flp); end
@@ -2373,7 +2374,7 @@ end
 
 %% Save JSON file, proposed by Chris G
 % matlab.internal.webservices.toJSON(s)
-function save_json(s, fname)
+function save_json(s, fname, pf)
 flds = {
   'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
   'AcquisitionDateTime' 'bval' 'bvec' ...
@@ -2386,6 +2387,7 @@ flds = {
   'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
   'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector'};
 
+if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
 nFields = numel(flds);
 fid = fopen([fname '.json'], 'w'); % overwrite silently if exist
 fprintf(fid, '{\n');
@@ -2400,6 +2402,10 @@ for i = 1:nFields
     elseif strcmp(nam, 'UnwarpDirection')
         nam = 'PhaseEncodingDirection';
         if val(1) == '-' || val(1) == '?', val = val([2 1]); end
+        if     val(1) == 'x', val(1) = 'i'; % BIDS spec
+        elseif val(1) == 'y', val(1) = 'j';
+        elseif val(1) == 'z', val(1) = 'k';
+        end
     elseif strcmp(nam, 'EffectiveEPIEchoSpacing')
         nam = 'EffectiveEchoSpacing';
         val = val / 1000;
