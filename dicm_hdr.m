@@ -94,6 +94,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 170910 regexp tweak to work for Octave.
 % 170921 read_ProtocolDataBlock: decode into struct with better performance.
 % 171228 philips_par: bug fix for possible slice flip. thx ShereifH.
+% 170309 philips_par: take care of incomplete volume if not XYTZ. thx YiL.
 
 persistent dict_full;
 s = []; info = '';
@@ -788,18 +789,22 @@ if isfield(s, 'IndexInREC') % why Philips includes this?
     s = rmfield(s, 'IndexInREC');
 end
 
-s.NumberOfFrames = nImg;
-nVol = nImg/nSL;
-s.NumberOfTemporalPositions = nVol;
-
+nVol = nImg / nSL;
 s.Dim3IsVolume = (diff(para(1:2, colIndex('slice number'))) == 0);
-if s.Dim3IsVolume
+if s.Dim3IsVolume % incomplete volume not taken care of due to REC file related
     iVol = 1:nVol;
     iSL = 1:nVol:nImg;
 else
+    if mod(nVol, 1) > 0 % incomplete volume in the end: drop it
+        nVol = floor(nVol);
+        nImg = nVol * nSL;
+        para(nImg+1:end, :) = [];
+    end
     iVol = 1:nSL:nImg;
     iSL = 1:nSL;
 end
+s.NumberOfFrames = nImg;
+s.NumberOfTemporalPositions = nVol;
 
 % PAR/REC file may not start with SliceNumber of 1, WHY?
 sl = para(iSL, colIndex('slice number'));
