@@ -265,6 +265,8 @@ function varargout = nii_viewer(fname, varargin)
 % 180103 Allow inflated surface while mapping to correct location in volume.
 % 180108 set_file back to nii_viewer_cb for cii_view_cb convenience.
 % 180128 Preference stays for current window, and applies to new window only.
+% 180228 'Add overlay' check nii struct in base workspace first.
+% 180309 Implement 'Standard deviation' like for 'time course'.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -275,7 +277,7 @@ elseif nargin>0 && ischar(fname) && strcmp(fname, 'LocalFunc')
     return;
 end
 
-if nargin<1 % open the included standard_2mm
+if nargin<1 || isempty(fname) % open the included standard_2mm
     fname = fullfile(fileparts(mfilename('fullpath')), 'example_data.mat'); 
     fname = load(fname, 'nii'); fname = fname.nii;
 end
@@ -578,6 +580,8 @@ uimenu(h, 'Label', 'Show NIfTI ext', 'Callback', cb('ext'));
 uimenu(h, 'Label', 'DICOM to NIfTI converter', 'Callback', 'dicm2nii', 'Separator', 'on');
 th = uimenu(h, 'Label', 'Time course ...', 'Callback', cb('tc'), 'Separator', 'on');
 setappdata(th, 'radius', 6);
+th = uimenu(h, 'Label', 'Standard deviation ...', 'Callback', cb('tc'));
+setappdata(th, 'radius', 6);
 uimenu(h, 'Label', 'Histogram', 'Callback', cb('hist'));
 
 h = uimenu(fh, 'Label', '&Help');
@@ -778,24 +782,39 @@ switch cmd
         end
         return;
     case 'add' % add overlay
+        vars = evalin('base', 'who');
+        is_nii = @(v)evalin('base', ...
+            sprintf('isstruct(%s) && all(isfield(%s,{''hdr'',''img''}))', v, v));
+        for i = numel(vars):-1:1, if ~is_nii(vars{i}), vars(i) = []; end; end
+        if ~isempty(vars)
+            a = listdlg('SelectionMode', 'single', 'ListString', vars, ...
+                'ListSize', [300 100], 'CancelString', 'File dialog', ...
+            	'Name', 'Select a NIfTI in the list or click File dialog');
+            if ~isempty(a), fname = evalin('base', vars{a}); end
+        end
+        
         pName = hs.pref.UserData.addPath;
         label = get(h, 'Label');
         if strcmp(label, 'Add aligned overlay')
-            [fname, pName] = uigetfile([pName '/*.nii; *.hdr;*.nii.gz;' ...
-                '*.hdr.gz'], 'Select overlay NIfTI');
-            if ~ischar(fname), return; end
-            fname = fullfile(pName, fname);
+            if ~exist('fname', 'var')
+                [fname, pName] = uigetfile([pName '/*.nii; *.hdr;*.nii.gz;' ...
+                    '*.hdr.gz'], 'Select overlay NIfTI');
+                if ~ischar(fname), return; end
+                fname = fullfile(pName, fname);
+            end
             [mtx, pName] = uigetfile([pName '/*.mat;*_warp.nii;*_warp.nii.gz'], ...
                 'Select FSL mat file or warp file transforming the nii to background');
             if ~ischar(mtx), return; end
             mtx = fullfile(pName, mtx);
             addOverlay(fname, fh, mtx);
         else
-            [fname, pName] = uigetfile([pName '/*.nii; *.hdr;*.nii.gz;' ...
-                '*.hdr.gz'], 'Select overlay NIfTI', 'MultiSelect', 'on');
-            if ~ischar(fname) && ~iscell(fname), return; end
-            nii = get_nii(strcat([pName filesep], fname));
-            addOverlay(nii, fh);
+            if ~exist('fname', 'var')
+                [fname, pName] = uigetfile([pName '/*.nii; *.hdr;*.nii.gz;' ...
+                    '*.hdr.gz'], 'Select overlay NIfTI', 'MultiSelect', 'on');
+                if ~ischar(fname) && ~iscell(fname), return; end
+                fname = get_nii(strcat([pName filesep], fname));
+            end
+            addOverlay(fname, fh);
         end
         setpref('nii_viewer_para', 'addPath', pName);
     case 'closeAll' % close all overlays
@@ -1098,7 +1117,7 @@ switch cmd
         set(hs.lut, 'Value', p.lut, 'Enable', 'off');
         set_cdata(hs);
         set_colorbar(hs);
-    case 'tc' % time course
+    case 'tc' % time course or std
         jf = hs.files.getSelectedIndex+1;
         p = get_para(hs, jf);
         dim = p.nii.hdr.dim(2:5);
@@ -1108,8 +1127,9 @@ switch cmd
             return;
         end
         
+        labl = strrep(get(h, 'Label'), ' ...', '');
         r = num2str(getappdata(h, 'radius'));
-        r = inputdlg('Radius around crosshair (mm):', 'Time course', 1, {r});
+        r = inputdlg('Radius around crosshair (mm):', labl, 1, {r});
         if isempty(r), return; end
         r = str2double(r{1});
         setappdata(h, 'radius', r);
@@ -1122,12 +1142,16 @@ switch cmd
         dim = size(img);
         img = reshape(img, [], prod(dim(4:end)))';
         img = img(:, b(:));
-        img = mean(single(img), 2);
         fh1 = figure(mod(fh.Number,10)+jf);
-        plot(img); 
+        if strcmp(labl, 'Time course')
+            img = mean(single(img), 2);
+        else
+            img = std(single(img), [], 2);
+        end
+        plot(img);
         xlabel('Volume number');
         c = sprintf('(%g,%g,%g)', round(c));
-        set(fh1, 'Name', [nam ' time course around voxel ' c]);
+        set(fh1, 'Name', [nam ' ' lower(labl) ' around voxel ' c]);
     case 'hist' % plot histgram
         jf =hs.files.getSelectedIndex+1;
         if jf<1, return; end
