@@ -365,6 +365,8 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 171211 Make it work for Siemens multiframe dicom (seems 3D only).
 % 180116 Bug fix for EchoTime1 for phase image (thx DylanW)
 % 180219 json: PhaseEncodingDirection use ijk, fix pf.save_PatientName (thx MichaelD)
+% 180312 json: ImageType uses BIDS format (thx ChrisR).
+% 180419 bug fix for long file name (thx NedaK).
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -752,9 +754,9 @@ for i = 1:nRun
         sN = tryGetField(s, 'AcquisitionNumber', floor(sN/100));
     end
     rNames{i} = sprintf('%s_s%03.0f', a, sN);
-    a = strfind(rNames{i}, '_s'); j_s(i) = a(end)-1;
+    a = strfind(rNames{i}, '_s'); j_s(i) = a(end) - 1;
     d = numel(rNames{i}) - maxLen;
-    if d>0, rNames{i}(a+(-d:-1)) = ''; j_s(i) = j_s(i)-d; end % keep _s007
+    if d>0, rNames{i}(j_s(i)+(-d+1:0)) = ''; j_s(i) = j_s(i)-d; end % keep _s007
 end
 
 vendor = strtok(unique(vendor));
@@ -1225,7 +1227,8 @@ end
 if isempty(t), t = tryGetField(s, 'RefAcqTimes'); end % GE or Siemens non-mosaic
 
 nSL = hdr.dim(4);
-if isempty(t) && isfield(s, 'ProtocolDataBlock') % GE with invalid RTIA_timer
+if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
+        isfield(s.ProtocolDataBlock, 'SLICEORDER') % GE with invalid RTIA_timer
     SliceOrder = s.ProtocolDataBlock.SLICEORDER;
     t = (0:nSL-1)' * TA/nSL;
     if strcmp(SliceOrder, '1') % 0/1: sequential/interleaved based on limited data
@@ -1474,7 +1477,7 @@ if ixyz(2) == ixyz(1), foo(ixyz(2),2) = 0; [~, ixyz(2)] = max(foo(:,2)); end
 if any(ixyz(3) == ixyz(1:2)), ixyz(3) = setdiff(1:3, ixyz(1:2)); end
 if nargout<2, return; end
 iSL = ixyz(3); % 1/2/3 for Sag/Cor/Tra slice
-cosSL = R(iSL, 3);
+signSL = sign(R(iSL, 3));
 
 try 
     pixdim = s.PixelSpacing;
@@ -1499,7 +1502,7 @@ if s.Columns > dim(1) % Siemens mosaic: use dim(1) since no transpose to img
     R(:,4) = R * [ceil(sqrt(dim(3))-1)*dim(1:2)/2 0 1]'; % real slice location
     vec = csa_header(s, 'SliceNormalVector'); % mosaic has this
     if ~isempty(vec) % exist for all tested data
-        if sign(vec(iSL)) ~= sign(cosSL), R(:,3) = -R(:,3); end
+        if sign(vec(iSL)) ~= signSL, R(:,3) = -R(:,3); end
         return;
     end
 elseif isfield(s, 'LastFile') && isfield(s.LastFile, 'ImagePositionPatient')
@@ -1514,7 +1517,7 @@ if isfield(s, 'CSASeriesHeaderInfo') % Siemens both mosaic and regular
     ori = {'Sag' 'Cor' 'Tra'}; ori = ori{iSL};
     sNormal = asc_header(s, ['sSliceArray.asSlice[0].sNormal.d' ori]);
     if asc_header(s, ['sSliceArray.ucImageNumb' ori]), sNormal = -sNormal; end
-    if sign(sNormal) ~= sign(cosSL), R(:,3) = -R(:,3); end
+    if sign(sNormal) ~= signSL, R(:,3) = -R(:,3); end
     if ~isempty(sNormal), return; end
 end
 
@@ -1537,7 +1540,7 @@ if isempty(pos) % keep right-handed, and warn user
     else
         errorLog(['No orientation/Location information found for ' s.NiftiName]);
     end
-elseif sign(pos-R(iSL,4)) ~= sign(cosSL) % same direction?
+elseif sign(pos-R(iSL,4)) ~= signSL % same direction?
     R(:,3) = -R(:,3);
 end
 
@@ -2429,6 +2432,8 @@ for i = 1:nFields
     elseif strcmp(nam, 'DelayTimeInTR')
         nam = 'DelayTime';
         val = val / 1000; % secs 
+    elseif strcmp(nam, 'ImageType')
+        val = regexp(val, '\\', 'split');
     end
     
     fprintf(fid, '\t"%s": ', nam);
@@ -2436,6 +2441,11 @@ for i = 1:nFields
         fprintf(fid, 'null,\n');
     elseif ischar(val)
         fprintf(fid, '"%s",\n', strrep(val, '\', '\\'));
+    elseif iscellstr(val)
+        fprintf(fid, '[');
+        fprintf(fid, '"%s", ', val{:});
+        fseek(fid, -2, 'cof'); % remove trailing comma and space
+        fprintf(fid, '],\n');
     elseif numel(val) == 1 % scalar numeric
         fprintf(fid, '%.8g,\n', val);
     elseif isvector(val) % row or column
@@ -2461,7 +2471,7 @@ fclose(fid);
 %% Check for newer version for 42997 at Matlab Central
 % Simplified from checkVersion in findjobj.m by Yair Altman
 function checkUpdate(mfile)
-webUrl = 'http://www.mathworks.com/matlabcentral/fileexchange/42997';
+webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-dicom-to-nifti-converter--nifti-tool-and-viewer';
 try
     str = urlread(webUrl);
     ind = strfind(str, 'user_version');

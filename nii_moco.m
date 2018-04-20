@@ -33,6 +33,7 @@ function varargout = nii_moco(nii, out, ref)
 % is a struct with following fields:
 %  ref: reference NIfTI name, or struct if no corrected img is saved.
 %  R: rigid xform matrix to correct the motion to ref volume, 4 by 4 by nVol
+%  mss: sum of squared diff between vol and ref img
 %  trans: translation in mm, nVol by 3
 %  rot: rotation in radian, nVol by 3
 %  FD: frame-wise displacement in mm, nVol by 1
@@ -77,8 +78,8 @@ end
 % Deal with ref vol options
 if nargin<3 || isempty(ref) % pick a good vol as ref: similar to next vol
     n = min(10, nVol);
-    mss = diff(nii.img(:,:,:,1:n), 1, 4);
-    mss = double(mss) .^ 2;
+    mss = double(nii.img(:,:,:,1:n));
+    mss = diff(mss, 1, 4) .^ 2;
     mss = reshape(mss, [], n-1);
     mss = sum(mss);
     [~, p.ref] = min(mss);

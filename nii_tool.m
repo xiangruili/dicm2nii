@@ -802,7 +802,7 @@ if islogical(cmd)
 end
 
 [err, str] = jsystem(cmd(fname));
-if err
+if err && ~exist([fname '.gz'], 'file')
     try
         gzip(fname); deleteFile(fname);
     catch
@@ -858,12 +858,8 @@ if ~err, return; end
 [err, ~] = jsystem({gz_unzip '-V'}); % gzip/gunzip on system path?
 if ~err, cmd = gz_unzip; return; end
 
-% Lastly, try Matlab gzip/gunzip
-if isempty(which(gz_unzip)) || ~usejava('jvm')
-    cmd = false; % none of de/compress tools available
-    return;
-end 
-cmd = true; % use slower matlab gzip.m/gunzip.m
+% Lastly, use Matlab gzip/gunzip if java avail
+cmd = usejava('jvm');
 
 %% check dd command, return empty if not available
 function dd = check_dd

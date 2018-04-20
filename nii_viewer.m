@@ -1120,12 +1120,7 @@ switch cmd
     case 'tc' % time course or std
         jf = hs.files.getSelectedIndex+1;
         p = get_para(hs, jf);
-        dim = p.nii.hdr.dim(2:5);
         nam = strtok(hs.files.getModel.get(jf-1), '(');
-        if dim(4)<2
-            errordlg(['There is only 1 volume for ' nam]);
-            return;
-        end
         
         labl = strrep(get(h, 'Label'), ' ...', '');
         r = num2str(getappdata(h, 'radius'));
@@ -1138,7 +1133,7 @@ switch cmd
         c = c(1:3);
         b = xyzr2roi(c, r, p.nii.hdr); % overlay space
         
-        img = nii_tool('img', p.nii.hdr.file_name); % may be re-oriented
+        img = p.nii.img;
         dim = size(img);
         img = reshape(img, [], prod(dim(4:end)))';
         img = img(:, b(:));
