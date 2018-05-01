@@ -3506,4 +3506,25 @@ for i = 1:4
     set(hs.ax(i), 'View', ae(i,:));
     camlight(hs.light(i), 'headlight');
 end
+
+%% flip slice dir for nii hdr
+% function hdr = flip_slices(hdr)
+% if hdr.sform_code<1 && hdr.sform_code<1, error('No valid form_code'); end
+% R = nii_xform_mat(hdr);
+% [~, iSL] = max(abs(R(1:3,1:3))); iSL = find(iSL==3);
+% if hdr.sform_code
+%     hdr.srow_x(iSL) = -hdr.srow_x(iSL);
+%     hdr.srow_y(iSL) = -hdr.srow_y(iSL);
+%     hdr.srow_z(iSL) = -hdr.srow_z(iSL);
+% end
+% if hdr.qform_code<1, return; end
+% R = quat2R(hdr);
+% R(:, iSL) = -R(:,iSL);
+% R = R(1:3, 1:3);
+% R = bsxfun(@rdivide, R, sqrt(sum(R .* R))); % normalize
+% dcm2quat = dicm2nii('', 'dcm2quat', 'func_handle');
+% [q, hdr.pixdim(1)] = dcm2quat(R);
+% hdr.quatern_b = q(2);
+% hdr.quatern_c = q(3);
+% hdr.quatern_d = q(4);
 %%

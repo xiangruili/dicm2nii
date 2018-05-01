@@ -367,6 +367,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180219 json: PhaseEncodingDirection use ijk, fix pf.save_PatientName (thx MichaelD)
 % 180312 json: ImageType uses BIDS format (thx ChrisR).
 % 180419 bug fix for long file name (thx NedaK).
+% 180430 store VolumeTiming from FrameReferenceTime (thx ChrisR).
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -880,12 +881,28 @@ for i = 1:nRun
         inc = nFile / dim(4);
         trans = zeros(dim(4), 3);
         rotat = zeros(dim(4), 3);
-        for j = 1:inc:nFile
-            trans(j,:) = tryGetField(h{i}{j}, 'RBMoCoTrans', [0 0 0]);
-            rotat(j,:) = tryGetField(h{i}{j}, 'RBMoCoRot',   [0 0 0]);
+        for j = 1:dim(4)
+            trans(j,:) = tryGetField(h{i}{(j-1)*inc+1}, 'RBMoCoTrans', [0 0 0]);
+            rotat(j,:) = tryGetField(h{i}{(j-1)*inc+1}, 'RBMoCoRot',   [0 0 0]);
         end
         h{i}{1}.RBMoCoTrans = trans;
         h{i}{1}.RBMoCoRot = rotat;
+    end
+    
+    % Store FrameReferenceTime: seen in Philips PET
+    if isfield(s, 'FrameReferenceTime') && numel(dim)>3
+        inc = nFile / dim(4);
+        vTime = zeros(1, dim(4));
+        dict = dicm_dict(s.Manufacturer, 'FrameReferenceTime');
+        for j = 1:dim(4)
+            s0 = dicm_hdr(h{i}{(j-1)*inc+1}.Filename, dict);
+            vTime(j) = tryGetField(s0, 'FrameReferenceTime', 0);
+        end
+        if vTime(1) > vTime(end) % could also update h{i}{1}
+            vTime = vTime(end:-1:1);
+            img = img(:,:,:, end:-1:1);
+        end
+        h{i}{1}.VolumeTiming = vTime / 1000; % ms to seconds
     end
     
     if isa(img, 'uint16') && max(img(:))<32768
@@ -1120,7 +1137,7 @@ if ~isempty(dTE)
     descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
     s.deltaTE = dTE;
 end
-descrip = sprintf('TE=%.4g;%s', TE0, descrip);
+if ~isempty(TE0), descrip = sprintf('TE=%.4g;%s', TE0, descrip); end
 
 % Get dwell time
 if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
