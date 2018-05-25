@@ -7,8 +7,9 @@ function varargout = nii_viewer(fname, varargin)
 % 
 % If no input is provided, the viewer will load included MNI_2mm brain as
 % background NIfTI. Although the preferred format is NIfTI, NII_VIEWER accepts
-% any files that can be converted into NIfTI by dicm2nii. In case of CIfTI file,
-% it will show the volume view, as well as surface view if GIfTI is available.
+% any files that can be converted into NIfTI by dicm2nii, including NIfTI,
+% dicom, PAR/REC, etc. In case of CIfTI file, it will show the volume view, as
+% well as surface view if GIfTI is available.
 % 
 % Here are some features and usage.
 % 
@@ -267,6 +268,7 @@ function varargout = nii_viewer(fname, varargin)
 % 180128 Preference stays for current window, and applies to new window only.
 % 180228 'Add overlay' check nii struct in base workspace first.
 % 180309 Implement 'Standard deviation' like for 'time course'.
+% 180522 set_xyz: bug fix for display val >2^15.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -369,7 +371,8 @@ h.setSelectionMode(0); % single selection
 h.setSelectedIndex(0); % 1st highlighted
 h.addCheckBoxListSelectedIndex(0); % check it
 h.ValueChangedCallback = cb('file'); % selection change
-h.Focusable = false;
+h.MouseReleasedCallback = @(~,~)uicontrol(hs.focus); % move focus away
+% h.Focusable = false;
 h.setToolTipText(['<html>Select image to show/modify its display ' ...
     'parameters.<br>Click checkbox to turn on/off image']);
 jScroll = com.mathworks.mwswing.MJScrollPane(h);
@@ -415,9 +418,9 @@ end
 % Controls for each file
 uipanel('Parent', ph, 'Units', 'pixels', 'Position', [1 2 412 34], ...
     'BorderType', 'etchedin', 'BorderWidth', 2);
-hs.lb = java_spinner([7 8 52 22], [p.lb -inf inf p.lb_step], ph, ...
+hs.lb = java_spinner([7 8 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
-hs.ub = java_spinner([59 8 52 22], [p.ub -inf inf p.ub_step], ph, ...
+hs.ub = java_spinner([59 8 56 22], [p.ub -inf inf p.ub_step], ph, ...
     cb('ub'), '#.##', 'max value (clipped)');
 hs.lutStr = {'grayscale' 'red' 'green' 'blue' 'violet' 'yellow' 'cyan' ...
     'red-yellow' 'blue-green' 'two-sided'  '<html><font color="red">lines' ...
@@ -2245,7 +2248,7 @@ for i = 1:hs.files.getModel.size % show top one first
     try
         val = p.nii.img(I0(1), I0(2), I0(3), t, :);
         if isfield(p, 'scl_slope')
-            val = val * p.scl_slope + p.scl_inter;
+            val = single(val) * p.scl_slope + p.scl_inter;
         end
     catch
         val = nan; % out of range
@@ -2266,7 +2269,7 @@ for i = 1:hs.files.getModel.size % show top one first
         end
     end
     
-    fmtstr = '%.5g ';
+    fmtstr = '%.4g ';
     if numel(val)>1
         fmtstr = repmat(fmtstr, 1, numel(val));
         fmtstr = ['[' fmtstr]; fmtstr(end) = ']'; %#ok
@@ -2808,8 +2811,8 @@ end
 if p.lut < 26 % no scaling for 3 phase LUTs, RGB, custom
     im = (im-rg(1)) / (rg(2)-rg(1));
     im(im>1) = 1; im(im<0) = 0;
-    alfa = im + alfa;
 end
+alfa = im + alfa;
 if p.lut ~= 29, im = repmat(im, [1 1 3]); end % gray now
 
 switch p.lut
@@ -2895,9 +2898,8 @@ switch p.lut
     case 29 % disp non-NIfTI RGB as RGB
         im = abs(im); % e.g. DTI V1
         if max(im(:)) > 1, im = im / 255; end % it should be unit8
-        alfa = sum(im,3) / 3;
+        alfa = sum(im,3)/3;
     otherwise % parula(12), jet(13), hsv(14), bone(21), pink(23), custom
-        alfa = im(:,:,1);
         if isfield(p, 'map') % custom
             map = p.map;            
         else
