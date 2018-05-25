@@ -368,6 +368,9 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180312 json: ImageType uses BIDS format (thx ChrisR).
 % 180419 bug fix for long file name (thx NedaK).
 % 180430 store VolumeTiming from FrameReferenceTime (thx ChrisR).
+% 180519 get_dti_para: bug fix to remove Philips ADC vol (thx ChrisR).
+% 180520 Make copy for vida CSA, so asc_header/csa_header faster if non-Siemens.
+% 180523 set_nii_header: use MRScaleSlope for Philips, same as dcm2niiX default.
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -820,8 +823,8 @@ for i = 1:nRun
     end
     sz = size(img); sz(numel(sz)+1:4) = 1;
     if all(sz(3:4)<2), img = permute(img, [1 2 5 3 4]); % remove dim3,4
-    elseif sz(4)<2, img = permute(img, [1:3 5 4]); % remove dim4
-    elseif sz(3)<2, img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
+    elseif sz(4)<2,    img = permute(img, [1:3 5 4]); % remove dim4: Frames
+    elseif sz(3)<2,    img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
     end
 
     if tryGetField(s, 'SamplesPerPixel', 1) > 1 % color image
@@ -893,12 +896,12 @@ for i = 1:nRun
     if isfield(s, 'FrameReferenceTime') && numel(dim)>3
         inc = nFile / dim(4);
         vTime = zeros(1, dim(4));
-        dict = dicm_dict(s.Manufacturer, 'FrameReferenceTime');
+        dict = dicm_dict('', 'FrameReferenceTime');
         for j = 1:dim(4)
             s0 = dicm_hdr(h{i}{(j-1)*inc+1}.Filename, dict);
             vTime(j) = tryGetField(s0, 'FrameReferenceTime', 0);
         end
-        if vTime(1) > vTime(end) % could also update h{i}{1}
+        if vTime(1) > vTime(end) % could also re-read sorted h{i}{1}
             vTime = vTime(end:-1:1);
             img = img(:,:,:, end:-1:1);
         end
@@ -1187,10 +1190,14 @@ end
 nii.hdr.descrip = descrip; % char[80], drop from end if exceed
 
 % data slope and intercept: apply to img if no rounding error 
-if any(isfield(s, {'RescaleSlope' 'RescaleIntercept'})) && ...
-        ~tryGetField(s, 'ApplyRescale', false) % already applied
+sclApplied = tryGetField(s, 'ApplyRescale', false);
+if any(isfield(s, {'RescaleSlope' 'RescaleIntercept'})) && ~sclApplied
     slope = tryGetField(s, 'RescaleSlope', 1); 
-    inter = tryGetField(s, 'RescaleIntercept', 0); 
+    inter = tryGetField(s, 'RescaleIntercept', 0);
+    if isfield(s, 'MRScaleSlope') % Philips: see PAR file for detail
+        inter = inter / (slope * s.MRScaleSlope);
+        slope = 1 / s.MRScaleSlope;
+    end
     val = sort(double([max(nii.img(:)) min(nii.img(:))]) * slope + inter);
     dClass = class(nii.img);
     if isa(nii.img, 'float') || (mod(slope,1)==0 && mod(inter,1)==0 ... 
@@ -1200,6 +1207,9 @@ if any(isfield(s, {'RescaleSlope' 'RescaleIntercept'})) && ...
         nii.hdr.scl_slope = slope;
         nii.hdr.scl_inter = inter;
     end
+elseif sclApplied && isfield(s, 'MRScaleSlope')
+    slope = tryGetField(s, 'RescaleSlope', 1) * s.MRScaleSlope; 
+    nii.img = nii.img / slope;
 end
 
 % Possible patient position: HFS/HFP/FFS/FFP / HFDR/HFDL/FFDR/FFDL
@@ -1259,7 +1269,7 @@ end
 
 % Siemens multiframe: read FrameAcquisitionDatetime 1st file
 if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
-    s2 = struct('FrameAcquisitionDatetime', {cell(27,1)});
+    s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
     s2 = dicm_hdr(s, s2, 1:nSL);
     try
         t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
@@ -1380,17 +1390,11 @@ bvec(isnan(bvec)) = 0;
 if strncmpi(s.Manufacturer, 'Philips', 7)
     % Remove computed ADC: it may not be the last vol
     ind = find(bval>1e-4 & sum(abs(bvec),2)<1e-4);
-    if ~isempty(ind)
-        try isISO = s.LastFile.DiffusionDirectionality;
-        catch, isISO = false;
-        end
-        if ~isISO
-            bval(ind) = [];
-            bvec(ind,:) = [];
-            nii.img(:,:,:,ind) = [];
-            nDir = nDir - numel(ind);
-            nii.hdr.dim(5) = nDir;
-        end
+    if ~isempty(ind) % DiffusionDirectionality: 'ISOTROPIC'
+        bval(ind) = [];
+        bvec(ind,:) = [];
+        nii.img(:,:,:,ind) = [];
+        nii.hdr.dim(5) = nDir - numel(ind);
     end
 end
 
@@ -1438,16 +1442,10 @@ fclose(fid);
 %% Subfunction, return a parameter from CSA Image/Series header
 function val = csa_header(s, key)
 val = [];
-csa = 'CSAImageHeaderInfo';
-asc = 'CSASeriesHeaderInfo';
-if ~isfield(s, csa)
-    try val = s.SharedFunctionalGroupsSequence.Item_1.(asc).Item_1.(key); return; end
-    try val = s.PerFrameFunctionalGroupsSequence.Item_1.(csa).Item_1.(key); end
-elseif isfield(s, csa) && isfield(s.(csa), key)
-    val = s.(csa).(key);
-elseif isfield(s, asc) && isfield(s.(asc), key)
-    val = s.(asc).(key);
-end
+fld = 'CSAImageHeaderInfo';
+if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
+fld = 'CSASeriesHeaderInfo';
+if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 
 %% Subfunction, Convert 3x3 direction cosine matrix to quaternion
 % Simplied from Quaternions by Przemyslaw Baranski 
@@ -1555,7 +1553,7 @@ if isempty(pos) % keep right-handed, and warn user
     if haveIPP && haveIOP
         errorLog(['Please check whether slices are flipped: ' s.NiftiName]);
     else
-        errorLog(['No orientation/Location information found for ' s.NiftiName]);
+        errorLog(['No orientation/location information found for ' s.NiftiName]);
     end
 elseif sign(pos-R(iSL,4)) ~= signSL % same direction?
     R(:,3) = -R(:,3);
@@ -1565,28 +1563,23 @@ end
 function val = asc_header(s, key)
 val = []; 
 csa = 'CSASeriesHeaderInfo';
-if ~isfield(s, csa)
-    try str = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1.MrPhoenixProtocol; 
-    catch, return;
-    end
-elseif isfield(s.(csa), 'MrPhoenixProtocol')
+if ~isfield(s, csa), return; end
+if isfield(s.(csa), 'MrPhoenixProtocol')
     str = s.(csa).MrPhoenixProtocol;
 elseif isfield(s.(csa), 'MrProtocol') % older version dicom
     str = s.(csa).MrProtocol;
 else % in case of failure to decode CSA header
-    str = char(s.(csa)');
+    str = char(s.(csa)(:)');
     str = regexp(str, 'ASCCONV BEGIN(.*)ASCCONV END', 'tokens', 'once');
     if isempty(str), return; end
     str = str{1};
 end
 
 % tSequenceFileName  = ""%SiemensSeq%\gre_field_mapping""
-i0 = strfind(str, [char(10) key]); %#ok<*CHARTEN> regexp bad for key with [ etc
-if isempty(i0), return; end
-i0 = i0(1) + 1 + numel(key);
-i1 = regexp(str(i0:end), '\s*=\s*', 'end', 'once') + i0;
-str = regexp(str(i1:end), '.*?(?=\n)', 'match', 'once');
-str = strtrim(str);
+expr = ['\n' regexptranslate('escape', key) '.*?=\s*(.*?)\n'];
+str = regexp(str, expr, 'tokens', 'once');
+if isempty(str), return; end
+str = str{1};
 
 if strncmp(str, '""', 2) % str parameter
     val = str(3:end-2);
@@ -1923,12 +1916,13 @@ end
 %% subfunction: extract useful fields for multiframe dicom
 function s = multiFrameFields(s)
 pffgs = 'PerFrameFunctionalGroupsSequence';
-if any(~isfield(s, {'SharedFunctionalGroupsSequence' pffgs})), return; end
+sfgs = 'SharedFunctionalGroupsSequence';
+if any(~isfield(s, {sfgs pffgs})), return; end
 
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
         'RepetitionTime' 'FlipAngle' 'RescaleIntercept' 'RescaleSlope' ...
         'ImageOrientationPatient' 'ImagePositionPatient' ...
-        'InPlanePhaseEncodingDirection'};
+        'InPlanePhaseEncodingDirection' 'MRScaleSlope'};
 for i = 1:numel(flds)
     if isfield(s, flds{i}), continue; end
     a = MF_val(flds{i}, s, 1);
@@ -1940,6 +1934,14 @@ if ~isfield(s, 'EchoTime')
     if ~isempty(a), s.EchoTime = a;
     else, try s.EchoTime = s.EchoTimeDisplay; end
     end
+end
+
+% for Siemens: the redundant copy makes non-Siemens code faster
+if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
+    s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
+end
+if isfield(s.(pffgs).Item_1, 'CSAImageHeaderInfo')
+    s.CSAImageHeaderInfo = s.(pffgs).Item_1.CSAImageHeaderInfo.Item_1; % Frame 1
 end
 
 try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
@@ -2028,7 +2030,7 @@ switch fld
     case {'InPlanePhaseEncodingDirection' 'MRAcquisitionFrequencyEncodingSteps' ...
             'MRAcquisitionPhaseEncodingStepsInPlane'}
         sq = 'MRFOVGeometrySequence';
-    case {'SliceNumberMR' 'EchoTime'}
+    case {'SliceNumberMR' 'EchoTime' 'MRScaleSlope'}
         sq = 'PrivatePerFrameSq'; % Philips
     otherwise
         error('Sequence for %s not set.', fld);
@@ -2491,8 +2493,8 @@ function checkUpdate(mfile)
 webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-dicom-to-nifti-converter--nifti-tool-and-viewer';
 try
     str = urlread(webUrl);
-    ind = strfind(str, 'user_version');
-    latestStr = regexp(str(ind(1):end), '(\d{4}.\d{2}.\d{2})', 'match', 'once');
+    ind = regexp(str, 'user_version', 'once');
+    latestStr = regexp(str(ind:end), '(\d{4}.\d{2}.\d{2})', 'match', 'once');
 catch me
     errordlg(me.message, 'Web access error');
     web(webUrl, '-browser');
@@ -2539,7 +2541,7 @@ warndlg(['Package updated successfully. Please restart ' mfile ...
 % If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. 
 % If not exists, it may still be mosaic due to Siemens bug seen in syngo MR
 % 2004A 4VA25A phase image. Then we check EchoColumnPosition in CSA, and if it
-% is greater than half of the slice dim, sSliceArray.lSize is used as nMos. 
+% is smaller than half of the slice dim, sSliceArray.lSize is used as nMos. 
 % If no CSA at all, the better way may be to peek into img to get nMos. Then the
 % first attempt is to check whether there are padded zeros. If so we count zeros
 % either at top or bottom of the img to decide real slice dim. In case there is
