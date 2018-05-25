@@ -95,6 +95,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 170921 read_ProtocolDataBlock: decode into struct with better performance.
 % 171228 philips_par: bug fix for possible slice flip. thx ShereifH.
 % 170309 philips_par: take care of incomplete volume if not XYTZ. thx YiL.
+% 180507 read_val: keep bytes if typecast fails. thx JillM.
 
 persistent dict_full;
 s = []; info = '';
@@ -164,7 +165,7 @@ tsUID = '';
 if ~isempty(i) % empty for truncated
     i = i(1) + 6;
     n = ch2int16(b8(i+(0:1)), 0);
-    tsUID = dcm_str(b8(i+1+(1:n)));
+    tsUID = deblank(char(b8(i+1+(1:n))));
     p.expl = ~strcmp(tsUID, '1.2.840.10008.1.2'); % may be wrong for some
     p.be =    strcmp(tsUID, '1.2.840.10008.1.2.2');
 end
@@ -210,7 +211,7 @@ if toSearch % search each tag if header is short and not many tags asked
         if ~isempty(i)
             i = i(1) + 4 + p.expl*2; % Manufacturer should be the earliest one
             n = ch2int16(b8(i+(0:1)), p.be);
-            dat = dcm_str(b8(i+1+(1:n)));
+            dat = deblank(char(b8(i+1+(1:n))));
             [p, dict] = updateVendor(p, dat);
         end
     end
@@ -269,7 +270,6 @@ while ~toSearch
         break; % done or give up
     end
     iPre = i; % back it up for PixelData
-    
     [dat, name, info, i, tg] = read_item(b8, i, p);
     if ~isempty(info), break; end
     if ~p.fullHdr && tg>p.dict.tag(end), break; end % done for partial hdr
@@ -357,9 +357,7 @@ end
 % compressed PixelData, n can be 0xffffffff
 if ~hasVR && n==4294967295, vr = 'SQ'; end % best guess
 if n+i>p.iPixelData && ~strcmp(vr, 'SQ'), i = i+n; return; end % PixelData or err
-% if group==33
 % fprintf('(%04x %04x) %s %6.0f %s\n', group, elmnt, vr, n, name);
-% end
 
 if strcmp(vr, 'SQ')
     nEnd = min(i+n, p.iPixelData); % n is likely 0xffff ffff
@@ -367,6 +365,15 @@ if strcmp(vr, 'SQ')
 else
     [dat, info] = read_val(b8(i+(0:n-1)), vr, swap); i=i+n;
 end
+% if group==33
+%     fprintf('\t''%04X'' ''%04X'' ''%s'' ''%s'' ', group, elmnt, vr, name);
+%     if numel(dat)>99, fprintf('''Long''');
+%     elseif ischar(dat), fprintf('''%s''', dat);
+%     elseif isnumeric(dat), fprintf(''''); fprintf('%g ', dat); fprintf('''');
+%     else, fprintf('''SQ''');
+%     end
+%     fprintf('\n');
+% end
 end
 
 %% Subfunction: decode SQ, called by read_item (recursively)
@@ -454,12 +461,6 @@ function d = ch2int16(u8, swap)
     d = d(1) + d(2)*256;
 end
 
-%% subfunction: remove trailing null and space for uint8
-function ch = dcm_str(b)
-    while ~isempty(b) && b(end)==0, b(end) = []; end
-    ch = deblank(char(b));
-end
-
 %% subfunction: return value length, numel(b)=6
 function [n, nvr] = val_len(vr, b, expl, swap)
 len16 = 'AE AS AT CS DA DS DT FD FL IS LO LT PN SH SL SS ST TM UI UL US';
@@ -481,7 +482,7 @@ function [dat, info] = read_val(b, vr, swap)
 if strcmp(vr, 'DS') || strcmp(vr, 'IS')
     dat = sscanf(char(b), '%f\\'); % like 1\2\3
 elseif ~isempty(strfind('AE AS CS DA DT LO LT PN SH ST TM UI UT', vr)) % char
-    dat = dcm_str(b);
+    dat = deblank(char(b));
 else % numeric data, UN. SQ taken care of
     fmt = vr2fmt(vr);
     if isempty(fmt)
@@ -489,7 +490,8 @@ else % numeric data, UN. SQ taken care of
         info = sprintf('Given up: Invalid VR (%d %d)', vr);
         return;
     end
-    dat = typecast(b, fmt)';
+    dat = b'; % keep as bytes in case typecast fails
+    try dat = typecast(dat, fmt); end
     if swap, dat = swapbytes(dat); end
 end
 info = '';
@@ -671,7 +673,6 @@ for i = 1:numel(flds)
             a = sscanf(a, '%f\\'); % like 1\2\3
             try s1.(flds{i})(:,k) = a; end %#ok<*TRYNC> ignore in case of error
         elseif isCH
-            while ~isempty(a) && a(end)==0, a(end) = ''; end % for Octave
             try s1.(flds{i}){k} = deblank(a); end
         else
             a = typecast(uint8(a), fmt)';
@@ -849,6 +850,7 @@ getTableVal('recon resolution', 'Columns');
 s.Rows = s.Columns(2); s.Columns = s.Columns(1);
 getTableVal('rescale intercept', 'RescaleIntercept');
 getTableVal('rescale slope', 'RescaleSlope');
+getTableVal('scale slope', 'MRScaleSlope');
 getTableVal('window center', 'WindowCenter', 1:nImg);
 getTableVal('window width', 'WindowWidth', 1:nImg);
 mx = max(s.WindowCenter + s.WindowWidth/2);
