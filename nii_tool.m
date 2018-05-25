@@ -927,6 +927,7 @@ if ~isempty(dd) && nargin>1 && ~isinf(nByte) % unzip only part of data
 end
 
 [err, str] = system([cmd(fname) '> "' outName '"']);
+% [err, str] = jsystem({'pigz' '-nfdc' fname '>' outName});
 if err
     try
     	outName = gunzip(fname, pth);
@@ -1212,8 +1213,9 @@ try
     pb = java.lang.ProcessBuilder(cmd);
     pb.redirectErrorStream(true); % ErrorStream to InputStream
     process = pb.start();
-    scanner = java.util.Scanner(process.getInputStream).useDelimiter('\\A');
+    scanner = java.util.Scanner(process.getInputStream).useDelimiter('\A');
     if scanner.hasNext(), out = char(scanner.next()); else, out = ''; end
+    %err = process.waitFor();
     err = process.exitValue; % waitFor may hang. Error if not exited
     if err, error(out); end
 catch % fallback to system if error
