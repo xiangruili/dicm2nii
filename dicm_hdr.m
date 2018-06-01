@@ -807,9 +807,17 @@ end
 s.NumberOfFrames = nImg;
 s.NumberOfTemporalPositions = nVol;
 
-% PAR/REC file may not start with SliceNumber of 1, WHY?
-sl = para(iSL, colIndex('slice number'));
-if any(diff(sl,2)>0), s.SliceNumber = sl; end % slice order in REC file
+% PAR/REC file may not start with SliceNumber of 1, WHY? JB: because data are stored in the order they are acquired?
+% for functional MRI, the dynamic scan number is usually ascending, but slices can be in different orders in each volume
+% for DTI, slices at different b values and gradient orientations can be interleaved
+% so we can sort these three fields + the slice number to create an index
+% that can be used to re-order the slices later on
+% the array to sort must also include other filed that may have (for instance: image_type_mr ofr magnitude/phase
+seq  = para(:, [colIndex('image_type_mr') colIndex('dynamic scan number') colIndex('diffusion b value number') colIndex('gradient orientation number') colIndex('slice number')]);
+[~,index] = sortrows(seq); % get index to re-order slices
+s.SliceNumber = (1:nImg)'; % invert the index to obtain the slice order
+s.SliceNumber(index) = s.SliceNumber; %slice order in REC file
+
 
 imgType = para(iVol, colIndex('image_type_mr')); % 0 mag; 3, phase?
 if any(diff(imgType) ~= 0) % more than 1 type of image
@@ -864,11 +872,13 @@ getTableVal('number of averages', 'NumberOfAverages');
 % getTableVal('trigger_time', 'TriggerTime', 1:nImg);
 % getTableVal('dyn_scan_begin_time', 'TimeOfAcquisition', 1:nImg);
 if isDTI
-    getTableVal('diffusion_b_factor', 'B_value', iVol);
+    gradientSeq  = para(:, [colIndex('diffusion b value number') colIndex('gradient orientation number')]);
+    [~,index] = unique(gradientSeq,'rows');
+    getTableVal('diffusion_b_factor', 'B_value', index);
     fld = 'bvec_original';
     a = regexp(str, 'diffusion\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})\)', 'tokens', 'once');
     ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
-    getTableVal('diffusion', fld, iVol);
+    getTableVal('diffusion', fld, index);
     if isfield(s, fld), s.(fld) = s.(fld)(:, ax_order); end
 end
 getTableVal('TURBO factor', 'TurboFactor');

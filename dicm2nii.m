@@ -847,7 +847,17 @@ for i = 1:nRun
             end
         end
         % fix weird slice ordering for PAR and multiframe
-        if isfield(s, 'SliceNumber'), img(:,:,s.SliceNumber,:) = img; end
+        if isfield(s, 'SliceNumber'), 
+          switch(length(s.SliceNumber))
+            case size(img,3)
+              img(:,:,s.SliceNumber,:) = img; 
+            case size(img,3) * size(img,4)
+              dim = size(img);
+              img = reshape(img,[dim(1:2), dim(3)*dim(4)]);
+              img(:,:,s.SliceNumber) = img; 
+              img = reshape(img,dim);
+          end
+        end
     end
 
     dim = size(img);
