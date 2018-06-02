@@ -96,15 +96,17 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 171228 philips_par: bug fix for possible slice flip. thx ShereifH.
 % 170309 philips_par: take care of incomplete volume if not XYTZ. thx YiL.
 % 180507 read_val: keep bytes if typecast fails. thx JillM.
+% 180528 remove reversed search so allow to get item from 1st PerFrame.
+% 180531 philips_par: use SortFrames to solve XYTZ and incomplete volume.
 
 persistent dict_full;
 s = []; info = '';
-p.fullHdr = false; % parameters: only updated in main func
 if nargin<2 || isempty(dict)
     if isempty(dict_full), dict_full = dicm_dict; end
     p.fullHdr = true;
     p.dict = dict_full; 
 else
+    p.fullHdr = false; % p updated in main func
     p.dict = dict;
 end
 
@@ -201,45 +203,57 @@ nTag = numel(p.dict.tag); % always search if only one tag: can find it in any SQ
 toSearch = nTag<2 || (nTag<30 && ~any(strcmp(p.dict.vr, 'SQ')) && p.iPixelData<1e6);
 if toSearch % search each tag if header is short and not many tags asked
     if ~isempty(tsUID), s.TransferSyntaxUID = tsUID; end % hope it is 1st tag
-    ib = p.iPixelData-1; % will be updated each loop
+    bc = char(b8(1:p.iPixelData));
     if ~isempty(p.dict.vendor) && any(mod(p.dict.group, 2)) % private group
         tg = char([8 0 112 0]); % Manufacturer
         if p.be, tg = tg([2 1 4 3]); end
         if p.expl, tg = [tg 'LO']; end
-        i = strfind(char(b8(1:ib)), tg);
+        i = strfind(bc, tg);
         i = i(mod(i,2)==1);
         if ~isempty(i)
             i = i(1) + 4 + p.expl*2; % Manufacturer should be the earliest one
             n = ch2int16(b8(i+(0:1)), p.be);
-            dat = deblank(char(b8(i+1+(1:n))));
+            dat = deblank(bc(i+1+(1:n)));
             [p, dict] = updateVendor(p, dat);
         end
     end
     
-    s1 = [];
-    for k = numel(p.dict.tag):-1:1 % reverse order so reduce range each loop
+    tg = char([40 0 8 0]); % NumberOfFrames
+    if p.be, tg = tg([2 1 4 3]); end
+    if p.expl, tg = [tg 'IS']; end
+    i = strfind(bc, tg);
+    i = i(mod(i,2)==1);
+    if ~isempty(i)
+        i = i(1) + 4 + p.expl*2; % take 1st
+        n = ch2int16(b8(i+(0:1)), p.be);
+        p.nFrames = str2double(bc(i+1+(1:n)));
+    end
+    
+    for k = 1:numel(p.dict.tag)
         group = p.dict.group(k);
         swap = p.be && group~=2;
         hasVR = p.expl || group==2;
         tg = char(typecast([group p.dict.element(k)], 'uint8'));
         if swap, tg = tg([2 1 4 3]); end
-        i = strfind(char(b8(1:ib)), tg);
+        i = strfind(bc, tg);
         i = i(mod(i,2)==1);
         if isempty(i), continue; % no this tag, next
+        elseif isfield(p, 'nFrames') && numel(i)==p.nFrames, i = i(1);
+        % elseif strcmp('SeriesInstanceUID', p.dict.name{k}), i = i(end);
         elseif numel(i)>1 % +1 tags found, add vr to try again if expl
             if hasVR
                 tg = [tg p.dict.vr{k}]; %#ok
-                i = strfind(char(b8(1:ib)), tg);
+                i = strfind(bc, tg);
                 i = i(mod(i,2)==1);
                 if numel(i)~=1, toSearch = false; break; end
             else
                 toSearch = false; break; % switch to regular way
             end
         end
-        ib = i-1; % make next tag search faster
         i = i + 4; % tag
         if hasVR
-            vr = char(b8(i+(0:1))); i = i+2;
+            vr = bc(i+(0:1)); i = i+2;
+            if any(vr>'Z') || any(vr<'A'), toSearch = false; break; end
             if strcmp(vr, 'UN') || strcmp(vr, 'OB'), vr = p.dict.vr{k}; end
         else
             vr = p.dict.vr{k};
@@ -250,11 +264,7 @@ if toSearch % search each tag if header is short and not many tags asked
         if i+n-1>p.iPixelData, break; end
         [dat, info] = read_val(b8(i+(0:n-1)), vr, swap);
         if ~isempty(info), toSearch = false; break; end % re-do in regular way
-        if ~isempty(dat), s1.(p.dict.name{k}) = dat; end
-    end
-    if ~isempty(s1) % reverse the order: just make it look normal
-        nam = fieldnames(s1);
-        for k = numel(nam):-1:1, s.(nam{k}) = s1.(nam{k}); end
+        if ~isempty(dat), s.(p.dict.name{k}) = dat; end
     end
 end
 
@@ -622,6 +632,7 @@ nf = numel(iFrame);
 
 for i = 1:numel(flds)
     k = find(strcmp(dict.name, flds{i}), 1, 'last'); % GE has another ipp tag
+    if isempty(k), continue; end % likely private tag for another vendor
     vr = dict.vr{k};
     group = dict.group(k);
     isBE = be && group~=2;
@@ -790,44 +801,53 @@ if isfield(s, 'IndexInREC') % why Philips includes this?
     s = rmfield(s, 'IndexInREC');
 end
 
-nVol = nImg / nSL;
-s.Dim3IsVolume = (diff(para(1:2, colIndex('slice number'))) == 0);
-if s.Dim3IsVolume % incomplete volume not taken care of due to REC file related
-    iVol = 1:nVol;
-    iSL = 1:nVol:nImg;
-else
-    if mod(nVol, 1) > 0 % incomplete volume in the end: drop it
-        nVol = floor(nVol);
-        nImg = nVol * nSL;
-        para(nImg+1:end, :) = [];
-    end
-    iVol = 1:nSL:nImg;
-    iSL = 1:nSL;
+% SortFrames solves XYTZ, unusual slice order, incomplete volume etc
+nVol = floor(nImg / nSL); % floor() in case of incomplete volume
+for key = {'dynamic scan number' 'gradient orientation number' ...
+           'cardiac phase number' 'image_type_mr' 'label type' 'echo number'}
+     cVol = colIndex(key);
+     n = numel(unique(para(:,cVol)));
+     if n==nVol || n==nVol+1, break; end % use it as vol index
 end
-s.NumberOfFrames = nImg;
+seq = para(:, [colIndex('slice number') cVol]);
+[seq, ind] = sortrows(seq); % this sort idea is from julienbesle
+
+if nVol*nSL < nImg % interrupted volume
+    lastV = seq(:,1) == nVol+1;
+    ind(lastV) = []; % remove incomplete volume: last
+end
+ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
+ind = ind(:)';
+if ~isequal(ind, 1:nImg)
+    para = para(ind, :); % XYZT order
+    s.SortFrames = ind; % for PAR, sort (drop) frames only in dicm2nii
+end
+
+s.NumberOfFrames = numel(ind); % may be smaller than nImg
 s.NumberOfTemporalPositions = nVol;
 
-% PAR/REC file may not start with SliceNumber of 1, WHY?
-sl = para(iSL, colIndex('slice number'));
-if any(diff(sl,2)>0), s.SliceNumber = sl; end % slice order in REC file
-
-imgType = para(iVol, colIndex('image_type_mr')); % 0 mag; 3, phase?
+iVol = (0:nVol-1)*nSL + 1;
+typ = {'magnitude' 'real' 'imaginary' 'phase'};
+imgType = para(iVol, colIndex('image_type_mr')); % 0:3
+imgType(imgType==16) = 0;
+imgType(imgType==17) = 3;
+imgType(imgType==18) = 1;
+imgType(imgType>3)   = 0; % unknown treated as magnitude
 if any(diff(imgType) ~= 0) % more than 1 type of image
     s.ComplexImageComponent = 'MIXED';
-    s.VolumeIsPhase = (imgType==3 | imgType==17); % one for each vol
-    s.LastFile.RescaleIntercept = para(end, colIndex('rescale intercept'));
-    s.LastFile.RescaleSlope = para(end, colIndex('rescale slope'));
-elseif imgType(1)==0 || imgType(1)==16
-    s.ComplexImageComponent = 'MAGNITUDE';
-elseif imgType(1)==3 || imgType(1)==17
-    s.ComplexImageComponent = 'PHASE';
+    s.Volumes.ComplexImageComponent = typ(imgType+1); % one for each vol
+    s.Volumes.RescaleIntercept = para(iVol, colIndex('rescale intercept'));
+    s.Volumes.RescaleSlope = para(iVol, colIndex('rescale slope'));
+    s.Volumes.MRScaleSlope = para(iVol, colIndex('scale slope'));
+else
+    s.ComplexImageComponent = typ(imgType(1)+1);
 end
 
 % These columns should be the same for nifti-convertible images: 
 cols = {'image pixel size' 'recon resolution' 'image angulation' ...
         'slice thickness' 'slice gap' 'slice orientation' 'pixel spacing'};
 if ~strcmp(s.ComplexImageComponent, 'MIXED')
-    cols = [cols {'rescale intercept' 'rescale slope'}];
+    cols = [cols {'rescale intercept' 'rescale slope' 'scale slope'}];
 end
 ind = [];
 for i = 1:numel(cols)
@@ -851,17 +871,12 @@ s.Rows = s.Columns(2); s.Columns = s.Columns(1);
 getTableVal('rescale intercept', 'RescaleIntercept');
 getTableVal('rescale slope', 'RescaleSlope');
 getTableVal('scale slope', 'MRScaleSlope');
-getTableVal('window center', 'WindowCenter', 1:nImg);
-getTableVal('window width', 'WindowWidth', 1:nImg);
-mx = max(s.WindowCenter + s.WindowWidth/2);
-mn = min(s.WindowCenter - s.WindowWidth/2);
-s.WindowCenter = round((mx+mn)/2);
-s.WindowWidth = ceil(mx-mn);
 getTableVal('slice thickness', 'SliceThickness');
-getTableVal('echo_time', 'EchoTime');
+getTableVal('echo_time', 'EchoTimes', iVol);
+s.EchoTime = s.EchoTimes(1);
 getTableVal('image_flip_angle', 'FlipAngle');
 getTableVal('number of averages', 'NumberOfAverages');
-% getTableVal('trigger_time', 'TriggerTime', 1:nImg);
+getTableVal('trigger_time', 'CardiacTriggerDelayTimes', iVol);
 % getTableVal('dyn_scan_begin_time', 'TimeOfAcquisition', 1:nImg);
 if isDTI
     getTableVal('diffusion_b_factor', 'B_value', iVol);
@@ -1252,11 +1267,7 @@ s.ImagePositionPatient = pos(:,1);
 s.LastFile.ImagePositionPatient = pos(:,2);
 
 % Following make dicm2nii happy
-try
-    [~, nam] = fileparts(bv.FirstDataSourceFile);
-    serN = sscanf(nam, [subj '-%f'], 1);
-    if ~isempty(serN), s.SeriesNumber = serN; end
-end
+s.SeriesInstanceUID = sprintf('%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999));
 c = class(s.PixelData);
 if strcmp(c, 'double') %#ok
     s.BitsAllocated = 64;
