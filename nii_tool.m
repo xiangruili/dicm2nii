@@ -278,7 +278,7 @@ if any(cmd=='?'), subFuncHelp(mfilename, cmd); return; end
 
 if strcmpi(cmd, 'init')
     if nargin<2, error('nii_tool(''%s'') needs second input', cmd); end
-    for i = 1:size(C,1), nii.hdr.(C{i,1}) = C{i,4}; end
+    nii.hdr = cell2struct(C(:,4), C(:,1));
     nii.img = varargin{1};
     if numel(size(nii.img))>8
         error('NIfTI img can have up to 7 dimension');
@@ -663,7 +663,7 @@ if niiVer == 1
     C = {
     % name              len  format     value           offset
     'sizeof_hdr'        1   'int32'     348             0
-    'data_type'         10  'char*1'    ''              4                                          
+    'data_type'         10  'char*1'    ''              4
     'db_name'           18  'char*1'    ''              14
     'extents'           1   'int32'     16384           32
     'session_error'     1   'int16'     0               36
