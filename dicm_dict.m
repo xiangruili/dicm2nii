@@ -256,6 +256,7 @@ C = {
     '0018' '9114' 'SQ' 'MREchoSequence'
     '0018' '9115' 'SQ' 'MRModifierSequence'
     '0018' '9117' 'SQ' 'MRDiffusionSequence'
+    '0018' '9118' 'SQ' 'CardiacTriggerSequence'
     '0018' '9119' 'SQ' 'MRAveragesSequence'
     '0018' '9125' 'SQ' 'MRFOVGeometrySequence'
     '0018' '9147' 'CS' 'DiffusionAnisotropyType'
@@ -324,6 +325,7 @@ C = {
     '0020' '9113' 'SQ' 'PlanePositionSequence'
     '0020' '9116' 'SQ' 'PlaneOrientationSequence'
     '0020' '9128' 'UL' 'TemporalPositionIndex'
+    '0020' '9153' 'FD' 'CardiacTriggerDelayTime'
     '0020' '9156' 'US' 'FrameAcquisitionNumber'
     '0020' '9157' 'UL' 'DimensionIndexValues'
     '0020' '9164' 'UI' 'DimensionOrganizationUID'
@@ -331,6 +333,7 @@ C = {
     '0020' '9167' 'AT' 'FunctionalGroupPointer'
     '0020' '9221' 'SQ' 'DimensionOrganizationSequence'
     '0020' '9222' 'SQ' 'DimensionIndexSequence'
+    '0020' '9251' 'FD' 'RRIntervalTimeMeasured'
     '0020' '9254' 'FD' 'RespiratoryIntervalTime'
     '0020' '9255' 'FD' 'RespiratoryTriggerDelayTime'
     '0020' '9421' 'LO' 'DimensionDescriptionLabel'
@@ -537,7 +540,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '1044' 'DS' 'B1rms' % 100 1.09702 ?
 	'0021' '1045' 'CS' 'B1rmsSupervision' % YES ?
 	'0021' '1046' 'DS' 'TalesReferencePower' % 2333.36 ?
-% 	'0021' '1049' 'CS' 'Private_0021_1049' % DIFFUSION
+	'0021' '1049' 'CS' 'AcquisitionContrast' % DIFFUSION ?
 	'0021' '1050' 'US' 'RFEchoTrainLength' % 1 
 	'0021' '1051' 'US' 'EchoTrainLength' % 71 ?
 	'0021' '1053' 'CS' 'Laterality4MF' % U ?
