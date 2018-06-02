@@ -218,7 +218,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 140513 change stored phase direction to image reference for FSL unwarp;
 %        Simplify code for dim_info.
 % 140516 Switch back to ProtocolName for SIEMENS to take care of MOCO series;
-%        Detect Philips Dim3IsVolume (for multi files) during dicom check; 
+%        Detect Philips XYTZ (for multi files) during dicom check; 
 %        Work for GE interleaved slices even if InstanceNumber is in time order;
 %        Do ImagePositionPatient check for all vendors;
 %        Simplify code for save_dti_para.
@@ -264,7 +264,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 %        Deal with dim3-RGB and dim4-frames due to dicm_img.m update.
 % 150222 Remove useless, mis-used TriggerTime for partial hdr; also B_matrix.
 % 150302 No hardcoded sign change for DTI bvec, except for GE;
-%        set_nii_header: do flip only once after permute;
+%        set_nii_hdr: do flip only once after permute;
 % 150303 Bug fix for phPos: result was right by lucky mistake;
 %        Progress shows nii dim, more informative than number of files.
 % 150305 Replace null with cross: null gives inconsistent signs;
@@ -272,7 +272,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 150306 GE: fully sort slices by loc to ease bvec sign (test data needed);
 %        bvec sign simplified by above sort & corrected R for Philips/Siemens.
 % 150309 GUI: added the little popup for 'about/license'.  
-% 150323 Siemens non-mosaic: RefAcqTimes from ucMode, AcquisitionTime(disabled).   
+% 150323 Siemens non-mosaic: timing from ucMode, AcquisitionTime(disabled).   
 % 150324 mandatory flds reduced to 5; get info by asc_header if possible;
 % 150325 Use SeriesInstanceUID to take care of multiple Study and PatientName; 
 %        Remove 5th input (subj); GUI updated; subjName in file name if needed;
@@ -282,7 +282,6 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 150413 InstanceNumber is not mandatory (now total 4);
 %        Check missing files for non-DTI mosaic by InstanceNumber.
 % 150418 phaseDirection: bug fix for Philips, simplify for others.
-% 150420 store raw timing in RefAcqTimes, avoid confusion with SliceTiming.
 % 150423 fix matlabpool for later matlab versions; no auto-close anymore;
 %        GUI figure handle can't be uint32 for matlab 2015;
 %        Turn off saveExt40: FSL 5.0.8 may read vox_offset as 352.
@@ -370,7 +369,14 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180430 store VolumeTiming from FrameReferenceTime (thx ChrisR).
 % 180519 get_dti_para: bug fix to remove Philips ADC vol (thx ChrisR).
 % 180520 Make copy for vida CSA, so asc_header/csa_header faster if non-Siemens.
-% 180523 set_nii_header: use MRScaleSlope for Philips, same as dcm2niiX default.
+% 180523 set_nii_hdr: use MRScaleSlope for Philips, same as dcm2niiX default.
+% 180526 split_philips_phase: fix the long time slope/inter bug for phase image;
+%        move some code (eg SliceTiming related) out of main function.
+% 180527 fix vida SliceTiming unit, but now turn it off, and rely on ucMode.
+% 180530 store EchoTimes and CardiacTriggerDelayTimes;
+%        split_components: not only phase, json for each file (thx ChrisR).
+% 180601 use SortFrames for multiframe and PAR (thx JulienB & ChrisR; 
+%        Side product: Philips DTI b=0 loc consistent with dcm2niiX.
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -503,7 +509,7 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'ImageOrientationPatient' 'ImagePositionPatient' 'PixelSpacing' ...
     'SliceThickness' 'SpacingBetweenSlices' ... % these 10 indexed in code
     'PixelRepresentation' 'BitsStored' 'HighBit' 'SamplesPerPixel' ...
-    'PlanarConfiguration' 'EchoNumber' 'RescaleIntercept' 'RescaleSlope' ...
+    'PlanarConfiguration' 'EchoTime' 'RescaleIntercept' 'RescaleSlope' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
     'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
@@ -525,7 +531,7 @@ end
 %% sort headers into cell h by SeriesInstanceUID, EchoNumber and InstanceNumber
 h = {}; % in case of no dicom files at all
 errInfo = '';
-seriesUIDs = {};
+seriesUIDs = {}; ETs = {};
 for k = 1:nFile
     s = hh{k};
     if isempty(s) || any(~isfield(s, flds(1:3))) || ~isfield(s, 'PixelData') ...
@@ -549,10 +555,16 @@ for k = 1:nFile
     if isempty(m)
         m = numel(seriesUIDs)+1;
         seriesUIDs{m} = sUID;
+        ETs{m} = [];
     end
     
-    % EchoNumber is needed for Siemens fieldmap mag series
-    i = tryGetField(s, 'EchoNumber', 1); if i<1, i = 1; end
+    % EchoTime is needed for Siemens fieldmap mag series
+    et = tryGetField(s, 'EchoTime');
+    if isempty(et), i = 1;
+    else
+        i = find(et == ETs{m}); % strict equal?
+        if isempty(i), i = numel(ETs{m})+1; ETs{m}(i) = et; end
+    end
     j = tryGetField(s, 'InstanceNumber');
     if isempty(j) || j<1
         try j = numel(h{m}{i}) + 1;
@@ -563,7 +575,7 @@ for k = 1:nFile
 end
 clear hh errStr;
 
-%% Check headers: remove file-missing and dim-inconsistent series
+%% Check headers: remove dim-inconsistent series
 nRun = numel(h);
 if nRun<1 % no valid series
     errorLog(sprintf('No valid files found:\n%s.', errInfo)); 
@@ -602,17 +614,21 @@ for i = 1:nRun
     h{i}{1} = s; % update record in case of full hdr or multiframe
     
     nFile = numel(h{i});
-    if nFile>1 && tryGetField(s, 'NumberOfFrames', 1) > 1
-        for k = 2:nFile
+    if nFile>1 && tryGetField(s, 'NumberOfFrames', 1) > 1 % seen in vida
+        for k = 2:nFile % this can be slow
             h{i}{k} = dicm_hdr(h{i}{k}.Filename); % full header
             h{i}{k} = multiFrameFields(h{i}{k});
+        end
+        if ~isfield(s, 'EchoTimes') && isfield(s, 'EchoTime')
+            h{i}{1}.EchoTimes = nan(1, nFile);
+            for k = 1:nFile, h{i}{1}.EchoTimes(k) = h{i}{k}.EchoTime; end
         end
     end
     
     % check consistency in 'fldsCk'
     nFlds = numel(fldsCk);
     if isfield(s, 'SpacingBetweenSlices'), nFlds = nFlds - 1; end % check 1 of 2
-    for k = 1:nFlds
+    for k = 1:nFlds*(nFile>1)
         if isfield(s, fldsCk{k}), val = s.(fldsCk{k}); else, continue; end
         val = repmat(double(val), [1 nFile]);
         for j = 2:nFile
@@ -651,17 +667,18 @@ for i = 1:nRun
         if s.isDTI, continue; end % allow missing directions for DTI
         a = zeros(1, nFile);
         for j = 1:nFile, a(j) = tryGetField(h{i}{j}, 'InstanceNumber', 1); end
-        ind = find(diff(a)>1);
-        if isempty(ind), continue; end
-
-        if numel(unique(diff(ind))) ~= 1
-            errorLog(['Missing file(s) detected for ' series '. Series skipped.']);
-            keep(i) = 0;
-        else % InstanceNumber regular spacing, like CMRR ISSS seq
-            errorLog(['InstanceNumber discontinuity detected for ' series '. ' ...
+        if any(diff(a) ~= 1) % like CMRR ISSS seq or multi echo
+            errorLog(['InstanceNumber discontinuity detected for ' series '.' ...
                 'See VolumeTiming in NIfTI ext or dcmHeaders.mat.']);
-            TR = tryGetField(s, 'RepetitionTime', 1000) / 1000;
-            h{i}{1}.VolumeTiming = (a-1) / TR;
+            dict = dicm_dict('', { 'AcquisitionDate' 'AcquisitionTime'});
+            vTime = nan(1, nFile);
+            for j = 1:nFile
+                s2 = dicm_hdr(h{i}{j}.Filename, dict);
+                dt = [s2.AcquisitionDate s2.AcquisitionTime];
+                vTime(j) = datenum(dt, 'yyyymmddHHMMSS.fff');
+            end
+            vTime = vTime - min(vTime);
+            h{i}{1}.VolumeTiming = vTime*24*3600; % day to seconds
         end
         continue; % no other check for mosaic
     end
@@ -681,10 +698,9 @@ for i = 1:nRun
     h{i}{1}.LocationsInAcquisition = uint16(nSL); % best way for nSL?
 
     nVol = nFile / nSL;
-    if isTZ % Dim3IsVolume: Philips
+    if isTZ % Philips
         ind = reshape(1:nFile, [nVol nSL])';
         h{i} = h{i}(ind(:));
-        h{i}{1}.Dim3IsVolume = true; % not needed, info only
     end
        
     % re-order slices within vol. No SliceNumber since files are organized
@@ -697,7 +713,7 @@ for i = 1:nRun
     if sliceN(1) == 1, continue; end % first file kept: following update h{i}{1}
     h{i}{1} = dicm_hdr(h{i}{1}.Filename); % read full hdr
     s = h{i}{sliceN==1}; % original first file
-    fldsCp = {'AcquisitionDateTime' 'isDTI' 'Dim3IsVolume' 'LocationsInAcquisition'};
+    fldsCp = {'AcquisitionDateTime' 'isDTI' 'LocationsInAcquisition'};
     for j = 1:numel(fldsCp)
         if isfield(h{i}{1}, fldsCk{k}), h{i}{1}.(fldsCp{j}) = s.(fldsCp{j}); end
     end
@@ -786,7 +802,7 @@ for i = 1:nRun
         fnames{iRuns(i)}(j_s(i)+1:end) = [];
     end
 end
-fmtStr = sprintf(' %%-%gs %%dx%%dx%%dx%%d\n', max(cellfun(@numel, fnames))+6);
+fmtStr = sprintf(' %%-%gs %%dx%%dx%%dx%%d\n', max(cellfun(@numel, fnames))+12);
 
 %% Now ready to convert nii series by series
 subjStr = sprintf('''%s'', ', subj{:}); subjStr(end+(-1:0)) = [];
@@ -831,81 +847,18 @@ for i = 1:nRun
         img = permute(img, [1 2 4:8 3]); % put RGB into dim8 for nii_tool
     elseif tryGetField(s, 'isMos', false) % SIEMENS mosaic
         img = mos2vol(img, s.LocationsInAcquisition); % mosaic to volume
-    elseif ndims(img)==4 && tryGetField(s, 'Dim3IsVolume', false) % BV/BRIK
-        img = permute(img, [1 2 4 3]);
     elseif ndims(img) == 3 % may need to reshape to 4D
         nSL = double(tryGetField(s, 'LocationsInAcquisition'));
         if ~isempty(nSL)
+            if isfield(s, 'SortFrames'), img = img(:,:,s.SortFrames); end
             dim = size(img);
             dim(3:4) = [nSL dim(3)/nSL]; % verified integer earlier
-            if nFile==1 && tryGetField(s, 'Dim3IsVolume', false)
-                % for PAR and single multiframe dicom
-                img = reshape(img, dim([1 2 4 3]));
-                img = permute(img, [1 2 4 3]);
-            else
-                img = reshape(img, dim);
-            end
+            img = reshape(img, dim);
         end
-        % fix weird slice ordering for PAR and multiframe
-        if isfield(s, 'SliceNumber'), img(:,:,s.SliceNumber,:) = img; end
     end
-
-    dim = size(img);
-    if numel(dim)<3, dim(3) = 1; end % single slice
-    fld = 'NumberOfTemporalPositions';
-    if ~isfield(s, fld) && numel(dim)>3 && dim(4)>1, h{i}{1}.(fld) = dim(4); end
 
     if any(~isfield(s, flds(6:8))) || ~any(isfield(s, flds(9:10)))
-        h{i}{1} = csa2pos(h{i}{1}, dim(3));
-    end
-    
-    % Store GE slice timing. No slice order info for Philips at all!
-    if isfield(s, 'RTIA_timer') && ~s.isDTI
-        t = zeros(dim(3), 1);
-        for j = 1:dim(3), t(j) = tryGetField(h{i}{j}, 'RTIA_timer', nan); end
-        if ~all(diff(t)==0), h{i}{1}.RefAcqTimes = t/10; end % in ms
-        
-%     % Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
-%     % check, but GE/Philips AcquisitionTime seems useless
-%     elseif numel(dim)>3 && dim(4)>2 && ~isfield(s, 'MosaicRefAcqTimes') ...
-%             && strncmpi(s.Manufacturer, 'SIEMENS', 7) && ~s.isDTI
-%         dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
-%         t = zeros(dim(3), 1);
-%         for j = 1:dim(3)
-%             s1 = dicm_hdr(h{i}{j}.Filename, dict);
-%             str = [s1.AcquisitionDate s1.AcquisitionTime];
-%             t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
-%         end
-%         h{i}{1}.RefAcqTimes = (t - min(t)) * 24 * 3600 * 1000; % day to ms
-    end
-    
-    % Store motion parameters for MoCo series
-    if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && numel(dim)>3
-        inc = nFile / dim(4);
-        trans = zeros(dim(4), 3);
-        rotat = zeros(dim(4), 3);
-        for j = 1:dim(4)
-            trans(j,:) = tryGetField(h{i}{(j-1)*inc+1}, 'RBMoCoTrans', [0 0 0]);
-            rotat(j,:) = tryGetField(h{i}{(j-1)*inc+1}, 'RBMoCoRot',   [0 0 0]);
-        end
-        h{i}{1}.RBMoCoTrans = trans;
-        h{i}{1}.RBMoCoRot = rotat;
-    end
-    
-    % Store FrameReferenceTime: seen in Philips PET
-    if isfield(s, 'FrameReferenceTime') && numel(dim)>3
-        inc = nFile / dim(4);
-        vTime = zeros(1, dim(4));
-        dict = dicm_dict('', 'FrameReferenceTime');
-        for j = 1:dim(4)
-            s0 = dicm_hdr(h{i}{(j-1)*inc+1}.Filename, dict);
-            vTime(j) = tryGetField(s0, 'FrameReferenceTime', 0);
-        end
-        if vTime(1) > vTime(end) % could also re-read sorted h{i}{1}
-            vTime = vTime(end:-1:1);
-            img = img(:,:,:, end:-1:1);
-        end
-        h{i}{1}.VolumeTiming = vTime / 1000; % ms to seconds
+        h{i}{1} = csa2pos(h{i}{1}, size(img,3));
     end
     
     if isa(img, 'uint16') && max(img(:))<32768
@@ -914,37 +867,33 @@ for i = 1:nRun
     
     nii = nii_tool('init', img); % create nii struct based on img
     fname = [niiFolder fnames{i}]; % name without ext
-
-    % Compute bval & bvec in image reference for DTI series
-    if s.isDTI, [h{i}, nii] = get_dti_para(h{i}, nii); end
     
-    [nii, h{i}{1}] = set_nii_header(nii, h{i}{1}, pf); % set most nii hdr
     h{i}{1}.ConversionSoftware = converter;
-    nii.ext = set_nii_ext(h{i}{1}, pf); % NIfTI extension
-    if pf.save_json, save_json(h{i}{1}, fname, pf); end
+    [nii, h{i}] = set_nii_hdr(nii, h{i}, pf); % set most nii hdr
 
-    % Save bval and bvec files after bvec perm/sign adjusted in set_nii_header
+    % Save bval and bvec files after bvec perm/sign adjusted in set_nii_hdr
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
 
-    [nii, niiP] = split_philips_phase(nii, s); % split Philips mag&phase img
-    if ~isempty(niiP) && ~no_save
-        fprintf(fmtStr, [fnames{i} '_phase'], niiP.hdr.dim(2:5));
-        nii_tool('save', niiP, [fname '_phase' ext], rst3D); % save phase nii
-    end
-    
+    nii = split_components(nii, h{i}{1}); % split Philips vol components
     if no_save % only return the first nii
-        nii.hdr.file_name = [fnames{i} '_no_save.nii'];
-        nii.hdr.magic = 'n+1';
-        varargout{1} = nii_tool('update', nii);
+        nii(1).hdr.file_name = [fnames{i} '_no_save.nii'];
+        nii(1).hdr.magic = 'n+1';
+        varargout{1} = nii_tool('update', nii(1));
         if nRun>1, fprintf(2, 'Only one series is converted.\n'); end
         return;
-    else
-        fprintf(fmtStr, fnames{i}, nii.hdr.dim(2:5)); % show info and progress
-        nii_tool('save', nii, [fname ext], rst3D);
     end
     
-    if isfield(nii.hdr, 'hdrTilt')
-        nii = nii_xform(nii, nii.hdr.hdrTilt);
+    for j = 1:numel(nii)
+        nam = fnames{i};
+        if numel(nii)>1, nam = nii(j).hdr.file_name; end
+        fprintf(fmtStr, nam, nii(j).hdr.dim(2:5));
+        nii(j).ext = set_nii_ext(nii(j).json); % NIfTI extension
+        if pf.save_json, save_json(nii(j).json, fname); end
+        nii_tool('save', nii(j), [niiFolder nam ext], rst3D);
+    end
+        
+    if isfield(nii(1).hdr, 'hdrTilt')
+        nii = nii_xform(nii(1), nii.hdr.hdrTilt);
         fprintf(fmtStr, [fnames{i} '_Tilt'], nii.hdr.dim(2:5));
         nii_tool('save', nii, [fname '_Tilt' ext], rst3D); % save xformed nii
     end
@@ -1015,11 +964,88 @@ else, val = [];
 end
 
 %% Subfunction: Set most nii header and re-orient img
-function [nii, s] = set_nii_header(nii, s, pf)
+function [nii, h] = set_nii_hdr(nii, h, pf)
+dim = nii.hdr.dim(2:4); nVol = nii.hdr.dim(5);
+fld = 'NumberOfTemporalPositions';
+if ~isfield(h{1}, fld) && nVol>1, h{1}.(fld) = nVol; end
+
 % Transformation matrix: most important feature for nii
-dim = nii.hdr.dim(2:4); % space dim, set by nii_tool according to img
-[ixyz, R, pixdim, xyz_unit] = xform_mat(s, dim); % R: dicom xform matrix
+[ixyz, R, pixdim, xyz_unit] = xform_mat(h{1}, dim); % R: dicom xform matrix
 R(1:2,:) = -R(1:2,:); % dicom LPS to nifti RAS, xform matrix before reorient
+
+% Compute bval & bvec in image reference for DTI series before reorienting
+if h{1}.isDTI, [h, nii] = get_dti_para(h, nii); end
+
+% Store CardiacTriggerDelayTime
+fld = 'CardiacTriggerDelayTime';
+if ~isfield(h{1}, 'CardiacTriggerDelayTimes') && nVol>1 && isfield(h{1}, fld)
+    if numel(h) == 1 % multi frames
+        iFrames = 1:dim(3):dim(3)*nVol;
+        if isfield(h{1}, 'SortFrames'), iFrames = h{1}.SortFrames(iFrames); end
+        s2 = struct(fld, nan(1,nVol));
+        s2 = dicm_hdr(h{1}, s2, iFrames);
+        tt = s2.(fld);
+    else
+        tt = zeros(1, nVol);
+        inc = numel(h) / nVol;
+        for j = 1:nVol
+            tt(j) = tryGetField(h{(j-1)*inc+1}, fld, 0);
+        end
+    end
+    if ~all(diff(tt)==0), h{1}.CardiacTriggerDelayTimes = tt; end
+end
+
+% Get EchoTime for each vol
+if ~isfield(h{1}, 'EchoTimes') && nVol>1 && isfield(h{1}, 'EchoTime')
+    if numel(h) == 1 % 4D multi frames
+        iFrames = 1:dim(3):dim(3)*nVol;
+        if isfield(h{1}, 'SortFrames'), iFrames = h{1}.SortFrames(iFrames); end
+        s2 = struct('EffectiveEchoTime', nan(1,nVol));
+        s2 = dicm_hdr(h{1}, s2, iFrames);
+        ETs = s2.EffectiveEchoTime;
+    else % regular dicom. Vida done previously
+        ETs = zeros(1, nVol);
+        inc = numel(h) / nVol;
+        for j = 1:nVol
+            ETs(j) = tryGetField(h{(j-1)*inc+1}, 'EchoTime', 0);
+        end
+    end
+    if ~all(diff(ETs)==0), h{1}.EchoTimes = ETs; end
+end
+
+% set TR and slice timing related info before re-orient
+[h, nii.hdr] = sliceTiming(h, nii.hdr);
+nii.hdr.xyzt_units = xyz_unit + nii.hdr.xyzt_units; % normally: mm (2) + sec (8)
+s = h{1};
+
+% Store motion parameters for MoCo series
+if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && nVol>1
+    inc = numel(h) / nVol;
+    trans = zeros(nVol, 3);
+    rotat = zeros(nVol, 3);
+    for j = 1:nVol
+        trans(j,:) = tryGetField(h{(j-1)*inc+1}, 'RBMoCoTrans', [0 0 0]);
+        rotat(j,:) = tryGetField(h{(j-1)*inc+1}, 'RBMoCoRot',   [0 0 0]);
+    end
+    s.RBMoCoTrans = trans;
+    s.RBMoCoRot = rotat;
+end
+
+% Store FrameReferenceTime: seen in Philips PET
+if isfield(s, 'FrameReferenceTime') && nVol>1
+    inc = numel(h) / nVol;
+    vTime = zeros(1, nVol);
+    dict = dicm_dict('', 'FrameReferenceTime');
+    for j = 1:nVol
+        s2 = dicm_hdr(h{(j-1)*inc+1}.Filename, dict);
+        vTime(j) = tryGetField(s2, 'FrameReferenceTime', 0);
+    end
+    if vTime(1) > vTime(end) % could also re-read sorted h{i}{1}
+        vTime = vTime(end:-1:1);
+        nii.img = nii.img(:,:,:, end:-1:1);
+    end
+    s.VolumeTiming = vTime / 1000; % ms to seconds
+end
 
 % dim_info byte: freq_dim, phase_dim, slice_dim low to high, each 2 bits
 [phPos, iPhase] = phaseDirection(s); % phPos relative to image in FSL feat!
@@ -1027,10 +1053,6 @@ if     iPhase == 2, fps_bits = [1 4 16];
 elseif iPhase == 1, fps_bits = [4 1 16]; 
 else,               fps_bits = [0 0 16];
 end
-
-% set TR and slice timing related info before re-orient
-[s, nii.hdr] = sliceTiming(s, nii.hdr);
-nii.hdr.xyzt_units = xyz_unit + nii.hdr.xyzt_units; % normally: mm (2) + sec (8)
 
 % Reorient if MRAcquisitionType==3D || isDTI && nSL>1
 % If FSL etc can read dim_info for STC, we can always reorient.
@@ -1189,7 +1211,7 @@ if ~isempty(iPhase)
 end
 nii.hdr.descrip = descrip; % char[80], drop from end if exceed
 
-% data slope and intercept: apply to img if no rounding error 
+% slope and intercept: apply to img if no rounding error 
 sclApplied = tryGetField(s, 'ApplyRescale', false);
 if any(isfield(s, {'RescaleSlope' 'RescaleIntercept'})) && ~sclApplied
     slope = tryGetField(s, 'RescaleSlope', 1); 
@@ -1211,10 +1233,29 @@ elseif sclApplied && isfield(s, 'MRScaleSlope')
     slope = tryGetField(s, 'RescaleSlope', 1) * s.MRScaleSlope; 
     nii.img = nii.img / slope;
 end
+h{1} = s;
 
 % Possible patient position: HFS/HFP/FFS/FFP / HFDR/HFDL/FFDR/FFDL
 % Seems dicom takes care of this, and maybe nothing needs to do here.
 % patientPos = tryGetField(s, 'PatientPosition', '');
+
+flds = { % store for nii.ext and json
+  'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
+  'AcquisitionDateTime' 'bval' 'bvec' 'VolumeTiming' ...
+  'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
+  'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'EchoTimes' ...
+  'SecondEchoTime' 'InversionTime' 'CardiacTriggerDelayTimes' ...
+  'PatientName' 'PatientSex' 'PatientAge' 'PatientSize' 'PatientWeight' ...
+  'PatientPosition' 'SliceThickness' 'FlipAngle' 'RBMoCoTrans' 'RBMoCoRot' ...
+  'Manufacturer' 'SoftwareVersion' 'MRAcquisitionType' ...
+  'InstitutionName' 'InstitutionAddress' 'DeviceSerialNumber' ...
+  'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
+  'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector'};
+if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
+for i = 1:numel(flds)
+    if ~isfield(s, flds{i}), continue; end
+    nii.json.(flds{i}) = s.(flds{i});
+end
 
 %% Subfunction, reshape mosaic into volume, remove padded zeros
 function vol = mos2vol(mos, nSL)
@@ -1232,7 +1273,8 @@ for i = 1:nSL
 end
 
 %% subfunction: set slice timing related info
-function [s, hdr] = sliceTiming(s, hdr)
+function [h, hdr] = sliceTiming(h, hdr)
+s = h{1};
 TR = tryGetField(s, 'RepetitionTime'); % in ms
 if isempty(TR), TR = tryGetField(s, 'TemporalResolution'); end
 if isempty(TR), return; end
@@ -1243,7 +1285,7 @@ if hdr.dim(5)<3, return; end % skip structual, fieldmap etc
 
 delay = asc_header(s, 'lDelayTimeInTR')/1000; % in ms now
 if isempty(delay), delay = 0;
-else, s.DelayTimeInTR = delay;
+else, h{1}.DelayTimeInTR = delay;
 end
 
 TA = TR - delay;
@@ -1251,9 +1293,14 @@ t = csa_header(s, 'MosaicRefAcqTimes'); % in ms
 if ~isempty(t) && isfield(s, 'LastFile') && max(t)-min(t)>TA % MB wrong vol 1
     try t = mb_slicetiming(s, TA); end %#ok<*TRYNC>
 end
-if isempty(t), t = tryGetField(s, 'RefAcqTimes'); end % GE or Siemens non-mosaic
 
 nSL = hdr.dim(4);
+if isempty(t) && isfield(s, 'RTIA_timer') % GE slice timing
+    t = zeros(nSL, 1);
+    for j = 1:nSL, t(j) = tryGetField(h{j}, 'RTIA_timer', nan); end
+    if all(diff(t)==0), t = []; else, t = t/10; end % in ms
+end
+
 if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
         isfield(s.ProtocolDataBlock, 'SLICEORDER') % GE with invalid RTIA_timer
     SliceOrder = s.ProtocolDataBlock.SLICEORDER;
@@ -1264,18 +1311,30 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
         errorLog(['Unknown SLICEORDER (' SliceOrder ') for ' s.NiftiName]);
         return;
     end
-    s.RefAcqTimes = t;
 end
 
 % Siemens multiframe: read FrameAcquisitionDatetime 1st file
-if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
-    s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-    s2 = dicm_hdr(s, s2, 1:nSL);
-    try
-        t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
-        t = (t-min(t))*24*3600;
-    end
-end
+% if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+%     s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
+%     s2 = dicm_hdr(s, s2, 1:nSL);
+%     try
+%         t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
+%         t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+%     end
+% end
+
+% Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
+% check, but GE/Philips AcquisitionTime seems useless
+% if isempty(t) && ~tryGetField(s, 'isMos', 0) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+%     dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
+%     t = zeros(nSL, 1);
+%     for j = 1:nSL
+%         s1 = dicm_hdr(h{j}.Filename, dict);
+%         str = [s1.AcquisitionDate s1.AcquisitionTime];
+%         t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
+%     end
+%     t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+% end
 
 if isempty(t) % non-mosaic Siemens: create 't' based on ucMode
     ucMode = asc_header(s, 'sSliceArray.ucMode'); % 1/2/4: Asc/Desc/Inter
@@ -1289,7 +1348,6 @@ if isempty(t) % non-mosaic Siemens: create 't' based on ucMode
         end
     end
     if asc_header(s, 'sSliceArray.ucImageNumb'), t = t(nSL:-1:1); end % rev-num
-    s.RefAcqTimes = t;
 end
 
 if numel(t)<2, return; end
@@ -1313,7 +1371,7 @@ elseif t(1)>t(3) % descending interleaved
 else, sc = 0; % unlikely to reach
 end
 
-s.SliceTiming = 0.5 - t/TR; % as for FSL custom timing
+h{1}.SliceTiming = 0.5 - t/TR; % as for FSL custom timing
 hdr.slice_code = sc;
 hdr.slice_end = nSL-1; % 0-based, slice_start default to 0
 hdr.slice_duration = min(diff(t1))/1000;
@@ -1333,21 +1391,16 @@ if isfield(s, 'bvec_original') % from BV or PAR file
 elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
     nFile =  numel(h);
     if nFile== 1 % all vol in 1 file, for Philips
-        if tryGetField(s, 'Dim3IsVolume', false), iDir = 1:nDir;
-        else, iDir = 1:nSL:nSL*nDir;
-        end
-
+        iDir = 1:nSL:nSL*nDir;
+        if isfield(s, 'SortFrames'), iDir = s.SortFrames(iDir); end
         s2 = struct('B_value', bval', 'DiffusionGradientDirection', bvec');
         s2 = dicm_hdr(s, s2, iDir); % call search_MF_val
         bval = s2.B_value';
         bvec = s2.DiffusionGradientDirection';
     else % 1 vol per file, e.g. Siemens
         for i = 1:nFile
-            try
-                s2 = h{i}.PerFrameFunctionalGroupsSequence.Item_1.MRDiffusionSequence.Item_1;
-                bval(i) = s2.B_value;
-                bvec(i,:) = s2.DiffusionGradientDirectionSequence.Item_1.DiffusionGradientDirection;
-            end
+            bval(i) = MF_val('B_value', h{i}, 1);
+            bvec(i,:) = MF_val('DiffusionGradientDirection', h{i}, 1);
         end
     end
 else % multiple files: order already in slices then volumes
@@ -1892,13 +1945,20 @@ if isfield(s, fld)
     end
 end
 
-if strncmpi(s.Manufacturer, 'SIEMENS', 7)
+if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
     phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
-elseif strncmpi(s.Manufacturer, 'GE', 2)
+elseif isfield(s, 'ProtocolDataBlock') %GE
+% elseif isfield(s, 'UserDefineData') % GE
+%     % https://github.com/rordenlab/dcm2niix/issues/163
+%     b = s.UserDefineData;
+%     i = typecast(b(25:26), 'uint16'); % hdr_offset
+%     v = typecast(b(i+1:i+4), 'single'); % 5.0 to 40.0
+%     if v >= 26, i = i + 76; end
+%     phPos = bitget(b(i+49), 3) > 0;
     try % VIEWORDER "1" == bottom_up
         phPos = s.ProtocolDataBlock.VIEWORDER == '1';
     end
-elseif strncmpi(s.Manufacturer, 'Philips', 7)
+elseif isfield(s, 'Stack') %Philips
     try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
     try R = reshape(s.ImageOrientationPatient, 3, 2); catch, return; end
     [~, ixy] = max(abs(R)); % like [1 2]
@@ -1919,20 +1979,57 @@ pffgs = 'PerFrameFunctionalGroupsSequence';
 sfgs = 'SharedFunctionalGroupsSequence';
 if any(~isfield(s, {sfgs pffgs})), return; end
 
+try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
+n = numel(MF_val('DimensionIndexValues', s, 1));
+s2 = struct('DimensionIndexValues', nan(n, nFrame), ...
+            'ImagePositionPatient', nan(3, nFrame));
+s2 = dicm_hdr(s, s2, 1:nFrame);
+
+if ~isfield(s, 'LocationsInAcquisition') % use all frames
+    iSL = xform_mat(s);
+    ipp = s2.ImagePositionPatient';
+    [err, s.LocationsInAcquisition] = checkImagePosition(ipp(:,iSL(3)));
+    if ~isempty(err)
+        errorLog([err ' for "' s.Filename '". Series skipped.']);
+        s = []; return; % skip
+    end
+end
+
+% check slice ordering (Philips often needs SortFrames)
+nSL = double(s.LocationsInAcquisition);
+seq = s2.DimensionIndexValues([2 end:-1:3], :)'; % 2nd row is for slice
+[seq, ind] = sortrows(seq); % sort by slice, then vol
+
+nVol = floor(nFrame / nSL); % floor() in case of incomplete volume
+if nVol*nSL < nFrame % interrupted volume
+    lastV = any(seq(:,2:end) == nVol+1, 2);
+    ind(lastV) = []; % remove ind for last volume
+end
+ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
+ind = ind(:)';
+if ~isequal(ind, 1:nFrame)
+    if ind(1) ~= 1 || ind(end) ~= nFrame 
+        s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read frames 1 and end
+    	s.LocationsInAcquisition = nSL; % in case we added it
+    end
+    s.SortFrames = ind;  % will use to sort img and get iVol/iSL for PerFrame
+end
+
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
         'RepetitionTime' 'FlipAngle' 'RescaleIntercept' 'RescaleSlope' ...
         'ImageOrientationPatient' 'ImagePositionPatient' ...
-        'InPlanePhaseEncodingDirection' 'MRScaleSlope'};
+        'InPlanePhaseEncodingDirection' 'MRScaleSlope' 'CardiacTriggerDelayTime'};
+iF = 1; if isfield(s, 'SortFrames'), iF = s.SortFrames(1); end
 for i = 1:numel(flds)
     if isfield(s, flds{i}), continue; end
-    a = MF_val(flds{i}, s, 1);
+    a = MF_val(flds{i}, s, iF);
     if ~isempty(a), s.(flds{i}) = a; end
 end
 
 if ~isfield(s, 'EchoTime')
-    a = MF_val('EffectiveEchoTime', s, 1);
+    a = MF_val('EffectiveEchoTime', s, iF);
     if ~isempty(a), s.EchoTime = a;
-    else, try s.EchoTime = s.EchoTimeDisplay; end
+    else, try s.EchoTime = str2double(s.EchoTimeDisplay); end
     end
 end
 
@@ -1940,82 +2037,38 @@ end
 if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
     s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
 end
-if isfield(s.(pffgs).Item_1, 'CSAImageHeaderInfo')
-    s.CSAImageHeaderInfo = s.(pffgs).Item_1.CSAImageHeaderInfo.Item_1; % Frame 1
+fld = 'CSAImageHeaderInfo';
+if isfield(s.(pffgs).Item_1, fld)
+    s.(fld) = s.(pffgs).(sprintf('Item_%g', iF)).(fld).Item_1;
 end
-
-try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 
 % check ImageOrientationPatient consistency for 1st and last frame only
+iF = nFrame; if isfield(s, 'SortFrames'), iF = s.SortFrames(iF); end
 fld = 'ImageOrientationPatient';
-val = MF_val(fld, s, nFrame);
+val = MF_val(fld, s, iF);
 if ~isempty(val) && isfield(s, fld) && any(abs(val-s.(fld))>1e-4)
-    s = []; % silently ignore it
-    return; % inconsistent orientation, remove the field
+    s = []; return; % inconsistent orientation, skip
 end
 
-flds = {'DiffusionDirectionality' 'ImagePositionPatient' ...
+flds = {'DiffusionDirectionality' 'ImagePositionPatient' 'MRScaleSlope' ...
         'ComplexImageComponent' 'RescaleIntercept' 'RescaleSlope'};
 for i = 1:numel(flds) % For last frame
-    a = MF_val(flds{i}, s, nFrame);
+    a = MF_val(flds{i}, s, iF);
     if ~isempty(a), s.LastFile.(flds{i}) = a; end
-end
-
-fld = 'ImagePositionPatient';
-val = MF_val(fld, s, 2); % 2nd frame
-if isempty(val), return; end
-if isfield(s, fld) && all(abs(s.(fld)-val)<1e-4)
-    s.Dim3IsVolume = true;
-end
-
-if ~isfield(s, 'LocationsInAcquisition') % use all frames
-    s2 = struct(fld, nan(3, nFrame));
-    s2 = dicm_hdr(s, s2, 1:nFrame);
-    iSL = xform_mat(s);
-    ipp = s2.(fld)';
-    [err, s.LocationsInAcquisition, sliceN] = checkImagePosition(ipp(:,iSL(3)));
-    if ~isempty(err)
-        errorLog([err ' for "' s.Filename '". Series skipped.']);
-        s = []; return; % skip
-    end
-end
-
-% Lastly check whether weird slice ordering: seen in PAR & dicom
-nSL = double(s.LocationsInAcquisition);
-i = MF_val('SliceNumberMR', s, 1); % Philips
-if ~isempty(i) 
-    i(2) = MF_val('SliceNumberMR', s, nFrame);
-    if isequal(i, [1 nSL]) || isequal(i, [nSL 1]), return; end % not 100% safe
-end
-
-if tryGetField(s, 'Dim3IsVolume', false), iFrame = 1:(nFrame/nSL):nFrame;
-else, iFrame = 1:nSL;
-end
-if ~exist('sliceN', 'var') % save time if done by checkImagePosition
-    s2 = struct(fld, nan(3, nSL));
-    s2 = dicm_hdr(s, s2, iFrame);
-    ipp = s2.(fld)';
-    iSL = xform_mat(s);
-    [~, sliceN] = sort(ipp(:,iSL(3)));
-end
-if any(diff(sliceN, 2)>0)
-    s.SliceNumber = sliceN; % will be used to re-order img
-    if size(ipp,1)>nSL, ipp = ipp(iFrame,:); end % all frames
-    s.(fld) = ipp(sliceN==1,:)';
-    s.LastFile.(fld) = ipp(sliceN==nSL,:)';
 end
 
 %% subfunction: return value from Shared or PerFrame FunctionalGroupsSequence
 function val = MF_val(fld, s, iFrame)
+pffgs = 'PerFrameFunctionalGroupsSequence';
 switch fld
     case 'EffectiveEchoTime'
         sq = 'MREchoSequence';
-    case {'DiffusionDirectionality' 'B_value' 'DiffusionGradientDirection' ...
-            'DiffusionGradientDirectionSequence'}
+    case {'DiffusionDirectionality' 'B_value'}
         sq = 'MRDiffusionSequence';
     case 'ComplexImageComponent'
         sq = 'MRImageFrameTypeSequence';
-    case {'DimensionIndexValues' 'InStackPositionNumber' 'TemporalPositionIndex'}
+    case {'DimensionIndexValues' 'InStackPositionNumber' 'TemporalPositionIndex' ...
+            'FrameReferenceDatetime' 'FrameAcquisitionDatetime'}
         sq = 'FrameContentSequence';
     case {'RepetitionTime' 'FlipAngle'}
         sq = 'MRTimingAndRelatedParametersSequence';
@@ -2030,12 +2083,21 @@ switch fld
     case {'InPlanePhaseEncodingDirection' 'MRAcquisitionFrequencyEncodingSteps' ...
             'MRAcquisitionPhaseEncodingStepsInPlane'}
         sq = 'MRFOVGeometrySequence';
+    case 'CardiacTriggerDelayTime'
+        sq = 'CardiacTriggerSequence';
     case {'SliceNumberMR' 'EchoTime' 'MRScaleSlope'}
         sq = 'PrivatePerFrameSq'; % Philips
+    case 'DiffusionGradientDirection' % 
+        sq = 'MRDiffusionSequence';
+        try
+            s2 = s.(pffgs).(sprintf('Item_%g', iFrame)).(sq).Item_1;
+            val = s2.DiffusionGradientDirectionSequence.Item_1.(fld);
+        catch, val = [0 0 0]';
+        end
+        if nargin>1, return; end
     otherwise
         error('Sequence for %s not set.', fld);
 end
-pffgs = 'PerFrameFunctionalGroupsSequence';
 if nargin<2
     val = {'SharedFunctionalGroupsSequence' pffgs sq fld 'NumberOfFrames'}; 
     return;
@@ -2050,49 +2112,47 @@ catch
     end
 end
 
-%% subfunction: split nii into mag and phase for Philips single file
-function [nii, niiP] = split_philips_phase(nii, s)
-niiP = [];
+%% subfunction: split nii components into multiple nii
+function nii = split_components(nii, s)
 fld = 'ComplexImageComponent';
-if ~strcmp(tryGetField(s, fld, ''), 'MIXED') ... % multiframe
-        && (~isfield(s, 'VolumeIsPhase') || ... 
-            all(s.VolumeIsPhase) || ~any(s.VolumeIsPhase)) % not MIXED
-    return;
-end
+if ~strcmp(tryGetField(s, fld, ''), 'MIXED'), return; end
 
-if ~isfield(s, 'VolumeIsPhase') % PAR file and single-frame file have this
+if ~isfield(s, 'Volumes') % PAR file and single-frame file have this
     nSL = nii.hdr.dim(4); nVol = nii.hdr.dim(5);
-    if tryGetField(s, 'Dim3IsVolume'), iFrames = 1:nVol;
-    else, iFrames = 1:nSL:nSL*nVol;
-    end
-    s1 = struct(fld, {cell(1, nVol)});
-    s1 = dicm_hdr(s, s1, iFrames);
-    for i=1:nVol, s.VolumeIsPhase(i) = strcmpi(s1.(fld){i}, 'PHASE'); end
+    iFrames = 1:nSL:nSL*nVol;
+    if isfield(s, 'SortFrames'), iFrames = s.SortFrames(iFrames); end
+    s1 = struct(fld, {cell(1, nVol)}, 'MRScaleSlope', nan(1,nVol), ...
+            'RescaleSlope', nan(1,nVol), 'RescaleIntercept', nan(1,nVol));
+    s.Volumes = dicm_hdr(s, s1, iFrames);
 end
+if ~isfield(s, 'Volumes'), return; end
 
-niiP = nii;
-niiP.img = nii.img(:,:,:,s.VolumeIsPhase);
-n = sum(s.VolumeIsPhase);
-niiP.hdr.dim(5) = n; % may be 1 always
-niiP.hdr.dim(1) = 3 + (n>1);
-
-nii.img(:,:,:,s.VolumeIsPhase) = []; % now only mag
-n = sum(~s.VolumeIsPhase);
-nii.hdr.dim(5) = n; % may be 1 always
-nii.hdr.dim(1) = 3 + (n>1);
-
-% undo scale for 2nd set img if it was applied in set_nii_header
-if (nii.hdr.scl_inter==0) && (nii.hdr.scl_slope==1) && ...
-        (tryGetfield(s, 'RescaleIntercept') ~=0 ) && ...
-        (tryGetfield(s, 'RescaleSlope') ~= 1)
-    if s.VolumeIsPhase(1)
-        nii.img = (nii.img - s.RescaleIntercept) / s.RescaleSlope;
-        nii.hdr.scl_inter = s.LastFile.RescaleIntercept;
-        nii.hdr.scl_slope = s.LastFile.RescaleSlope;
-    else
-        niiP.img = (niiP.img - s.RescaleIntercept) / s.RescaleSlope;
-        niiP.hdr.scl_inter = s.LastFile.RescaleIntercept;
-        niiP.hdr.scl_slope = s.LastFile.RescaleSlope;
+% suppose scl not applied in set_nii_hdr, since MRScaleSlope is not integer
+flds = {'EchoTimes' 'CardiacTriggerDelayTimes'}; % to split
+s1 = s.Volumes;
+nii0 = nii;
+% [c, ia] = unique(s.Volumes.(fld), 'stable'); % since 2013a?
+[~, ia] = unique(s1.(fld));
+ia = sort(ia);
+c = s1.(fld)(ia);
+for i = 1:numel(c)
+    nii(i) = nii0;
+    ind = strcmp(c{i}, s1.(fld));
+    nii(i).img = nii0.img(:,:,:,ind);
+    slope = s1.RescaleSlope(ia(i)); if isnan(slope), slope = 1; end 
+    inter = s1.RescaleIntercept(ia(i)); if isnan(inter), inter = 0; end
+    if ~isnan(s1.MRScaleSlope(ia(i)))
+        inter = inter / (slope * s1.MRScaleSlope(ia(i)));
+        slope = 1 / s1.MRScaleSlope(ia(i));
+    end
+    nii(i).hdr.scl_inter = inter;
+    nii(i).hdr.scl_slope = slope;
+    nii(i).hdr.file_name = [s.NiftiName '_' lower(c{i})];
+    nii(i) = nii_tool('update', nii(i));
+    
+    for j = 1:numel(flds)
+        if ~isfield(nii(i).json, flds{j}), continue; end
+        nii(i).json.(flds{j}) = nii(i).json.(flds{j})(ind);
     end
 end
 
@@ -2110,7 +2170,7 @@ fclose(fid);
 %% Get the last date string in history
 function dStr = reviseDate(mfile)
 if nargin<1, mfile = mfilename; end
-dStr = '170922?';
+dStr = '180527?';
 try str = fileread(which(mfile)); catch, return; end
 str = regexp(str, '.*\n% (\d{6}) ', 'tokens', 'once'); % last one
 if isempty(str), return; end
@@ -2252,24 +2312,14 @@ end
 % -0.25444411 0.52460458 -0.81243353 
 % ...
 % 0.9836791 0.17571079 0.038744]; % matrix rows separated by char(10) and/or ';'
-function ext = set_nii_ext(s, pf)
-flds = { % fields to put into nifti ext
-  'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
-  'AcquisitionDateTime' 'bval' 'bvec' 'ReadoutSeconds' 'SliceTiming' ...
-  'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'InversionTime' ...
-  'PatientName' 'PatientSex' 'PatientAge' 'PatientSize' 'PatientWeight' ...
-  'PatientPosition' 'SliceThickness' 'FlipAngle' 'RBMoCoTrans' 'RBMoCoRot' ...
-  'Manufacturer' 'SoftwareVersion' 'MRAcquisitionType' 'InstitutionName' ...
-  'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
-  'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector', ...
-  'VolumeTiming'};
-if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
-
+function ext = set_nii_ext(s)
+flds = fieldnames(s);
 ext.ecode = 6; % text ext
 ext.edata = '';
 for i = 1:numel(flds)
     try val = s.(flds{i}); catch, continue; end
     if ischar(val)
+        if strncmp(val, 'West', 4), keyboard; end
         str = sprintf('''%s''', val);
     elseif numel(val) == 1 % single numeric
         str = sprintf('%.8g', val);
@@ -2396,20 +2446,8 @@ end
 
 %% Save JSON file, proposed by Chris G
 % matlab.internal.webservices.toJSON(s)
-function save_json(s, fname, pf)
-flds = {
-  'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
-  'AcquisitionDateTime' 'bval' 'bvec' ...
-  'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
-  'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'SecondEchoTime' 'InversionTime' ...
-  'PatientName' 'PatientSex' 'PatientAge' 'PatientSize' 'PatientWeight' ...
-  'PatientPosition' 'SliceThickness' 'FlipAngle' 'RBMoCoTrans' 'RBMoCoRot' ...
-  'Manufacturer' 'SoftwareVersion' 'MRAcquisitionType' ...
-  'InstitutionName' 'InstitutionAddress' 'DeviceSerialNumber' ...
-  'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
-  'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector'};
-
-if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
+function save_json(s, fname)
+flds = fieldnames(s);
 nFields = numel(flds);
 fid = fopen([fname '.json'], 'w'); % overwrite silently if exist
 fprintf(fid, '{\n');
@@ -2419,7 +2457,7 @@ for i = 1:nFields
     val = s.(nam);
     
     % this if-elseif block takes care of name/val change for BIDS json
-    if any(strcmp(nam, {'RepetitionTime' 'InversionTime'}))
+    if any(strcmp(nam, {'RepetitionTime' 'InversionTime' 'EchoTimes' 'CardiacTriggerDelayTimes'}))
         val = val / 1000; % in sec now
     elseif strcmp(nam, 'UnwarpDirection')
         nam = 'PhaseEncodingDirection';
@@ -2490,7 +2528,8 @@ fclose(fid);
 %% Check for newer version for 42997 at Matlab Central
 % Simplified from checkVersion in findjobj.m by Yair Altman
 function checkUpdate(mfile)
-webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-dicom-to-nifti-converter--nifti-tool-and-viewer';
+webUrl = ['https://www.mathworks.com/matlabcentral/fileexchange/' ...
+          '42997-dicom-to-nifti-converter--nifti-tool-and-viewer'];
 try
     str = urlread(webUrl);
     ind = regexp(str, 'user_version', 'once');
@@ -2518,26 +2557,23 @@ answer = questdlg(msg, ['Update ' mfile], 'Yes', 'Later', 'Yes');
 if ~strcmp(answer, 'Yes'), return; end
 
 try
-    tmp = [tempdir '/dicm2nii'];
-    websave(tmp, 'http://www.mathworks.com/matlabcentral/mlc-downloads/downloads/submissions/42997/versions/1/download/zip');
-    unzip(tmp, tempdir); delete(tmp);
-    tmp = [tempdir '/xiangruili-dicm2nii-14ceee6/'];
-    movefile([tmp '*.*'], [fileparts(which(mfile)) '/.'], 'f');
+    fileUrl = [webUrl '?controller=file_infos&download=true'];
+    tmp = [tempdir 'tmp/'];
+    if exist(tmp, 'dir'), rmdir(tmp, 's'); end
+    unzip(fileUrl, tmp);
+    a = dir([tmp 'xiangruili*']);
+    if isempty(a), tdir = tmp; else, tdir = [tmp a(1).name '/']; end
+    movefile([tdir '*.*'], [fileparts(which(mfile)) '/.'], 'f');
     rmdir(tmp, 's');
 catch me
-    try
-        fileUrl = [webUrl '?controller=file_infos&download=true'];
-        unzip(fileUrl, fileparts(which(mfile)));
-    catch
-        errordlg(['Error in updating: ' me.message], mfile);
-        return;
-    end
+    errordlg(['Error in updating: ' me.message], mfile);
+    return;
 end
 rehash;
 warndlg(['Package updated successfully. Please restart ' mfile ...
          ', otherwise it may give error.'], 'Check update');
 
-%% Subfunction: return NumberOfImagesInMosaic in Siemens mosaic, or [] otherwise.
+%% Subfunction: return NumberOfImagesInMosaic if Siemens mosaic, or [] otherwise.
 % If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. 
 % If not exists, it may still be mosaic due to Siemens bug seen in syngo MR
 % 2004A 4VA25A phase image. Then we check EchoColumnPosition in CSA, and if it
