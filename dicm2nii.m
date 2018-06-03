@@ -1711,7 +1711,7 @@ switch cmd
         folder = hs.src.Text; % initial folder
         if ~isdir(folder), folder = fileparts(folder); end
         if ~isdir(folder), folder = pwd; end
-        ext = '*.zip;*.tgz;*.tar;*.tar.gz;*.dcm;*.PAR;*.HEAD;*.fmr;*.vmr;*.dmr';
+        ext = '*.zip;*.tgz;*.tar;*.tar.gz;*.dcm;*.PAR;*.xml;*.HEAD;*.fmr;*.vmr;*.dmr';
         [src, folder] = uigetfile([folder '/' ext], ['Select one or more ' ...
             'convertible files, or a zip file containing convertible files'], ...
             'MultiSelect', 'on');
