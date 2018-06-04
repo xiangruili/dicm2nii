@@ -790,10 +790,11 @@ colIndex = @(key)iColumn(keyInLabel(key));
 
 i1 = regexp(str(i2:end), '\n\s*\d+', 'once') + i2;
 n = iColumn(end)-1; % number of items each row, 41 for V4
+% str(i1:end) = strrep(str(i1:end), '?', '0'); % saw '?'
 para = sscanf(str(i1:end), '%g'); % read all numbers
-nImg = floor(numel(para) / n); 
-para = reshape(para(1:n*nImg), n, nImg)'; % whole table now
-getTableVal('index in REC file', 'IndexInREC', 1:nImg);
+nFrame = floor(numel(para) / n); 
+para = reshape(para(1:n*nFrame), n, nFrame)'; % whole table now
+getTableVal('index in REC file', 'IndexInREC', 1:nFrame);
 if isfield(s, 'IndexInREC') % why Philips includes this?
     if ~all(diff(s.IndexInREC) == 1) % not needed, just avoid accident
         para = para(s.IndexInREC, :); % in the order of REC img
@@ -802,31 +803,23 @@ if isfield(s, 'IndexInREC') % why Philips includes this?
 end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
-nVol = floor(nImg / nSL); % floor() in case of incomplete volume
-for key = {'dynamic scan number' 'gradient orientation number' ...
-           'cardiac phase number' 'image_type_mr' 'label type' 'echo number'}
-     cVol = colIndex(key);
-     n = numel(unique(para(:,cVol)));
-     if n==nVol || n==nVol+1, break; end % use it as vol index
+keys = {'dynamic scan number' 'gradient orientation number' 'scanning sequence' ...
+    'cardiac phase number' 'image_type_mr' 'label type' 'echo number'};
+id = ones(nFrame, numel(keys));
+for i = 1:numel(keys)
+    id(:,i) = para(:, colIndex(keys{i}));
 end
-seq = para(:, [colIndex('slice number') cVol]);
-[seq, ind] = sortrows(seq); % this sort idea is from julienbesle
-
-if nVol*nSL < nImg % interrupted volume
-    lastV = seq(:,1) == nVol+1;
-    ind(lastV) = []; % remove incomplete volume: last
-end
-ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
-ind = ind(:)';
-if ~isequal(ind, 1:nImg)
+sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
+ind = sort_frames(para(:, colIndex('slice number')), id);
+if ~isequal(ind, 1:nFrame)
     para = para(ind, :); % XYZT order
     s.SortFrames = ind; % for PAR, sort (drop) frames only in dicm2nii
 end
 
 s.NumberOfFrames = numel(ind); % may be smaller than nImg
-s.NumberOfTemporalPositions = nVol;
+s.NumberOfTemporalPositions = numel(ind)/nSL;
 
-iVol = (0:nVol-1)*nSL + 1;
+iVol = (0:s.NumberOfTemporalPositions-1)*nSL + 1; % already XYZT
 typ = {'magnitude' 'real' 'imaginary' 'phase'};
 imgType = para(iVol, colIndex('image_type_mr')); % 0:3
 imgType(imgType==16) = 0;
@@ -874,6 +867,7 @@ getTableVal('scale slope', 'MRScaleSlope');
 getTableVal('slice thickness', 'SliceThickness');
 getTableVal('echo_time', 'EchoTimes', iVol);
 s.EchoTime = s.EchoTimes(1);
+if numel(s.EchoTimes) == 1, s = rmfield(s, 'EchoTimes'); end
 getTableVal('image_flip_angle', 'FlipAngle');
 getTableVal('number of averages', 'NumberOfAverages');
 getTableVal('trigger_time', 'CardiacTriggerDelayTimes', iVol);
@@ -944,7 +938,7 @@ s.LastFile.ImagePositionPatient = y(1:3);
 s.Manufacturer = 'Philips';
 s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
 s.PixelData.Start = 0;
-s.PixelData.Bytes = s.Rows * s.Columns * nImg * s.BitsAllocated / 8;
+s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
 
     % nested function: set field if the key is in colTable
     function getTableVal(key, fldname, iRow)
