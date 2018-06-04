@@ -375,8 +375,9 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180527 fix vida SliceTiming unit, but now turn it off, and rely on ucMode.
 % 180530 store EchoTimes and CardiacTriggerDelayTimes;
 %        split_components: not only phase, json for each file (thx ChrisR).
-% 180601 use SortFrames for multiframe and PAR (thx JulienB & ChrisR; 
+% 180601 use SortFrames for multiframe and PAR (thx JulienB & ChrisR); 
 %        Side product: Philips DTI b=0 loc consistent with dcm2niiX.
+% 180602 extract sort_frames() for multiFrameFields() and philips_par()
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -1979,42 +1980,21 @@ pffgs = 'PerFrameFunctionalGroupsSequence';
 sfgs = 'SharedFunctionalGroupsSequence';
 if any(~isfield(s, {sfgs pffgs})), return; end
 
+% check slice ordering (Philips often needs SortFrames)
 try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 n = numel(MF_val('DimensionIndexValues', s, 1));
-s2 = struct('DimensionIndexValues', nan(n, nFrame), ...
-            'ImagePositionPatient', nan(3, nFrame));
-s2 = dicm_hdr(s, s2, 1:nFrame);
-
-if ~isfield(s, 'LocationsInAcquisition') % use all frames
-    iSL = xform_mat(s);
-    ipp = s2.ImagePositionPatient';
-    [err, s.LocationsInAcquisition] = checkImagePosition(ipp(:,iSL(3)));
-    if ~isempty(err)
-        errorLog([err ' for "' s.Filename '". Series skipped.']);
-        s = []; return; % skip
-    end
-end
-
-% check slice ordering (Philips often needs SortFrames)
-nSL = double(s.LocationsInAcquisition);
-seq = s2.DimensionIndexValues([2 end:-1:3], :)'; % 2nd row is for slice
-[seq, ind] = sortrows(seq); % sort by slice, then vol
-
-nVol = floor(nFrame / nSL); % floor() in case of incomplete volume
-if nVol*nSL < nFrame % interrupted volume
-    lastV = any(seq(:,2:end) == nVol+1, 2);
-    ind(lastV) = []; % remove ind for last volume
-end
-ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
-ind = ind(:)';
+s2 = struct('DimensionIndexValues', nan(n, nFrame));
+s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
+[ind, nSL] = sort_frames(a(:,2), a(:, [3:end 1]));
 if ~isequal(ind, 1:nFrame)
     if ind(1) ~= 1 || ind(end) ~= nFrame 
         s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read frames 1 and end
-    	s.LocationsInAcquisition = nSL; % in case we added it
     end
-    s.SortFrames = ind;  % will use to sort img and get iVol/iSL for PerFrame
+    s.SortFrames = ind; % will use to sort img and get iVol/iSL for PerFrame
 end
+if ~isfield(s, 'LocationsInAcquisition'), s.LocationsInAcquisition = nSL; end
 
+% copy important fields into s
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
         'RepetitionTime' 'FlipAngle' 'RescaleIntercept' 'RescaleSlope' ...
         'ImageOrientationPatient' 'ImagePositionPatient' ...
@@ -2044,18 +2024,14 @@ end
 
 % check ImageOrientationPatient consistency for 1st and last frame only
 iF = nFrame; if isfield(s, 'SortFrames'), iF = s.SortFrames(iF); end
+a = MF_val('ImagePositionPatient', s, iF);
+if ~isempty(a), s.LastFile.ImagePositionPatient = a; end
 fld = 'ImageOrientationPatient';
 val = MF_val(fld, s, iF);
 if ~isempty(val) && isfield(s, fld) && any(abs(val-s.(fld))>1e-4)
     s = []; return; % inconsistent orientation, skip
 end
 
-flds = {'DiffusionDirectionality' 'ImagePositionPatient' 'MRScaleSlope' ...
-        'ComplexImageComponent' 'RescaleIntercept' 'RescaleSlope'};
-for i = 1:numel(flds) % For last frame
-    a = MF_val(flds{i}, s, iF);
-    if ~isempty(a), s.LastFile.(flds{i}) = a; end
-end
 
 %% subfunction: return value from Shared or PerFrame FunctionalGroupsSequence
 function val = MF_val(fld, s, iFrame)
@@ -2319,7 +2295,6 @@ ext.edata = '';
 for i = 1:numel(flds)
     try val = s.(flds{i}); catch, continue; end
     if ischar(val)
-        if strncmp(val, 'West', 4), keyboard; end
         str = sprintf('''%s''', val);
     elseif numel(val) == 1 % single numeric
         str = sprintf('%.8g', val);
@@ -2653,4 +2628,40 @@ while 1
     if any(a(:)), break; end
     nMos = nMos - 1;
 end
+
+%% Get sorting index for multi-frame and PAR (called by dicm_hdr
+function [ind, nSL] = sort_frames(sl, id)
+nFrame = size(sl, 1);
+nSL = max(sl(:, 1));
+nVol = floor(nFrame / nSL);
+badVol = nVol*nSL < nFrame; % incomplete volume
+for i = 1:size(id,2)
+    [~, ~, id(:,i)] = unique(id(:,i)); % entries to index
+end
+n = max(id); id = id(:, n>1); n = n(n>1); 
+ind = find(n == nVol+badVol, 1);
+if ~isempty(ind) % most fMRI/DTI
+    c2 = id(:, ind);
+elseif ~badVol && numel(n)==2 && prod(n) == nVol % 2 columns in a
+    c2 = (id(:,2) - 1) * n(1) + id(:,1); % 1 through nVol
+else % 3D, or badVol, or no useful identifier
+    c2 = [];
+end
+seq = [sl c2]; % sl and identifier
+[seq, ind] = sortrows(seq); % this sort idea is from julienbesle
+if badVol
+    lastV = seq(:,2:end) > nVol;
+    if sum(lastV) == nFrame-nSL*nVol
+        ind(lastV) = []; % remove incomplete volume
+    else % suppose extra later slices are from bad volume
+        for i = 1:nSL
+            a = ind==i;
+            if sum(a) <= nVol, continue; end % shoule be ==
+            ind(find(a, 'last')) = []; % remove last extra one
+            if numel(ind) == nSL*nVol, break; end
+        end
+    end
+end
+ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
+ind = ind(:)';
 %%
