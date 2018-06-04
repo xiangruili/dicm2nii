@@ -98,7 +98,7 @@
 {
     "inputs":
         [
-            {"name":"fname", "kind":"required", "type":"filepath=*.par,*.dcm"},
+            {"name":"fname", "kind":"required", "type":"filepath=*.par,*.dcm,*.xml"},
             {"name":"dict", "kind":"positional", "type":"struct"},
             {"name":"iFrames", "kind":"positional", "type":"numeric"}
         ]
