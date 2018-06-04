@@ -1389,11 +1389,11 @@ bval = nan(nDir, 1);
 bvec = nan(nDir, 3);
 s = h{1};
 
+nFile =  numel(h);
 if isfield(s, 'bvec_original') % from BV or PAR file
     bval = s.B_value;
     bvec = s.bvec_original;
 elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
-    nFile =  numel(h);
     if nFile== 1 % all vol in 1 file, for Philips
         iDir = 1:nSL:nSL*nDir;
         if isfield(s, 'SortFrames'), iDir = s.SortFrames(iDir); end
@@ -1407,10 +1407,10 @@ elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
             bvec(i,:) = MF_val('DiffusionGradientDirection', h{i}, 1);
         end
     end
-else % multiple files: order already in slices then volumes
+elseif nFile>1 % multiple files: order already in slices then volumes
     dict = dicm_dict(s.Manufacturer, {'B_value' 'B_factor' 'SlopInt_6_9' ...
        'DiffusionDirectionX' 'DiffusionDirectionY' 'DiffusionDirectionZ'});
-    iDir = (0:nDir-1) * numel(h)/nDir + 1; % could be mosaic 
+    iDir = (0:nDir-1) * nFile/nDir + 1; % could be mosaic 
     for j = 1:nDir % no bval/bvec for 1st file of each excitation
         s2 = h{iDir(j)};
         val = tryGetField(s2, 'B_value');
