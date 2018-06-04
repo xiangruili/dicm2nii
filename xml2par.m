@@ -22,7 +22,7 @@ function xml2par(inputFilename, outputFilename)
   if ~isequal(inputFilename,0) %if we have a file name
     
     [path, file, extension] = fileparts(inputFilename);
-    if strcmp(extension,'.xml') %if the file has the correct extension
+    if strcmpi(extension,'.xml') %if the file has the correct extension
       
       % read the xml file
       fprintf('Reading %s...',inputFilename);
