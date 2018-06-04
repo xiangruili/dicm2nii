@@ -2,16 +2,19 @@ function xml2par(inputFilename, outputFilename)
 % converts Philips xml header file to PAR format V4.2
 % written by Julien Besle, June 2018
 
+  warningStrings = {};
   if ~exist('inputFilename','var') || isempty(inputFilename)
     [inputFilename,pathname] = uigetfile({'*.xml';'*.*'},'Select Philips XML file(s)', 'MultiSelect', 'on');
-    if iscell(inputFilename)
-      fnms = strcat(pathname,char(inputFilename));
-      for i=1:size(fnms,1)
-        filename = deblank(fnms(i,:)); 
-        xml2par(filename);
-      end
-    else
+    if ~isequal(inputFilename,0) 
+      if iscell(inputFilename)
+        fnms = strcat(pathname,char(inputFilename));
+        for i=1:size(fnms,1)
+          filename = deblank(fnms(i,:)); 
+          xml2par(filename);
+        end
+      else
         inputFilename = [pathname inputFilename];
+      end
     end
   end
  
@@ -22,7 +25,7 @@ function xml2par(inputFilename, outputFilename)
   if ~isequal(inputFilename,0) %if we have a file name
     
     [path, file, extension] = fileparts(inputFilename);
-    if strcmp(extension,'.xml') %if the file has the correct extension
+    if strcmpi(extension,'.xml') %if the file has the correct extension
       
       % read the xml file
       fprintf('Reading %s...',inputFilename);
@@ -279,7 +282,18 @@ function xml2par(inputFilename, outputFilename)
       if index
         value = attributeNames{position,3}{index,2};
       else
-        keyboard  %if it stops here, it means the conversion between the value in the xml to the expected value in the PAR is unknown.
+        % If the conversion between the value in the xml to the expected value in the PAR is unknown, issue a warning the first time
+        warningString = sprintf('(Warning) Unknown value (''%s'') for item ''%s'' in xml file', value, attributeNames{position,1});
+        if ~isempty(attributeNames{position,2}) && ~strcmp(attributeNames{position,1}, attributeNames{position,2})
+          warningString = sprintf('%s (field ''%s'' in PAR file)', warningString, attributeNames{position,2});
+        end     
+        warningString = sprintf('%s, setting to ''0'' in PAR file...',warningString);
+        if ~ismember(warningString,warningStrings)
+          warningStrings{end+1} = warningString;
+          fprintf('\n%s',warningString); %issue the warning only the first time
+        end
+        value = '0';
+        % this is what needs to happen:
         % Add the string value in the 3rd column of either seriesAttributeNames or imageAttributeNames, at row = position 
         % and, if known, the corresponding expected value in the PAR file
       end
