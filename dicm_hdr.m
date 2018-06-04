@@ -813,12 +813,9 @@ end
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'dynamic scan number' 'gradient orientation number' 'scanning sequence' ...
     'cardiac phase number' 'image_type_mr' 'label type' 'echo number'};
-id = ones(nFrame, numel(keys));
-for i = 1:numel(keys)
-    id(:,i) = para(:, colIndex(keys{i}));
-end
+ic = []; for i = 1:numel(keys), ic = [ic colIndex(keys{i})]; end %#ok
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
-ind = sort_frames(para(:, colIndex('slice number')), id);
+ind = sort_frames(para(:, colIndex('slice number')), para(:, ic));
 if ~isequal(ind, 1:nFrame)
     para = para(ind, :); % XYZT order
     s.SortFrames = ind; % for PAR, sort (drop) frames only in dicm2nii
@@ -875,18 +872,22 @@ getTableVal('scale slope', 'MRScaleSlope');
 getTableVal('slice thickness', 'SliceThickness');
 getTableVal('echo_time', 'EchoTimes', iVol);
 s.EchoTime = s.EchoTimes(1);
-if numel(s.EchoTimes) == 1, s = rmfield(s, 'EchoTimes'); end
+if numel(unique(s.EchoTimes)) == 1, s = rmfield(s, 'EchoTimes'); end
 getTableVal('image_flip_angle', 'FlipAngle');
 getTableVal('number of averages', 'NumberOfAverages');
-getTableVal('trigger_time', 'CardiacTriggerDelayTimes', iVol);
+fld = 'CardiacTriggerDelayTimes';
+getTableVal('trigger_time', fld, iVol);
+if isfield(s,fld) && numel(unique(s.(fld))) == 1, s = rmfield(s, fld); end
 % getTableVal('dyn_scan_begin_time', 'TimeOfAcquisition', 1:nImg);
 if isDTI
     getTableVal('diffusion_b_factor', 'B_value', iVol);
     fld = 'bvec_original';
-    a = regexp(str, 'diffusion\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})\)', 'tokens', 'once');
-    ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
     getTableVal('diffusion', fld, iVol);
-    if isfield(s, fld), s.(fld) = s.(fld)(:, ax_order); end
+    if isfield(s, fld)
+        a = regexp(str, 'diffusion\s*\(\s*(\w{2}),\s*(\w{2}),\s*(\w{2})\)', 'tokens', 'once');
+        ax_order = cellfun(@(x)find(strcmpi(a, x)), {'rl' 'ap' 'fh'});
+        s.(fld) = s.(fld)(:, ax_order);
+    end
 end
 getTableVal('TURBO factor', 'TurboFactor');
 
