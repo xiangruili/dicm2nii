@@ -5,14 +5,16 @@ function xml2par(inputFilename, outputFilename)
   warningStrings = {};
   if ~exist('inputFilename','var') || isempty(inputFilename)
     [inputFilename,pathname] = uigetfile({'*.xml';'*.*'},'Select Philips XML file(s)', 'MultiSelect', 'on');
-    if iscell(inputFilename)
-      fnms = strcat(pathname,char(inputFilename));
-      for i=1:size(fnms,1)
-        filename = deblank(fnms(i,:)); 
-        xml2par(filename);
-      end
-    else
+    if ~isequal(inputFilename,0) 
+      if iscell(inputFilename)
+        fnms = strcat(pathname,char(inputFilename));
+        for i=1:size(fnms,1)
+          filename = deblank(fnms(i,:)); 
+          xml2par(filename);
+        end
+      else
         inputFilename = [pathname inputFilename];
+      end
     end
   end
  
