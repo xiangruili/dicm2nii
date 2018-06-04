@@ -620,7 +620,6 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
     nii.hdr.bitpix = para.bitpix(ind);
     nii.hdr.dim = [ndim dim];
     
-    
     mx = double(max(nii.img(:)));
     mn = double(min(nii.img(:)));
     if nii.hdr.cal_min>mx || nii.hdr.cal_max>mn % reset wrong value
@@ -1023,9 +1022,14 @@ for i = 1:numel(ext)
                 if isempty(a), continue; end
                 try
                     eval(['ss.' a]); % put all into struct
-                catch me
-                    fprintf(2, '%s\n', me.message);
-                    fprintf(2, 'Unrecognized text: %s\n', a);
+                catch
+                    try
+                        a = regexp(a, '(.*?)\s*=\s*(.*?);', 'tokens', 'once');
+                        ss.(a{1}) = a{2};
+                    catch me
+                        fprintf(2, '%s\n', me.message);
+                        fprintf(2, 'Unrecognized text: %s\n', a);
+                    end
                 end
             end
             flds = fieldnames(ss); % make all vector column
