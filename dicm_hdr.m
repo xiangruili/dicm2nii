@@ -696,36 +696,28 @@ end
 
 %% subfunction: read PAR file, return struct like that from dicm_hdr.
 function [s, err] = philips_par(fname)
-
-[pth,nam,ext] = fileparts(fname);
-if strcmp(ext,'.xml') % if this is an xml file, convert to a temporary PAR file
-  parFname = fullfile(pth, [nam '.PAR.temp']);
-  xml2par(fname,parFname);
-  fname = parFname;  %this PAR file name will be used for the next few lines
-end 
-
 err = '';
 fid = fopen(fname);
 if fid<0, s = []; err = ['File not exist: ' fname]; return; end
+fullName = fopen(fid); % name with full path
+[pth, nam, ext] = fileparts(fullName);
+if strcmpi(ext, '.xml') % if this is an xml file, convert to a temporary PAR file
+    fclose(fid);
+    fname = fullfile(tempdir, [nam '_tmp.PAR']);
+    xml2par(fullName, fname);
+    delTmpPar = onCleanup(@() delete(fname));
+    fid = fopen(fname);
+end
+
 str = fread(fid, inf, '*char')'; % read all as char
-fname = fopen(fid); % name with full path
 fclose(fid);
 str = strrep(str, char([13 10]), char(10)); % remove char(13)
-
-if strcmp(ext,'.xml')
-  fname = fullfile(pth, [nam '.xml']);  %revert the file name bcak to its original name
-end
 
 % In V4, offcentre and Angulation labeled as y z x, but actually x y z. We
 % try not to use these info
 V = regexpi(str, 'image export tool\s*(V[\d\.]+)', 'tokens', 'once');
 if isempty(V), err = 'Not PAR file'; s = []; return; end
-if strcmp(ext,'.xml')
-  s.SoftwareVersion = [V{1} '\xml']; %not sure what version to put here. xml files have this information: "PRIDE V5"
-  % however, currently, xml2par converts the xml file to PAR version 4.2
-else
-  s.SoftwareVersion = [V{1} '\PAR'];
-end
+s.SoftwareVersion = [V{1} '\' ext(2:end)]; % xml files have "PRIDE V5"
 if strncmpi(s.SoftwareVersion, 'V3', 2)
     fprintf(2, ' V3 PAR file is not supported.\n');
     s = []; return;
@@ -867,7 +859,7 @@ end
 a = para(:, ind);
 a = abs(diff(a));
 if any(a(:) > 1e-5)
-    err = sprintf('Inconsistent image size, bits etc: %s', fname);
+    err = sprintf('Inconsistent image size, bits etc: %s', fullName);
     fprintf(2, ' %s. \n', err);
     s = []; return;
 end
@@ -955,10 +947,6 @@ s.Manufacturer = 'Philips';
 s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
 s.PixelData.Start = 0;
 s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
-
-if strcmp(ext,'.xml')
-    delete(parFname);% delete temporary PAR file
-end
 
     % nested function: set field if the key is in colTable
     function getTableVal(key, fldname, iRow)
