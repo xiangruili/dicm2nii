@@ -550,6 +550,9 @@ for k = 1:nFile
         else, sN = fix(toc*1e6);
         end
         sUID = num2str(sN); % make up UID
+        if isfield(s, 'SeriesDescription')
+            sUID = [s.SeriesDescription sUID];
+        end
     end
     
     m = find(strcmp(sUID, seriesUIDs));
