@@ -378,6 +378,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180601 use SortFrames for multiframe and PAR (thx JulienB & ChrisR); 
 %        Side product: Philips DTI b=0 loc consistent with dcm2niiX.
 % 180602 extract sort_frames() for multiFrameFields() and philips_par()
+% 180605 multiFrameFields: B=0 to first vol. 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -1986,9 +1987,9 @@ if any(~isfield(s, {sfgs pffgs})), return; end
 % check slice ordering (Philips often needs SortFrames)
 try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 n = numel(MF_val('DimensionIndexValues', s, 1));
-s2 = struct('DimensionIndexValues', nan(n, nFrame));
+s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', nan(1, nFrame));
 s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
-[ind, nSL] = sort_frames(a(:,2), a(:, [3:end 1]));
+[ind, nSL] = sort_frames([a(:,2) s2.B_value'], a(:, [3:end 1]));
 if ~isequal(ind, 1:nFrame)
     if ind(1) ~= 1 || ind(end) ~= nFrame 
         s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read frames 1 and end
