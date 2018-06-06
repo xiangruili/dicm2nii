@@ -52,7 +52,7 @@
 {
     "inputs":
         [
-            {"name":"src", "kind":"positional", "type":[["folderpath"], ["filepath=*.dcm,*.par"]]},
+            {"name":"src", "kind":"positional", "type":[["folderpath"], ["filepath=*.dcm,*.par,*.xml"]]},
             {"name":"niiFolder", "kind":"positional", "type":[["char"], ["folderpath"]]},
             {"name":"fmt", "kind":"positional", "type":"choices={'.hdr', '.hdr.gz', '.hdr (3D)', '.nii', '.nii (3D)', '.nii.gz'}"}
         ]
