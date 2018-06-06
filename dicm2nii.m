@@ -2634,27 +2634,25 @@ while 1
 end
 
 %% Get sorting index for multi-frame and PAR (called by dicm_hdr
-function [ind, nSL] = sort_frames(sl, id)
+function [ind, nSL] = sort_frames(sl, ic)
 nFrame = size(sl, 1);
 nSL = max(sl(:, 1));
 nVol = floor(nFrame / nSL);
 badVol = nVol*nSL < nFrame; % incomplete volume
-for i = 1:size(id,2)
-    [~, ~, id(:,i)] = unique(id(:,i)); % entries to index
+id = zeros(size(ic));
+for i = 1:size(ic,2)
+    [~, ~, id(:,i)] = unique(ic(:,i)); % entries to index
 end
 n = max(id); id = id(:, n>1); n = n(n>1); 
 ind = find(n == nVol+badVol, 1);
 if ~isempty(ind) % most fMRI/DTI
-    c2 = id(:, ind);
-elseif ~badVol && numel(n)==2 && prod(n) == nVol % 2 columns in a
-    c2 = (id(:,2) - 1) * n(1) + id(:,1); % 1 through nVol
-else % 3D, or badVol, or no useful identifier
-    c2 = [];
+    id = id(:, ind);
+elseif ~badVol && numel(n)>=2 && prod(n(1:2)) == nVol % 2 columns in a
+    id = (id(:,2) - 1) * n(1) + id(:,1); % 1 through nVol
 end
-seq = [sl c2]; % sl and identifier
-[seq, ind] = sortrows(seq); % this sort idea is from julienbesle
+[~, ind] = sortrows([sl id]); % this sort idea is from julienbesle
 if badVol
-    lastV = seq(:,2:end) > nVol;
+    try lastV = id(ind,1) > nVol; catch, lastV = []; end
     if sum(lastV) == nFrame-nSL*nVol
         ind(lastV) = []; % remove incomplete volume
     else % suppose extra later slices are from bad volume
