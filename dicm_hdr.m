@@ -805,8 +805,8 @@ if isfield(s, 'IndexInREC') % why Philips includes this?
 end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
-keys = {'dynamic scan number' 'gradient orientation number' 'scanning sequence' ...
-    'cardiac phase number' 'image_type_mr' 'label type' 'echo number'};
+keys = {'dynamic scan number' 'gradient orientation number' 'echo number' ...
+    'cardiac phase number' 'image_type_mr' 'label type' 'scanning sequence'};
 ic = []; for i = 1:numel(keys), ic = [ic colIndex(keys{i})]; end %#ok
 bval = para(:, colIndex('diffusion_b_factor'));
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
@@ -883,12 +883,10 @@ getTableVal('rescale slope', 'RescaleSlope');
 getTableVal('scale slope', 'MRScaleSlope');
 getTableVal('echo_time', 'EchoTimes', iVol);
 s.EchoTime = s.EchoTimes(1);
-if numel(unique(s.EchoTimes)) == 1, s = rmfield(s, 'EchoTimes'); end
 getTableVal('image_flip_angle', 'FlipAngle');
 getTableVal('number of averages', 'NumberOfAverages');
 fld = 'CardiacTriggerDelayTimes';
 getTableVal('trigger_time', fld, iVol);
-if isfield(s,fld) && numel(unique(s.(fld))) == 1, s = rmfield(s, fld); end
 % getTableVal('dyn_scan_begin_time', 'TimeOfAcquisition', 1:nImg);
 if isDTI
     getTableVal('diffusion_b_factor', 'B_value', iVol);
@@ -1369,75 +1367,77 @@ fullName = fopen(fid); % name with full path
 ch = fread(fid, inf, '*char')'; % read all as char
 fclose(fid);
 [pth, nam] = fileparts(fullName);
+i = regexp(ch, '</Series_Info>', 'once');
+if isempty(i), s = []; err = 'Not valid Philips xml file'; return; end
+ch1 = ch(1:i); ch = ch(i:end);
 
-s.SoftwareVersion = regexp(ch, '(?<=<)PRIDE.*?(?=>)', 'match', 'once');
-s.PatientName = xml_attr(ch, 'Patient Name');
-s.StudyDescription = xml_attr(ch, 'Examination Name');
+s.SoftwareVersion = regexp(ch1, '(?<=<)PRIDE.*?(?=>)', 'match', 'once');
+s.PatientName = xml_attr(ch1, 'Patient Name');
+s.StudyDescription = xml_attr(ch1, 'Examination Name');
 s.SeriesDescription = nam;
-s.ProtocolName = xml_attr(ch, 'Protocol Name');
-d = xml_attr(ch, 'Examination Date'); d = d(isstrprop(d, 'digit'));
-t = xml_attr(ch, 'Examination Time'); t = t(isstrprop(t, 'digit'));
+s.ProtocolName = xml_attr(ch1, 'Protocol Name');
+d = xml_attr(ch1, 'Examination Date'); d = d(isstrprop(d, 'digit'));
+t = xml_attr(ch1, 'Examination Time'); t = t(isstrprop(t, 'digit'));
 s.AcquisitionDateTime = [d t];
-s.SeriesNumber = xml_attr(ch, 'Ac?quisition Number', 1);
-% s.ReconstructionNumberMR = xml_attr(ch, 'Reconstruction Number', 1);
-% s.MRSeriesScanDuration = xml_attr(ch, 'Scan Duration', 1);
-s.NumberOfEchoes = xml_attr(ch, 'Max No Echoes', 1);
-s.LocationsInAcquisition = xml_attr(ch, 'Max No Slices', 1);
-s.PatientPosition = xml_attr(ch, 'Patient Position');
-s.MRAcquisitionType = xml_attr(ch, 'Scan Mode');
-s.ScanningSequence = xml_attr(ch, 'Technique'); % ScanningTechnique
-typ = xml_attr(ch, 'Series Data Type'); typ(isspace(typ)) = '';
-s.ImageType = ['PhilipsPAR\' typ '\' s.ScanningSequence];
-s.RepetitionTime = xml_attr(ch, 'Repetition Times?', 1);
+s.SeriesNumber = xml_attr(ch1, 'Ac?quisition Number', 1);
+% s.ReconstructionNumberMR = xml_attr(ch1, 'Reconstruction Number', 1);
+% s.MRSeriesScanDuration = xml_attr(ch1, 'Scan Duration', 1);
+s.NumberOfEchoes = xml_attr(ch1, 'Max No Echoes', 1);
+s.LocationsInAcquisition = xml_attr(ch1, 'Max No Slices', 1);
+s.PatientPosition = xml_attr(ch1, 'Patient Position');
+s.MRAcquisitionType = xml_attr(ch1, 'Scan Mode');
+s.ScanningSequence = xml_attr(ch1, 'Technique'); % ScanningTechnique
+typ = xml_attr(ch1, 'Series Data Type'); typ(isspace(typ)) = '';
+s.ImageType = ['PhilipsXML\' typ '\' s.ScanningSequence];
+s.RepetitionTime = xml_attr(ch1, 'Repetition Times?', 1);
 if numel(s.RepetitionTime)>1, s.RepetitionTime = s.RepetitionTime(1); end
-s.WaterFatShift = xml_attr(ch, 'Water Fat Shift', 1);
-rotAngle = [xml_attr(ch, 'Angulation RL', 1) ...
-            xml_attr(ch, 'Angulation AP', 1) ...
-            xml_attr(ch, 'Angulation FH', 1)];
-posMid = [xml_attr(ch, 'Off Center RL', 1)
-          xml_attr(ch, 'Off Center AP', 1)
-          xml_attr(ch, 'Off Center FH', 1)];    
-s.EPIFactor = xml_attr(ch, 'EPI factor', 1);
-% s.DynamicSeries = xml_attr(ch, 'Dynamic Scan', 1); % 0 or 1
-isDTI = strncmpi(xml_attr(ch, 'Diffusion'), 'Y', 1);
+s.WaterFatShift = xml_attr(ch1, 'Water Fat Shift', 1);
+rotAngle = [xml_attr(ch1, 'Angulation RL', 1) ...
+            xml_attr(ch1, 'Angulation AP', 1) ...
+            xml_attr(ch1, 'Angulation FH', 1)];
+posMid = [xml_attr(ch1, 'Off Center RL', 1)
+          xml_attr(ch1, 'Off Center AP', 1)
+          xml_attr(ch1, 'Off Center FH', 1)];    
+s.EPIFactor = xml_attr(ch1, 'EPI factor', 1);
+% s.DynamicSeries = xml_attr(ch1, 'Dynamic Scan', 1); % 0 or 1
+isDTI = strncmpi(xml_attr(ch1, 'Diffusion'), 'Y', 1);
 if isDTI
     s.ImageType = [s.ImageType '\DIFFUSION\'];
-    s.DiffusionEchoTime = xml_attr(ch, 'Diffusion echo time', 1); % ms
+    s.DiffusionEchoTime = xml_attr(ch1, 'Diffusion echo time', 1); % ms
 end
 
-a = xml_attr(ch, 'Preparation direction'); % AP
+a = xml_attr(ch1, 'Preparation direction'); % AP
 if ~isempty(a)
     s.Stack.Item_1.MRStackPreparationDirection = a;
     iPhase = strfind('LRAPFH', a(1));
     iPhase = ceil(iPhase/2); % 1/2/3
 end
 
-nFrame = numel(regexp(ch, '<Image_Info>')); 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'Dynamic' 'Grad Orient' 'Echo' 'Phase' 'Sequence' 'Type' 'Label Type'};
 id = [];
-for i = 1:4, id = [id xml_val(ch, keys{i}, 1, [])]; end %#ok
-for i = 5:7
-    a = xml_val(ch, keys{i}, 0, []);
-    [~, ~, a] = unique(a);
-    id = [id a]; %#ok
-end
+for i = 1:numel(keys), id = [id xml_raw(ch, keys{i})]; end %#ok
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
-[ind_sort, nSL] = sort_frames(xml_val(ch, 'Slice', 1, []), id);
+sl = str2num(char(xml_raw(ch, 'Slice'))); 
+if isDTI, sl(:,2) = str2num(char(xml_raw(ch, 'Diffusion B Factor'))); end
+[ind_sort, nSL] = sort_frames(sl, id);
+nFrame = size(sl, 1); 
 if ~isequal(ind_sort, 1:nFrame), s.SortFrames = ind_sort; end
 
-a = xml_val(ch, 'Index', 1, [])';
+a = str2num(char(xml_raw(ch, 'Index')))';
 if ~isequal(a, 0:nFrame-1), error('Special REC order not supported yet'); end
 
 s.NumberOfFrames = numel(ind_sort); % may be smaller than nFrame
 s.NumberOfTemporalPositions = numel(ind_sort)/nSL;
 
-iVol = (0:s.NumberOfTemporalPositions-1)*nSL + 1; % already XYZT
+iVol = ind_sort((0:s.NumberOfTemporalPositions-1)*nSL + 1); % already XYZT
 typ = {'MAGNITUDE' 'REAL' 'IMAGINARY' 'PHASE'};
 imgType = xml_val(ch, 'Type', 0, iVol); % 'M'
 for i = 1:numel(imgType), imgType{i} = find(strncmpi(typ, imgType{i}, 1), 1); end
 imgType = cell2mat(imgType);
-if any(diff(imgType) ~= 0) % more than 1 type of image
+if numel(iVol) == 1
+    s.ComplexImageComponent = typ{imgType(1)};
+elseif any(diff(imgType) ~= 0) % more than 1 type of image
     s.ComplexImageComponent = 'MIXED';
     s.Volumes.ComplexImageComponent = typ(imgType); % one for each vol
     s.Volumes.RescaleIntercept = xml_val(ch, 'Rescale Intercept', 1, iVol);
@@ -1448,35 +1448,32 @@ else
 end
 
 % These columns should be the same for nifti-convertible images: 
-keys = {'Pixel Size' 'Resolution X' 'Resolution Y' ...
+keys = {'Pixel Size' 'Resolution X' 'Resolution Y' 'Slice Orientation' ...
         'Angulation AP' 'Angulation FH' 'Angulation RL'...
         'Slice Thickness' 'Slice Gap' 'Pixel Spacing'};
 if ~strcmp(s.ComplexImageComponent, 'MIXED')
     keys = [keys {'Rescale Intercept' 'Rescale Slope' 'Scale Slope'}];
 end
-[~, ~, a] = unique(xml_val(ch, 'Slice Orientation', 0));
 for i = 1:numel(keys)
-    a = [a xml_val(ch, keys{i}, 1)]; %#ok
-end
-a = abs(diff(a));
-if any(a(:) > 1e-4) % seen 5e-5 error
-    err = sprintf('Inconsistent image size, bits etc: %s', fullName);
-    fprintf(2, ' %s. \n', err);
-    s = []; return;
+    if numel(unique(xml_raw(ch, keys{i}))) > 1
+        err = sprintf('Inconsistent %s for %s', keys{i}, fullName);
+        fprintf(2, ' %s. \n', err);
+        s = []; return;
+    end
 end
 
-s.BitsAllocated = xml_val(ch, 'Pixel Size', 1, 1);
-s.Columns = xml_val(ch, 'Resolution X', 1, 1);
-s.Rows = xml_val(ch, 'Resolution Y', 1, 1);
-s.RescaleIntercept = xml_val(ch, 'Rescale Intercept', 1, 1);
-s.RescaleSlope = xml_val(ch, 'Rescale Slope', 1, 1);
-s.MRScaleSlope = xml_val(ch, 'Scale Slope', 1, 1);
-s.SliceThickness = xml_val(ch, 'Slice Thickness', 1, 1);
+v1 = ind_sort(1);
+s.BitsAllocated = xml_val(ch, 'Pixel Size');
+s.Columns = xml_val(ch, 'Resolution X');
+s.Rows = xml_val(ch, 'Resolution Y');
+s.RescaleIntercept = xml_val(ch, 'Rescale Intercept', 1, v1);
+s.RescaleSlope = xml_val(ch, 'Rescale Slope', 1, v1);
+s.MRScaleSlope = xml_val(ch, 'Scale Slope', 1, v1);
+s.SliceThickness = xml_val(ch, 'Slice Thickness');
 s.EchoTimes = xml_val(ch, 'Echo Time', 1, iVol);
 s.EchoTime = s.EchoTimes(1);
-if numel(unique(s.EchoTimes)) == 1, s = rmfield(s, 'EchoTimes'); end
-s.FlipAngle = xml_val(ch, 'Image Flip Angle', 1, 1);
-s.NumberOfAverages = xml_val(ch, 'No Averages', 1, 1);
+s.FlipAngle = xml_val(ch, 'Image Flip Angle');
+s.NumberOfAverages = xml_val(ch, 'No Averages');
 fld = 'CardiacTriggerDelayTimes';
 s.(fld) = xml_val(ch, 'Trigger Time', 1, iVol);
 if numel(unique(s.(fld))) == 1, s = rmfield(s, fld); end
@@ -1487,7 +1484,7 @@ if isDTI
                xml_val(ch, 'Diffusion AP', 1, iVol) ...
                xml_val(ch, 'Diffusion FH', 1, iVol)];
 end
-s.TurboFactor = xml_val(ch, 'TURBO Factor', 1, 1);
+s.TurboFactor = xml_val(ch, 'TURBO Factor');
 
 % Rotation order and signs are figured out by try and err, not 100% sure
 ca = cosd(rotAngle); sa = sind(rotAngle);
@@ -1496,8 +1493,9 @@ ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
 rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
 R = rx * ry * rz; % seems right for Philips
 
-s.SliceOrientation = xml_val(ch, 'Slice Orientation', 0, 1);
-iOri = find(strncmpi({'SAG' 'COR' 'TRA'}, s.SliceOrientation, 3));
+s.SliceOrientation = xml_val(ch, 'Slice Orientation', 0);
+s.SliceOrientation = s.SliceOrientation{1};
+iOri = find(strncmpi({'Sag' 'Cor' 'Tra'}, s.SliceOrientation, 3));
 if iOri == 1 
     R(:,[1 3]) = -R(:,[1 3]);
     R = R(:, [2 3 1]);
@@ -1506,8 +1504,8 @@ elseif iOri == 2
     R = R(:, [1 3 2]);
 end
 
-s.PixelSpacing = xml_val(ch, 'Pixel Spacing', 1, 1)';
-s.SpacingBetweenSlices = xml_val(ch, 'Slice Gap', 1, 1) + s.SliceThickness;
+s.PixelSpacing = xml_val(ch, 'Pixel Spacing')';
+s.SpacingBetweenSlices = xml_val(ch, 'Slice Gap') + s.SliceThickness;
 
 if exist('iPhase', 'var')
     a = 'COL';
@@ -1520,7 +1518,7 @@ R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
 R = [R posMid; 0 0 0 1]; % 4th col is mid slice center position
 
 ori = {'RL' 'AP' 'FH'}; ori = ori{iOri};
-s.SliceLocation = xml_val(ch, ['Offcenter' ori], 1, 1);
+s.SliceLocation = xml_val(ch, ['Offcenter ' ori], 1, v1);
 if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
     R(:,3) = -R(:,3);
 end
@@ -1534,26 +1532,29 @@ s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
 s.PixelData.Start = 0;
 s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
 
-    % Return xml attribute value for key
-    function val = xml_attr(ch, key, isnum)
+    % Return xml attribute value for key in Series_Info
+    function val = xml_attr(ch1, key, isnum)
         expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
-        val = regexpi(ch, expr, 'tokens', 'once');
-        if isempty(val), val = '';
-        else, val = val{1};
-        end
+        val = regexpi(ch1, expr, 'tokens', 'once');
+        if isempty(val), val = ''; else, val = val{1}; end
         if nargin>2 && isnum, val = str2num(val); end %#ok<*ST2NM>
     end
 
-    % Return xml values in a column for key
-    function val = xml_val(ch, key, isnum, iVol)
+    % Return all values for key with original order in Image_Info
+    function val = xml_raw(ch, key)
         expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
         val = regexpi(ch, expr, 'tokens');
-        if isempty(val), val = []; return; end
-        if nargin>3 && isempty(iVol), iVol = 1:numel(val); % order in xml
-        elseif nargin<4, iVol = ind_sort;  % order for dicm2nii
-        else, iVol= ind_sort(iVol); 
+        val = [val{:}]';
+    end
+
+    % Return values for key in Image_Info for volumes iVol
+    function val = xml_val(ch, key, isnum, iVol)
+        if nargin<3 || isempty(isnum), isnum = true; end
+        if nargin<4 || isempty(iVol), iVol = 1; end
+        expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
+        if isequal(iVol, 1), val = regexpi(ch, expr, 'tokens', 'once');
+        else, val = regexpi(ch, expr, 'tokens'); val = [val{iVol}]';
         end
-        val = [val{iVol}]';
         if isnum, val = str2num(char(val)); end
     end
 end
