@@ -870,13 +870,12 @@ for i = 1:nRun
         img = int16(img); % use int16 if lossless
     end
     
-    nii = nii_tool('init', img); % create nii struct based on img
-    fname = [niiFolder fnames{i}]; % name without ext
-    
     h{i}{1}.ConversionSoftware = converter;
+    nii = nii_tool('init', img); % create nii struct based on img
     [nii, h{i}] = set_nii_hdr(nii, h{i}, pf); % set most nii hdr
 
     % Save bval and bvec files after bvec perm/sign adjusted in set_nii_hdr
+    fname = [niiFolder fnames{i}]; % name without ext
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
 
     nii = split_components(nii, h{i}{1}); % split Philips vol components
@@ -1987,14 +1986,14 @@ if any(~isfield(s, {sfgs pffgs})), return; end
 % check slice ordering (Philips often needs SortFrames)
 try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 n = numel(MF_val('DimensionIndexValues', s, 1));
-s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', nan(1, nFrame));
+s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', zeros(1, nFrame));
 s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
 [ind, nSL] = sort_frames([a(:,2) s2.B_value'], a(:, [3:end 1]));
 if ~isequal(ind, 1:nFrame)
     if ind(1) ~= 1 || ind(end) ~= nFrame 
-        s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read frames 1 and end
+        s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
     end
-    s.SortFrames = ind; % will use to sort img and get iVol/iSL for PerFrame
+    s.SortFrames = ind; % will use to sort img and get iVol/iSL for PerFrameSQ
 end
 if ~isfield(s, 'LocationsInAcquisition'), s.LocationsInAcquisition = nSL; end
 
