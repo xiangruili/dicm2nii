@@ -764,14 +764,6 @@ if isDTI
     s.DiffusionEchoTime = par_key(str, 'Diffusion echo time'); % ms
 end
 
-a = par_key(str, 'Preparation direction', 0); % Anterior-Posterior
-if ~isempty(a)
-    a = a(regexp(a, '\<.')); % 'AP'
-    s.Stack.Item_1.MRStackPreparationDirection = a;
-    iPhase = strfind('LRAPFH', a(1));
-    iPhase = ceil(iPhase/2); % 1/2/3
-end
-
 % Get list of para meaning for the table, and col index of each para
 i1 = regexpi(str, 'IMAGE INFORMATION DEFINITION', 'once');
 i2 = regexpi(str, '= IMAGE INFORMATION ='); i2 = i2(end);
@@ -902,26 +894,28 @@ rx = [1 0 0; 0 ca(1) -sa(1); 0 sa(1) ca(1)]; % 3D rotation
 ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
 rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
 R = rx * ry * rz; % seems right for Philips
-% R = makehgtform('x', , 'y', , 'z', );
+% a = rotAngle/180*pi;
+% R = makehgtform('xrotate', a(1), 'yrotate', a(2), 'zrotate', a(3));
 
 getTableVal('slice orientation', 'SliceOrientation'); % 1/2/3 for TRA/SAG/COR
-a = regexp(str, 'slice orientation\s*\(\s*(\w{3})\s*/\s*(\w{3})\s*/\s*(\w{3})\s*\)', 'tokens', 'once');
-iOri = find(strcmpi({'SAG' 'COR' 'TRA'}, a{s.SliceOrientation}));
+iOri = mod(s.SliceOrientation+1, 3) + 1;
+a = {'SAGITTAL' 'CORONAL' 'TRANSVERSAL'};
+s.SliceOrientation = a{iOri};
 if iOri == 1 
-    s.SliceOrientation = 'SAGITTAL';
     R(:,[1 3]) = -R(:,[1 3]);
     R = R(:, [2 3 1]);
 elseif iOri == 2
-    s.SliceOrientation = 'CORONAL';
     R(:,3) = -R(:,3);
     R = R(:, [1 3 2]);
-else
-    s.SliceOrientation = 'TRANSVERSAL';
 end
 
-if exist('iPhase', 'var')
-    a = 'COL';
-    if iPhase == (iOri==1)+1, a = 'ROW'; end
+a = par_key(str, 'Preparation direction', 0); % Anterior-Posterior
+if ~isempty(a)
+    a = a(regexp(a, '\<.')); % 'AP'
+    s.Stack.Item_1.MRStackPreparationDirection = a;
+    iPhase = strfind('LRAPFH', a(1));
+    iPhase = ceil(iPhase/2); % 1/2/3
+    if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
     s.InPlanePhaseEncodingDirection = a;
 end
 
@@ -930,7 +924,7 @@ R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
 R = [R posMid; 0 0 0 1]; % 4th col is mid slice center position
 
 getTableVal('image offcentre', 'SliceLocation');
-s.SliceLocation = s.SliceLocation(ax_order==iOri); % center loc for 1st slice
+s.SliceLocation = s.SliceLocation(ax_order(iOri)); % center loc for 1st slice
 if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
     R(:,3) = -R(:,3);
 end
@@ -1358,7 +1352,7 @@ s.PixelData = reshape(img, dim);
     end
 end
 
-%%
+%% similar to philips_par, inspired by Julien's xml2par
 function [s, err] = philips_xml(fname)
 err = '';
 fid = fopen(fname);
@@ -1395,9 +1389,9 @@ s.WaterFatShift = xml_attr(ch1, 'Water Fat Shift', 1);
 rotAngle = [xml_attr(ch1, 'Angulation RL', 1) ...
             xml_attr(ch1, 'Angulation AP', 1) ...
             xml_attr(ch1, 'Angulation FH', 1)];
-posMid = [xml_attr(ch1, 'Off Center RL', 1)
-          xml_attr(ch1, 'Off Center AP', 1)
-          xml_attr(ch1, 'Off Center FH', 1)];    
+posMid =   [xml_attr(ch1, 'Off Center RL', 1)
+            xml_attr(ch1, 'Off Center AP', 1)
+            xml_attr(ch1, 'Off Center FH', 1)];    
 s.EPIFactor = xml_attr(ch1, 'EPI factor', 1);
 % s.DynamicSeries = xml_attr(ch1, 'Dynamic Scan', 1); % 0 or 1
 isDTI = strncmpi(xml_attr(ch1, 'Diffusion'), 'Y', 1);
@@ -1406,29 +1400,22 @@ if isDTI
     s.DiffusionEchoTime = xml_attr(ch1, 'Diffusion echo time', 1); % ms
 end
 
-a = xml_attr(ch1, 'Preparation direction'); % AP
-if ~isempty(a)
-    s.Stack.Item_1.MRStackPreparationDirection = a;
-    iPhase = strfind('LRAPFH', a(1));
-    iPhase = ceil(iPhase/2); % 1/2/3
-end
-
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
-keys = {'Dynamic' 'Grad Orient' 'Echo' 'Phase' 'Sequence' 'Type' 'Label Type'};
+keys = {'Dynamic' 'Grad Orient' 'Echo' 'Phase' 'Type' 'Label Type' 'Sequence'};
 id = [];
 for i = 1:numel(keys), id = [id xml_raw(ch, keys{i})]; end %#ok
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
 sl = str2num(char(xml_raw(ch, 'Slice'))); 
 if isDTI, sl(:,2) = str2num(char(xml_raw(ch, 'Diffusion B Factor'))); end
 [ind_sort, nSL] = sort_frames(sl, id);
-nFrame = size(sl, 1); 
+a = str2num(char(xml_raw(ch, 'Index')))' + 1;
+nFrame = numel(a); 
+if ~isequal(a, 1:nFrame), ind_sort(a) = ind_sort; end % not tested
 if ~isequal(ind_sort, 1:nFrame), s.SortFrames = ind_sort; end
 
-a = str2num(char(xml_raw(ch, 'Index')))';
-if ~isequal(a, 0:nFrame-1), error('Special REC order not supported yet'); end
 
 s.NumberOfFrames = numel(ind_sort); % may be smaller than nFrame
-s.NumberOfTemporalPositions = numel(ind_sort)/nSL;
+s.NumberOfTemporalPositions = s.NumberOfFrames/nSL;
 
 iVol = ind_sort((0:s.NumberOfTemporalPositions-1)*nSL + 1); % already XYZT
 typ = {'MAGNITUDE' 'REAL' 'IMAGINARY' 'PHASE'};
@@ -1449,7 +1436,7 @@ end
 
 % These columns should be the same for nifti-convertible images: 
 keys = {'Pixel Size' 'Resolution X' 'Resolution Y' 'Slice Orientation' ...
-        'Angulation AP' 'Angulation FH' 'Angulation RL'...
+        'Angulation AP' 'Angulation FH' 'Angulation RL' ...
         'Slice Thickness' 'Slice Gap' 'Pixel Spacing'};
 if ~strcmp(s.ComplexImageComponent, 'MIXED')
     keys = [keys {'Rescale Intercept' 'Rescale Slope' 'Scale Slope'}];
@@ -1476,13 +1463,11 @@ s.FlipAngle = xml_val(ch, 'Image Flip Angle');
 s.NumberOfAverages = xml_val(ch, 'No Averages');
 fld = 'CardiacTriggerDelayTimes';
 s.(fld) = xml_val(ch, 'Trigger Time', 1, iVol);
-if numel(unique(s.(fld))) == 1, s = rmfield(s, fld); end
 if isDTI
     s.B_value = xml_val(ch, 'Diffusion B Factor', 1, iVol);
-    fld = 'bvec_original';
-    s.(fld) = [xml_val(ch, 'Diffusion RL', 1, iVol) ...
-               xml_val(ch, 'Diffusion AP', 1, iVol) ...
-               xml_val(ch, 'Diffusion FH', 1, iVol)];
+    s.bvec_original = [xml_val(ch, 'Diffusion RL', 1, iVol) ...
+                       xml_val(ch, 'Diffusion AP', 1, iVol) ...
+                       xml_val(ch, 'Diffusion FH', 1, iVol)];
 end
 s.TurboFactor = xml_val(ch, 'TURBO Factor');
 
@@ -1493,9 +1478,8 @@ ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
 rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
 R = rx * ry * rz; % seems right for Philips
 
-s.SliceOrientation = xml_val(ch, 'Slice Orientation', 0);
-s.SliceOrientation = s.SliceOrientation{1};
-iOri = find(strncmpi({'Sag' 'Cor' 'Tra'}, s.SliceOrientation, 3));
+s.SliceOrientation = upper(xml_val(ch, 'Slice Orientation', 0));
+iOri = find(strncmp({'SAG' 'COR' 'TRA'}, s.SliceOrientation, 3));
 if iOri == 1 
     R(:,[1 3]) = -R(:,[1 3]);
     R = R(:, [2 3 1]);
@@ -1507,11 +1491,12 @@ end
 s.PixelSpacing = xml_val(ch, 'Pixel Spacing')';
 s.SpacingBetweenSlices = xml_val(ch, 'Slice Gap') + s.SliceThickness;
 
-if exist('iPhase', 'var')
-    a = 'COL';
-    if iPhase == (iOri==1)+1, a = 'ROW'; end
-    s.InPlanePhaseEncodingDirection = a;
-end
+a = xml_attr(ch1, 'Preparation Direction'); % AP
+s.Stack.Item_1.MRStackPreparationDirection = a;
+iPhase = strfind('LRAPFH', a(1));
+iPhase = ceil(iPhase/2); % 1/2/3
+if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
+s.InPlanePhaseEncodingDirection = a;
 
 s.ImageOrientationPatient = R(1:6)';
 R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
@@ -1535,7 +1520,7 @@ s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
     % Return xml attribute value for key in Series_Info
     function val = xml_attr(ch1, key, isnum)
         expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
-        val = regexpi(ch1, expr, 'tokens', 'once');
+        val = regexp(ch1, expr, 'tokens', 'once');
         if isempty(val), val = ''; else, val = val{1}; end
         if nargin>2 && isnum, val = str2num(val); end %#ok<*ST2NM>
     end
@@ -1543,7 +1528,7 @@ s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
     % Return all values for key with original order in Image_Info
     function val = xml_raw(ch, key)
         expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
-        val = regexpi(ch, expr, 'tokens');
+        val = regexp(ch, expr, 'tokens');
         val = [val{:}]';
     end
 
@@ -1555,6 +1540,8 @@ s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
         if isequal(iVol, 1), val = regexpi(ch, expr, 'tokens', 'once');
         else, val = regexpi(ch, expr, 'tokens'); val = [val{iVol}]';
         end
-        if isnum, val = str2num(char(val)); end
+        if isnum, val = str2num(char(val));
+        elseif nargin<4, val = val{1};
+        end
     end
 end
