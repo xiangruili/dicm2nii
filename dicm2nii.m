@@ -376,9 +376,9 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180530 store EchoTimes and CardiacTriggerDelayTimes;
 %        split_components: not only phase, json for each file (thx ChrisR).
 % 180601 use SortFrames for multiframe and PAR (thx JulienB & ChrisR); 
-%        Side product: Philips DTI b=0 loc consistent with dcm2niiX.
 % 180602 extract sort_frames() for multiFrameFields() and philips_par()
 % 180605 multiFrameFields: B=0 to first vol. 
+% 180614 Implement scale_16bit: free precision for tools using 16-bit datatype. 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -423,6 +423,7 @@ pf.save_json = getpref('dicm2nii_gui_para', 'save_json', false);
 pf.use_parfor = getpref('dicm2nii_gui_para', 'use_parfor', true);
 pf.use_seriesUID = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
 pf.lefthand = getpref('dicm2nii_gui_para', 'lefthand', true);
+pf.scale_16bit = getpref('dicm2nii_gui_para', 'scale_16bit', false);
 
 tic;
 unzip_cmd = '';
@@ -1078,9 +1079,8 @@ iPhase = find(fps_bits==4); % axis index for phase_dim in re-oriented img
 nii.hdr.dim_info = (1:3) * fps_bits'; % useful for EPI only
 nii.hdr.pixdim(2:4) = pixdim; % voxel zize
 
-ind4 = ixyz + [0 4 8]; % index in 4xN matrix
-flp = R(ind4)<0; % flip an axis if true
-d = det(R(1:3,1:3)) * prod(1-flp*2); % det after all 3 axis positive
+flp = R(ixyz+[0 3 6])<0; % flip an axis if true
+d = det(R(:,1:3)) * prod(1-flp*2); % det after all 3 axis positive
 if (d>0 && pf.lefthand) || (d<0 && ~pf.lefthand)
     flp(1) = ~flp(1); % left or right storage
 end
@@ -1105,7 +1105,7 @@ nii.hdr.srow_x = R(1,:);
 nii.hdr.srow_y = R(2,:);
 nii.hdr.srow_z = R(3,:);
 
-R0 = R(1:3, 1:3);
+R0 = R(:, 1:3);
 R0 = bsxfun(@rdivide, R0, sqrt(sum(R0 .* R0))); % normalize
 sNorm = null(R0(:, setdiff(1:3, iSL))');
 if sign(sNorm(ixyz(iSL))) ~= sign(R(ixyz(iSL),iSL)), sNorm = -sNorm; end
@@ -1236,6 +1236,18 @@ if any(isfield(s, {'RescaleSlope' 'RescaleIntercept'})) && ~sclApplied
 elseif sclApplied && isfield(s, 'MRScaleSlope')
     slope = tryGetField(s, 'RescaleSlope', 1) * s.MRScaleSlope; 
     nii.img = nii.img / slope;
+end
+
+if pf.scale_16bit && s.BitsAllocated==16 % like dcm2niix
+    mx = max(nii.img(:));
+    if isa(mx, 'int16')
+        mn = min(nii.img(:));
+        scale = floor(32000 / max(mx, abs(mn)));
+    else
+        scale = floor(64000 / mx);
+    end
+    nii.img = nii.img * scale;
+    nii.hdr.scl_slope = nii.hdr.scl_slope / double(scale);
 end
 h{1} = s;
 
@@ -1470,12 +1482,12 @@ if exist('imgRef', 'var') && imgRef % GE bvec already in image reference
              'the result and report problem to author.'], s.NiftiName));
         end
     end
-    flp = R(ixyz+[0 4 8]) < 0; % negative sign
+    flp = R(ixyz+[0 3 6]) < 0; % negative sign
     flp(3) = ~flp(3); % GE slice dir opposite to LPS for all sag/cor/tra
     if ixyz(3)==1, flp(1) = ~flp(1); end % Sag slice: don't know why
     for i = 1:3, if flp(i), bvec(:,i) = -bvec(:,i); end; end
 else % Siemens/Philips
-    R = R(1:3, 1:3);
+    R = R(:, 1:3);
     R = bsxfun(@rdivide, R, sqrt(sum(R.*R))); % normalize
     bvec = bvec * R; % dicom plane to image plane
 end
@@ -1561,11 +1573,10 @@ end
 thk = tryGetField(s, 'SpacingBetweenSlices');
 if isempty(thk), thk = tryGetField(s, 'SliceThickness', pixdim(1)); end
 pixdim = [pixdim; thk];
-R = R * diag(pixdim); % apply vox size
 haveIPP = isfield(s, 'ImagePositionPatient');
 if haveIPP, ipp = s.ImagePositionPatient; else, ipp = -(dim'.* pixdim)/2; end
 % Next is almost dicom xform matrix, except mosaic trans and unsure slice_dir
-R = [R ipp; 0 0 0 1];
+R = [R * diag(pixdim) ipp];
 
 % rest are former: R = verify_slice_dir(R, s, dim, iSL)
 if dim(3)<2, return; end % don't care direction for single slice
@@ -1578,8 +1589,8 @@ if s.Columns > dim(1) % Siemens mosaic: use dim(1) since no transpose to img
         return;
     end
 elseif isfield(s, 'LastFile') && isfield(s.LastFile, 'ImagePositionPatient')
-    R(1:3, 3) = (s.LastFile.ImagePositionPatient - R(1:3,4)) / (dim(3)-1);
-    thk = sqrt(sum(R(1:3,3).^2)); % override slice thickness if it is off
+    R(:, 3) = (s.LastFile.ImagePositionPatient - R(:,4)) / (dim(3)-1);
+    thk = sqrt(sum(R(:,3).^2)); % override slice thickness if it is off
     if abs(pixdim(3)-thk)/thk > 0.01, pixdim(3) = thk; end
     return; % almost all non-mosaic images return from here
 end
@@ -1837,7 +1848,7 @@ chkbox = @(parent,val,str,cbk,tip) uicontrol(parent, 'Style', 'checkbox', ...
     'Value', val, 'String', str, 'Callback', cbk, 'TooltipString', tip);
 
 set(fh, 'Toolbar', 'none', 'Menubar', 'none', 'Resize', 'off', 'Color', clr, ...
-    'Tag', 'dicm2nii_fig', 'Position', [200 scrSz(4)-600 420 300], ...
+    'Tag', 'dicm2nii_fig', 'Position', [200 scrSz(4)-600 420 300], 'Visible', 'off', ...
     'Name', 'dicm2nii - DICOM to NIfTI Converter', 'NumberTitle', 'off');
 
 uitxt('Browse source', [8 274 88 16]);
@@ -1925,9 +1936,14 @@ h = chkbox(ph, getpf(p,false), 'Save json file', setpf(p), ...
     'Save json file for BIDS (http://bids.neuroimaging.io/)');
 sz = get(h, 'Extent'); set(h, 'Position', [4 12 sz(3)+24 sz(4)]);
 
+p = 'scale_16bit';
+h = chkbox(ph, getpf(p,false), 'Use 16-bit scaling', setpf(p), ...
+    'Losslessly scale 16-bit integers to use dynamic range');
+sz = get(h, 'Extent'); set(h, 'Position', [180 12 sz(3)+24 sz(4)]);
+
 hs.fig = fh;
 guidata(fh, hs); % store handles
-set(fh, 'HandleVisibility', 'callback'); % protect from command line
+drawnow; set(fh, 'Visible', 'on', 'HandleVisibility', 'callback');
 
 try % java_dnd is based on dndcontrol by Maarten van der Seijs
     java_dnd(jSrc, cb('drop_src'));
