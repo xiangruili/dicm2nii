@@ -26,9 +26,9 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % Siemens, GE and Philips dicom, and runs faster, especially for partial header
 % and multi-frame dicom.
 % 
-% DICM_HDR can also read Philips PAR file, AFNI HEAD file, Freesurfer MGH file
-% and some BrainVoyager files, and return needed fields for dicm2nii to convert
-% into nifti.
+% DICM_HDR can also read Philips PAR/XML file, AFNI HEAD file, Freesurfer MGH
+% file and some BrainVoyager files, and return needed fields for dicm2nii to
+% convert into nifti.
 % 
 % See also DICM_DICT, DICM2NII, DICM_IMG, RENAME_DICM, SORT_DICM, ANONYMIZE_DICM
 
@@ -100,6 +100,8 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 180531 philips_par: use SortFrames to solve XYTZ and incomplete volume.
 % 180605 philips_xml: much faster than xml2par;
 %        philips_par: start to support V3 (thx ChrisR); fix (ap,fh,rl) issue.
+% 180612 philips_par & xml: take care of IndexInREC (may nerver be tested).
+% 180614 read 12+ rather than 8+ than p.iPixelData (thx LucaT).
 
 persistent dict_full;
 s = []; info = '';
@@ -188,7 +190,7 @@ for nb = [0 2e6 20e6 fSize] % if not enough, read more till all read
     i = i(mod(i,2)==1); % must be odd number
     for k = i(end:-1:1) % last is likely real PixelData
         p.iPixelData = k + p.expl*4 + 7; % s.PixelData.Start: 0-based
-        if numel(b8)<p.iPixelData, b8 = [b8 fread(fid, 8, '*uint8')']; end %#ok
+        if numel(b8)<p.iPixelData, b8 = [b8 fread(fid, 12, '*uint8')']; end %#ok
         p.bytes = ch2int32(b8(p.iPixelData+(-3:0)), p.be);
         if p.bytes==4294967295 && feof(fid), break; end % 2^32-1 compressed
         d = fSize - p.iPixelData - p.bytes; % d=0 most of time
@@ -293,7 +295,7 @@ while ~toSearch
     if strcmp(name, 'Manufacturer')
         [p, dict] = updateVendor(p, dat);
     elseif tg>=2621697 && ~isfield(p, 'nFrames') % BitsAllocated
-        p = get_nFrames(s, p); % only make code here cleaner
+        p = get_nFrames(s, p, b8); % only make code here cleaner
     end
 end
 
@@ -411,7 +413,8 @@ while i<nEnd % loop through multi Item under the SQ
     % This 'if' block deals with partial PerFrameSQ: j and i jump to a frame. 
     % The 1/2/nf frame scheme will have problem in case that tag1 in 1st frame
     % is not the first tag in other frames. Then the tags before tag1 in other
-    % frames will be treated as for previous.
+    % frames will be treated as for previous frame. This is very unlikely since
+    % the 1st tag is almost always a SQ, like MREchoSequence
     if isPerFrameSQ
         if ischar(p.iFrames) % 'all' frames
             if j==1 && ~isnan(p.nFrames), rst.FrameStart = nan(1, p.nFrames); end
@@ -530,7 +533,7 @@ function fmt = vr2fmt(vr)
 end
 
 %% subfunction: get nFrames into p.nFrames
-function p = get_nFrames(s, p)
+function p = get_nFrames(s, p, ch)
 if isfield(s, 'NumberOfFrames')
     p.nFrames = s.NumberOfFrames; % useful for PerFrameSQ
 elseif all(isfield(s, {'Columns' 'Rows' 'BitsAllocated'})) && p.bytes<4294967295
@@ -540,7 +543,13 @@ elseif all(isfield(s, {'Columns' 'Rows' 'BitsAllocated'})) && p.bytes<4294967295
     n = p.bytes * 8 / double(s.BitsAllocated);
     p.nFrames = n / (spp * double(s.Columns) * double(s.Rows));
 else
-    p.nFrames = nan;
+    % FFFE E0DD, 4-byte len (zeros), 0020 9111 (FrameContentSequence)
+    % GE has no FFFE E0DD 0000 0000. Only FrameContentSequence tag is not safe
+    tg = char([254 255 221 224 0 0 0 0 32 0 17 145]);
+    if p.be, tg = tg([2 1 4 3 5:8 10 9 12 11]); end
+    if p.expl, tg = [tg 'SQ']; end
+    p.nFrames = numel(strfind(char(ch), tg));
+    if p.nFrames<1, p.nFrames = nan; end
 end
 end
         
@@ -717,51 +726,44 @@ end
 str = fread(fid, inf, '*char')'; % read all as char
 fclose(fid);
 str = strrep(str, char([13 10]), char(10)); % remove char(13)
+ch = regexp(str, '.*?(?=IMAGE INFORMATION DEFINITION)', 'match', 'once');
 
-V = regexpi(str, 'image export tool\s*(V[\d\.]+)', 'tokens', 'once');
+V = regexpi(ch, 'image export tool\s*(V[\d\.]+)', 'tokens', 'once');
 if isempty(V), err = 'Not PAR file'; s = []; return; end
 V = V{1};
-% Fix V4 bug: based on Chris obervation. Only those in table are 1:3
+% Fix V4 bug: based on Chris observation. Only those in table are 1:3
 % The ugly hard-coded order is the simple solution
 if strcmpi(V, 'V4'), ax_order = 1:3; else, ax_order = [3 1 2]; end
 s.SoftwareVersion = [V '\' ext(2:end)]; % xml files have "PRIDE V5"
-s.PatientName = par_key(str, 'Patient name', 0);
-s.StudyDescription = par_key(str, 'Examination name', 0);
+s.PatientName = par_attr(ch, 'Patient name', 0);
+s.StudyDescription = par_attr(ch, 'Examination name', 0);
 s.SeriesDescription = nam;
-s.ProtocolName = par_key(str, 'Protocol name', 0);
-a = par_key(str, 'Examination date/time', 0);
-a = a(isstrprop(a, 'digit'));
-s.AcquisitionDateTime = a;
-s.SeriesNumber = par_key(str, 'Acquisition nr');
-% s.ReconstructionNumberMR = par_key(str, 'Reconstruction nr');
-% s.MRSeriesScanDuration = par_key(str, 'Scan Duration');
-s.NumberOfEchoes = par_key(str, 'Max. number of echoes');
-nSL = par_key(str, 'Max. number of slices/locations');
-s.LocationsInAcquisition = nSL;
-a = par_key(str, 'Patient position', 0);
-if isempty(a), a = par_key(str, 'Patient Position', 0); end
+s.ProtocolName = par_attr(ch, 'Protocol name', 0);
+a = par_attr(ch, 'Examination date/time', 0);
+s.AcquisitionDateTime = a(isstrprop(a, 'digit'));
+s.SeriesNumber = par_attr(ch, 'Acquisition nr');
+% s.ReconstructionNumberMR = par_attr(ch, 'Reconstruction nr');
+% s.MRSeriesScanDuration = par_attr(ch, 'Scan Duration');
+s.NumberOfEchoes = par_attr(ch, 'Max. number of echoes');
+a = par_attr(ch, 'Patient position', 0);
+if isempty(a), a = par_attr(ch, 'Patient Position', 0); end
 if ~isempty(a)
     if numel(a)>4, s.PatientPosition = a(regexp(a, '\<.')); 
     else, s.PatientPosition = a; 
     end
 end
-s.MRAcquisitionType = par_key(str, 'Scan mode', 0);
-s.ScanningSequence = par_key(str, 'Technique', 0); % ScanningTechnique
-typ = par_key(str, 'Series Type', 0); typ(isspace(typ)) = '';
+s.MRAcquisitionType = par_attr(ch, 'Scan mode', 0);
+s.ScanningSequence = par_attr(ch, 'Technique', 0); % ScanningTechnique
+typ = par_attr(ch, 'Series Type', 0); typ(isspace(typ)) = '';
 s.ImageType = ['PhilipsPAR\' typ '\' s.ScanningSequence];
-s.RepetitionTime = par_key(str, 'Repetition time');
-s.WaterFatShift = par_key(str, 'Water Fat shift');
-
-rotAngle = par_key(str, 'Angulation midslice'); % (ap,fh,rl) deg
-rotAngle = rotAngle([3 1 2]); % this seems always
-posMid = par_key(str, 'Off Centre midslice'); % (ap,fh,rl) [mm]
-posMid = posMid([3 1 2]); % better precision than those in the table
-s.EPIFactor = par_key(str, 'EPI factor');
-% s.DynamicSeries = par_key(str, 'Dynamic scan'); % 0 or 1
-isDTI = par_key(str, 'Diffusion')>0;
+s.RepetitionTime = par_attr(ch, 'Repetition time');
+s.WaterFatShift = par_attr(ch, 'Water Fat shift');
+s.EPIFactor = par_attr(ch, 'EPI factor');
+% s.DynamicSeries = par_key(ch, 'Dynamic scan'); % 0 or 1
+isDTI = par_attr(ch, 'Diffusion')>0;
 if isDTI
     s.ImageType = [s.ImageType '\DIFFUSION\'];
-    s.DiffusionEchoTime = par_key(str, 'Diffusion echo time'); % ms
+    s.DiffusionEchoTime = par_attr(ch, 'Diffusion echo time'); % ms
 end
 
 % Get list of para meaning for the table, and col index of each para
@@ -784,32 +786,26 @@ colIndex = @(key)iColumn(keyInLabel(key));
 
 i1 = regexp(str(i2:end), '\n\s*\d+', 'once') + i2;
 n = iColumn(end)-1; % number of items each row, 41 for V4
-% str(i1:end) = strrep(str(i1:end), '?', '0'); % saw '?'
 para = sscanf(str(i1:end), '%g'); % read all numbers
 nFrame = floor(numel(para) / n); 
 para = reshape(para(1:n*nFrame), n, nFrame)'; % whole table now
-getTableVal('index in REC file', 'IndexInREC', 1:nFrame);
-if isfield(s, 'IndexInREC') % why Philips includes this?
-    if ~isequal(s.IndexInREC', 0:nFrame-1) % not needed, just avoid accident
-        para = para(s.IndexInREC, :); % in the order of REC img
-    end
-    s = rmfield(s, 'IndexInREC');
-end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'dynamic scan number' 'gradient orientation number' 'echo number' ...
     'cardiac phase number' 'image_type_mr' 'label type' 'scanning sequence'};
 ic = []; for i = 1:numel(keys), ic = [ic colIndex(keys{i})]; end %#ok
-bval = para(:, colIndex('diffusion_b_factor'));
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
-ind = sort_frames([para(:, colIndex('slice number')) bval], para(:, ic));
-if ~isequal(ind, 1:nFrame)
-    para = para(ind, :); % XYZT order
-    s.SortFrames = ind; % for PAR, sort (drop) frames only in dicm2nii
-end
+sl = [para(:, colIndex('slice number')) para(:, colIndex('diffusion_b_factor'))];
+[ind_sort, nSL] = sort_frames(sl, para(:, ic));
+a = par_val('index in REC file', 1:nFrame); % always 0:nFrame-1 ?
+a(a+1) = 1:nFrame; % [~, a] = sort(a);
+a = a(ind_sort)';
+if ~isequal(a, 1:nFrame), s.SortFrames = a; end % used only in dicm2nii
+para = para(ind_sort, :); % XYZT order
 
-s.NumberOfFrames = numel(ind); % may be smaller than nFrame
-s.NumberOfTemporalPositions = numel(ind)/nSL;
+s.LocationsInAcquisition = nSL;
+s.NumberOfFrames = numel(ind_sort); % may be smaller than nFrame
+s.NumberOfTemporalPositions = s.NumberOfFrames/nSL;
 
 iVol = (0:s.NumberOfTemporalPositions-1)*nSL + 1; % already XYZT
 fld = 'ComplexImageComponent';
@@ -840,7 +836,7 @@ end
 ind = [];
 for i = 1:numel(cols)
     j = find(keyInLabel(cols{i}));
-    if isempty(j), continue; end
+    if isempty(j), continue; end % some not in V3
     ind = [ind iColumn(j):iColumn(j+1)-1]; %#ok
 end
 a = para(:, ind);
@@ -851,65 +847,63 @@ if any(a(:) > 1e-5)
     s = []; return;
 end
 
-% getTableVal('echo number', 'EchoNumber', 1:nImg);
-% getTableVal('dynamic scan number', 'TemporalPositionIdentifier', 1:nImg);
+% s.EchoNumber = getTableVal('echo number', 1:s.NumberOfFrames);
 % 'pixel spacing' and 'slice gap' have poor precision for v<=4?
 % It may be wrong to use FOV, maybe due to partial Fourier?
 if strncmp(V, 'V3', 2)
-    s.BitsAllocated = par_key(str, 'Image pixel size', 1);
-    s.Columns = par_key(str, 'Recon resolution', 1);
-    s.SliceThickness = par_key(str, 'Slice thickness', 1);
-    s.SpacingBetweenSlices = par_key(str, 'Slice gap', 1);
+    s.BitsAllocated = par_attr(ch, 'Image pixel size', 1);
+    res = par_attr(ch, 'Recon resolution', 1);
+    s.SliceThickness = par_attr(ch, 'Slice thickness', 1);
+    gap = par_attr(ch, 'Slice gap', 1);
+    s.TurboFactor = par_attr('TURBO factor', 1);
+    s.NumberOfAverages = par_attr(ch, 'Number of averages', 1);
 else
-    getTableVal('image pixel size', 'BitsAllocated');
-    getTableVal('recon resolution', 'Columns');
-    getTableVal('slice thickness', 'SliceThickness');
-    getTableVal('slice gap', 'SpacingBetweenSlices');
+    s.BitsAllocated = par_val('image pixel size');
+    res = par_val('recon resolution');
+    s.SliceThickness = par_val('slice thickness');
+    gap = par_val('slice gap');
+    s.TurboFactor = par_val('TURBO factor');
+    s.NumberOfAverages = par_val('number of averages');
 end
-s.Rows = s.Columns(2); s.Columns = s.Columns(1);
-s.SpacingBetweenSlices = s.SpacingBetweenSlices + s.SliceThickness;
-getTableVal('pixel spacing', 'PixelSpacing');
-s.PixelSpacing = s.PixelSpacing(:);
-getTableVal('rescale intercept', 'RescaleIntercept');
-getTableVal('rescale slope', 'RescaleSlope');
-getTableVal('scale slope', 'MRScaleSlope');
-getTableVal('echo_time', 'EchoTimes', iVol);
+s.Columns = res(1);
+s.Rows = res(2);
+s.SpacingBetweenSlices = gap + s.SliceThickness;
+a = par_val('pixel spacing');
+s.PixelSpacing = a(:);
+s.RescaleIntercept = par_val('rescale intercept');
+s.RescaleSlope = par_val('rescale slope');
+s.MRScaleSlope = par_val('scale slope');
+s.EchoTimes = par_val('echo_time', iVol);
 s.EchoTime = s.EchoTimes(1);
-getTableVal('image_flip_angle', 'FlipAngle');
-getTableVal('number of averages', 'NumberOfAverages');
-fld = 'CardiacTriggerDelayTimes';
-getTableVal('trigger_time', fld, iVol);
-% getTableVal('dyn_scan_begin_time', 'TimeOfAcquisition', 1:nImg);
+s.FlipAngle = par_val('image_flip_angle');
+s.CardiacTriggerDelayTimes = par_val('trigger_time', iVol);
+% s.TimeOfAcquisition = par_val('dyn_scan_begin_time', 1:s.NumberOfFrames);
 if isDTI
-    getTableVal('diffusion_b_factor', 'B_value', iVol);
-    fld = 'bvec_original';
-    getTableVal('diffusion', fld, iVol);
-    if isfield(s, fld), s.(fld) = s.(fld)(:, ax_order); end
+    s.B_value = par_val('diffusion_b_factor', iVol);
+    a = par_val('diffusion', iVol);
+    if ~isempty(a), s.bvec_original = a(:, ax_order); end
 end
-getTableVal('TURBO factor', 'TurboFactor');
 
-% Rotation order and signs are figured out by try and err, not 100% sure
-ca = cosd(rotAngle); sa = sind(rotAngle);
-rx = [1 0 0; 0 ca(1) -sa(1); 0 sa(1) ca(1)]; % 3D rotation
-ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
-rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
-R = rx * ry * rz; % seems right for Philips
-% a = rotAngle/180*pi;
-% R = makehgtform('xrotate', a(1), 'yrotate', a(2), 'zrotate', a(3));
+posMid = par_attr(ch, 'Off Centre midslice'); % (ap,fh,rl) [mm]
+posMid = posMid([3 1 2]); % better precision than those in the table
+rotAngle = par_attr(ch, 'Angulation midslice'); % (ap,fh,rl) deg
+a = rotAngle([3 1 2]) /180*pi; % always this order?
+R = makehgtform('xrotate', a(1), 'yrotate', a(2), 'zrotate', a(3));
+R = R(1:3, :);
 
-getTableVal('slice orientation', 'SliceOrientation'); % 1/2/3 for TRA/SAG/COR
-iOri = mod(s.SliceOrientation+1, 3) + 1;
+iOri = par_val('slice orientation'); % 1/2/3 for TRA/SAG/COR
+iOri = mod(iOri+1, 3) + 1;
 a = {'SAGITTAL' 'CORONAL' 'TRANSVERSAL'};
 s.SliceOrientation = a{iOri};
 if iOri == 1 
     R(:,[1 3]) = -R(:,[1 3]);
-    R = R(:, [2 3 1]);
+    R = R(:, [2 3 1 4]);
 elseif iOri == 2
     R(:,3) = -R(:,3);
-    R = R(:, [1 3 2]);
+    R = R(:, [1 3 2 4]);
 end
 
-a = par_key(str, 'Preparation direction', 0); % Anterior-Posterior
+a = par_attr(ch, 'Preparation direction', 0); % Anterior-Posterior
 if ~isempty(a)
     a = a(regexp(a, '\<.')); % 'AP'
     s.Stack.Item_1.MRStackPreparationDirection = a;
@@ -920,36 +914,34 @@ if ~isempty(a)
 end
 
 s.ImageOrientationPatient = R(1:6)';
-R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
-R = [R posMid; 0 0 0 1]; % 4th col is mid slice center position
+R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices; 1]);
+R(:,4) = posMid; % 4th col is mid slice center position
 
-getTableVal('image offcentre', 'SliceLocation');
-s.SliceLocation = s.SliceLocation(ax_order(iOri)); % center loc for 1st slice
+a = par_val('image offcentre');
+s.SliceLocation = a(ax_order(iOri)); % center loc for 1st slice
 if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
     R(:,3) = -R(:,3);
 end
 
 R(:,4) = R * [-([s.Columns s.Rows nSL]-1)/2 1]'; % vol center to corner of 1st
-y = R * [0 0 nSL-1 1]'; % last slice position
-s.ImagePositionPatient = R(1:3,4);
-s.LastFile.ImagePositionPatient = y(1:3);
+s.ImagePositionPatient = R(:,4);
+s.LastFile.ImagePositionPatient = R * [0 0 nSL-1 1]'; % last slice
 s.Manufacturer = 'Philips';
 s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
 s.PixelData.Start = 0;
 s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
 
     % nested function: set field if the key is in colTable
-    function getTableVal(key, fldname, iRow)
-        if nargin<3, iRow = 1; end
+    function val = par_val(key, iRow)
+        if nargin<2, iRow = 1; end
         iCol = find(keyInLabel(key));
-        if isempty(iCol), return; end
-        s.(fldname) = para(iRow, iColumn(iCol):iColumn(iCol+1)-1);
+        val = para(iRow, iColumn(iCol):iColumn(iCol+1)-1);
     end
 
     % subfunction: return value specified by key in PAR file
-    function val = par_key(str, key, isNum)
+    function val = par_attr(ch, key, isNum)
         expr = ['\n.\s*' key '.*?:(.*?)\n']; % \n. key ... : val \n
-        val = strtrim(regexp(str, expr, 'tokens', 'once'));
+        val = strtrim(regexp(ch, expr, 'tokens', 'once'));
         if isempty(val), val = ''; else, val = val{1}; end
         if nargin<3 || isNum, val = sscanf(val, '%g'); end
     end
@@ -1036,8 +1028,7 @@ R = afni_key('IJK_TO_DICOM_REAL'); % IJK_TO_DICOM is always straight?
 if isempty(R), R = afni_key('IJK_TO_DICOM'); end
 R = reshape(R, [4 3])';
 s.ImagePositionPatient = R(:,4); % afni_key('ORIGIN') can be wrong
-y = [R; 0 0 0 1] * [0 0 dim(3)-1 1]';
-s.LastFile.ImagePositionPatient = y(1:3);
+s.LastFile.ImagePositionPatient = R * [0 0 dim(3)-1 1]'; % last slice
 R = R(1:3, 1:3);
 R = R ./ (ones(3,1) * sqrt(sum(R.^2)));
 s.ImageOrientationPatient = R(1:6)';
@@ -1266,8 +1257,7 @@ if strcmp(c, 'double') %#ok
 elseif strcmp(c, 'single') %#ok
     s.BitsAllocated = 32;
 else
-    ind = find(isstrprop(c, 'digit'), 1);
-    s.BitsAllocated = sscanf(c(ind:end), '%g');
+    s.BitsAllocated = str2double(c(isstrprop(c, 'digit')));
 end
 end
 
@@ -1386,12 +1376,6 @@ s.ImageType = ['PhilipsXML\' typ '\' s.ScanningSequence];
 s.RepetitionTime = xml_attr(ch1, 'Repetition Times?', 1);
 if numel(s.RepetitionTime)>1, s.RepetitionTime = s.RepetitionTime(1); end
 s.WaterFatShift = xml_attr(ch1, 'Water Fat Shift', 1);
-rotAngle = [xml_attr(ch1, 'Angulation RL', 1) ...
-            xml_attr(ch1, 'Angulation AP', 1) ...
-            xml_attr(ch1, 'Angulation FH', 1)];
-posMid =   [xml_attr(ch1, 'Off Center RL', 1)
-            xml_attr(ch1, 'Off Center AP', 1)
-            xml_attr(ch1, 'Off Center FH', 1)];    
 s.EPIFactor = xml_attr(ch1, 'EPI factor', 1);
 % s.DynamicSeries = xml_attr(ch1, 'Dynamic Scan', 1); % 0 or 1
 isDTI = strncmpi(xml_attr(ch1, 'Diffusion'), 'Y', 1);
@@ -1402,17 +1386,16 @@ end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'Dynamic' 'Grad Orient' 'Echo' 'Phase' 'Type' 'Label Type' 'Sequence'};
-id = [];
-for i = 1:numel(keys), id = [id xml_raw(ch, keys{i})]; end %#ok
+id = []; for i = 1:numel(keys), id = [id xml_raw(ch, keys{i})]; end %#ok
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
 sl = str2num(char(xml_raw(ch, 'Slice'))); 
 if isDTI, sl(:,2) = str2num(char(xml_raw(ch, 'Diffusion B Factor'))); end
 [ind_sort, nSL] = sort_frames(sl, id);
-a = str2num(char(xml_raw(ch, 'Index')))' + 1;
-nFrame = numel(a); 
-if ~isequal(a, 1:nFrame), ind_sort(a) = ind_sort; end % not tested
-if ~isequal(ind_sort, 1:nFrame), s.SortFrames = ind_sort; end
-
+nFrame = size(sl, 1);
+a = str2num(char(xml_raw(ch, 'Index'))); % always 0:nFrame-1 ?
+a(a+1) = 1:nFrame; % [~, a] = sort(a);
+a = a(ind_sort)';
+if ~isequal(a, 1:nFrame), s.SortFrames = a; end % used only in dicm2nii
 
 s.NumberOfFrames = numel(ind_sort); % may be smaller than nFrame
 s.NumberOfTemporalPositions = s.NumberOfFrames/nSL;
@@ -1461,8 +1444,7 @@ s.EchoTimes = xml_val(ch, 'Echo Time', 1, iVol);
 s.EchoTime = s.EchoTimes(1);
 s.FlipAngle = xml_val(ch, 'Image Flip Angle');
 s.NumberOfAverages = xml_val(ch, 'No Averages');
-fld = 'CardiacTriggerDelayTimes';
-s.(fld) = xml_val(ch, 'Trigger Time', 1, iVol);
+s.CardiacTriggerDelayTimes = xml_val(ch, 'Trigger Time', 1, iVol);
 if isDTI
     s.B_value = xml_val(ch, 'Diffusion B Factor', 1, iVol);
     s.bvec_original = [xml_val(ch, 'Diffusion RL', 1, iVol) ...
@@ -1471,21 +1453,20 @@ if isDTI
 end
 s.TurboFactor = xml_val(ch, 'TURBO Factor');
 
-% Rotation order and signs are figured out by try and err, not 100% sure
-ca = cosd(rotAngle); sa = sind(rotAngle);
-rx = [1 0 0; 0 ca(1) -sa(1); 0 sa(1) ca(1)]; % 3D rotation
-ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
-rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
-R = rx * ry * rz; % seems right for Philips
+a = [xml_attr(ch1, 'Angulation RL', 1)
+     xml_attr(ch1, 'Angulation AP', 1)
+     xml_attr(ch1, 'Angulation FH', 1)] /180*pi; % deg to radians
+R = makehgtform('xrotate', a(1), 'yrotate', a(2), 'zrotate', a(3));
+R = R(1:3, :);
 
 s.SliceOrientation = upper(xml_val(ch, 'Slice Orientation', 0));
 iOri = find(strncmp({'SAG' 'COR' 'TRA'}, s.SliceOrientation, 3));
 if iOri == 1 
     R(:,[1 3]) = -R(:,[1 3]);
-    R = R(:, [2 3 1]);
+    R = R(:, [2 3 1 4]);
 elseif iOri == 2
     R(:,3) = -R(:,3);
-    R = R(:, [1 3 2]);
+    R = R(:, [1 3 2 4]);
 end
 
 s.PixelSpacing = xml_val(ch, 'Pixel Spacing')';
@@ -1499,19 +1480,20 @@ if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
 s.InPlanePhaseEncodingDirection = a;
 
 s.ImageOrientationPatient = R(1:6)';
-R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
-R = [R posMid; 0 0 0 1]; % 4th col is mid slice center position
+R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices; 1]);
+R(:,4) = [xml_attr(ch1, 'Off Center RL', 1)
+          xml_attr(ch1, 'Off Center AP', 1)
+          xml_attr(ch1, 'Off Center FH', 1)]; % vol center for now  
 
 ori = {'RL' 'AP' 'FH'}; ori = ori{iOri};
 s.SliceLocation = xml_val(ch, ['Offcenter ' ori], 1, v1);
-if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
+if sign(R(iOri,3)) ~= sign(R(iOri,4)-s.SliceLocation)
     R(:,3) = -R(:,3);
 end
 
 R(:,4) = R * [-([s.Columns s.Rows nSL]-1)/2 1]'; % vol center to corner of 1st
-y = R * [0 0 nSL-1 1]'; % last slice position
-s.ImagePositionPatient = R(1:3,4);
-s.LastFile.ImagePositionPatient = y(1:3);
+s.ImagePositionPatient = R(:,4);
+s.LastFile.ImagePositionPatient = R * [0 0 nSL-1 1]'; % last slice
 s.Manufacturer = 'Philips';
 s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
 s.PixelData.Start = 0;
@@ -1538,7 +1520,7 @@ s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
         if nargin<4 || isempty(iVol), iVol = 1; end
         expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
         if isequal(iVol, 1), val = regexpi(ch, expr, 'tokens', 'once');
-        else, val = regexpi(ch, expr, 'tokens'); val = [val{iVol}]';
+        else, val = regexp(ch, expr, 'tokens'); val = [val{iVol}]';
         end
         if isnum, val = str2num(char(val));
         elseif nargin<4, val = val{1};
