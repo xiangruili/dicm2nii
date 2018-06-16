@@ -101,7 +101,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 180605 philips_xml: much faster than xml2par;
 %        philips_par: start to support V3 (thx ChrisR); fix (ap,fh,rl) issue.
 % 180612 philips_par & xml: take care of IndexInREC (may nerver be tested).
-% 180614 read 12+ rather than 8+ than p.iPixelData (thx LucaT).
+% 180615 Avoid error for dicm without PixelData for search method (thx LucaT).
 
 persistent dict_full;
 s = []; info = '';
@@ -210,7 +210,7 @@ nTag = numel(p.dict.tag); % always search if only one tag: can find it in any SQ
 toSearch = nTag<2 || (nTag<30 && ~any(strcmp(p.dict.vr, 'SQ')) && p.iPixelData<1e6);
 if toSearch % search each tag if header is short and not many tags asked
     if ~isempty(tsUID), s.TransferSyntaxUID = tsUID; end % hope it is 1st tag
-    bc = char(b8(1:p.iPixelData));
+    bc = char(b8(1:min(end, p.iPixelData)));
     if ~isempty(p.dict.vendor) && any(mod(p.dict.group, 2)) % private group
         tg = char([8 0 112 0]); % Manufacturer
         if p.be, tg = tg([2 1 4 3]); end
