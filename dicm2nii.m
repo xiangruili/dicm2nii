@@ -1238,16 +1238,14 @@ elseif sclApplied && isfield(s, 'MRScaleSlope')
     nii.img = nii.img / slope;
 end
 
-if pf.scale_16bit && s.BitsAllocated==16 % like dcm2niix
-    mx = max(nii.img(:));
-    if isa(mx, 'int16')
-        mn = min(nii.img(:));
-        scale = floor(32000 / max(mx, abs(mn)));
-    else
-        scale = floor(64000 / mx);
+if pf.scale_16bit && any(nii.hdr.datatype==[4 512]) % like dcm2niix
+    if nii.hdr.datatype == 4 % int16
+        scale = floor(32000 / double(max(abs(nii.img(:)))));
+    else % datatype==512 % uint16
+        scale = floor(64000 / double((max(nii.img(:)))));
     end
     nii.img = nii.img * scale;
-    nii.hdr.scl_slope = nii.hdr.scl_slope / double(scale);
+    nii.hdr.scl_slope = nii.hdr.scl_slope / scale;
 end
 h{1} = s;
 
@@ -1277,7 +1275,6 @@ end
 function vol = mos2vol(mos, nSL)
 nMos = ceil(sqrt(nSL)); % always nMos x nMos tiles
 [nr, nc, nv] = size(mos); % number of row, col and vol in mosaic
-
 nr = nr / nMos; nc = nc / nMos; % number of row and col in slice
 vol = zeros([nr nc nSL nv], class(mos));
 for i = 1:nSL
@@ -2524,6 +2521,9 @@ fclose(fid);
 function checkUpdate(mfile)
 webUrl = ['https://www.mathworks.com/matlabcentral/fileexchange/' ...
           '42997-dicom-to-nifti-converter--nifti-tool-and-viewer'];
+      
+% webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii';
+% regexp(str, '"datePublished"\s+content="(\d{4}-\d{2}-\d{2})"', 'tokens', 'once');      
 try
     str = urlread(webUrl);
     ind = regexp(str, 'user_version', 'once');
