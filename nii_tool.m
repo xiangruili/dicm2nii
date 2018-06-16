@@ -833,18 +833,7 @@ if ismac % pigz for mac is not included in the package
         fprintf(2, [' Please install pigz for fast compression: ' ...
             'http://macappstore.org/pigz/\n']);
     end
-elseif ispc % rename back pigz for Windows. Renamed to trick Matlab Central
-    try %#ok<*TRYNC>
-        fname = [m_dir '\pigz.win'];
-        if exist(fname, 'file')
-            movefile(fname, [m_dir '\pigz.exe'], 'f');
-        end
-        fname = [m_dir '\pthreadGC2.win'];
-        if exist(fname, 'file')
-            movefile(fname, [m_dir '\pthreadGC2.dll'], 'f');
-        end
-    end
-else % linux
+elseif isunix % linux
     [st, val] = fileattrib([m_dir '/pigz']);
     if st && ~val.UserExecute, fileattrib([m_dir '/pigz'], '+x'); end
 end
@@ -868,10 +857,6 @@ if ~err, dd = 'dd'; return; end % dd with linix/mac, and maybe windows
 if ispc % rename it as exe
     m_dir = fileparts(which(mfilename));
     if strcmpi(pwd, m_dir), cd ..; clnObj = onCleanup(@() cd(m_dir)); end
-    fname = [m_dir '\dd.win'];
-    if exist(fname, 'file') % first time after download
-        try movefile(fname, [m_dir '\dd.exe'], 'f'); end
-    end
     dd = fullfile(m_dir, 'dd');
     [err, ~] = jsystem({dd '--version'});
     if ~err, return; end
@@ -1195,7 +1180,7 @@ catch
         fclose(fid);
     end
     
-    try
+    try %#ok<*TRYNC>
         fname = gunzipOS(fname, nByte);
         fid = fopen(fname);
         bytes = fread(fid, nByte, '*uint8');
