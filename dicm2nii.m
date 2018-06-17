@@ -379,6 +379,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180602 extract sort_frames() for multiFrameFields() and philips_par()
 % 180605 multiFrameFields: B=0 to first vol. 
 % 180614 Implement scale_16bit: free precision for tools using 16-bit datatype. 
+% 180617 new fullpath(): avoid what() (thx JulienB). 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -457,11 +458,11 @@ elseif ischar(src) % 1 dicom or zip/tgz file
 else 
     error('Unknown dicom source.');
 end
-dcmFolder = fullfile(getfield(what(dcmFolder), 'path'));
+dcmFolder = fullpath(dcmFolder);
 
 %% Deal with niiFolder
 if ~isdir(niiFolder), mkdir(niiFolder); end
-niiFolder = fullfile([getfield(what(niiFolder), 'path') filesep]);
+niiFolder = [fullpath(niiFolder) filesep];
 converter = ['dicm2nii.m 20' reviseDate];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
     more off;
@@ -1087,7 +1088,7 @@ end
 rotM = diag([1-flp*2 1]); % 1 or -1 on diagnal
 rotM(1:3, 4) = (dim-1) .* flp; % 0 or dim-1
 R = R / rotM; % xform matrix after flip
-if ~exist('flip', 'builtin'), eval('flip = @flipdim'); end
+if ~exist('flip', 'builtin'), eval('flip = @flipdim;'); end
 for k = 1:3, if flp(k), nii.img = flip(nii.img, k); end; end
 if flp(iPhase), phPos = ~phPos; end
 if isfield(s, 'bvec'), s.bvec(:, flp) = -s.bvec(:, flp); end
@@ -2519,28 +2520,25 @@ fclose(fid);
 %% Check for newer version for 42997 at Matlab Central
 % Simplified from checkVersion in findjobj.m by Yair Altman
 function checkUpdate(mfile)
-webUrl = ['https://www.mathworks.com/matlabcentral/fileexchange/' ...
-          '42997-dicom-to-nifti-converter--nifti-tool-and-viewer'];
-      
-% webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii';
-% regexp(str, '"datePublished"\s+content="(\d{4}-\d{2}-\d{2})"', 'tokens', 'once');      
+webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii';
 try
     str = urlread(webUrl);
-    ind = regexp(str, 'user_version', 'once');
-    latestStr = regexp(str(ind:end), '(\d{4}.\d{2}.\d{2})', 'match', 'once');
 catch me
-    errordlg(me.message, 'Web access error');
+    str = sprintf('%s.\n\nPlease download manually.', me.message);
+    errordlg(str, 'Web access error');
     web(webUrl, '-browser');
     return;
 end
 
-latestNum = datenum(latestStr, 'yyyy.mm.dd');
+latestStr = regexp(str, '"datePublished".*?(\d{4}-\d{2}-\d{2})"', 'tokens', 'once');
+latestStr = latestStr{1}([1:4 6 7 9 10]);
+latestNum = datenum(latestStr, 'yyyymmdd');
 d = sort({reviseDate('nii_viewer') reviseDate('nii_tool') ...
           reviseDate('dicm2nii') reviseDate('dicm_hdr')});
 d = ['20' d{end}];
 myFileDate = datenum(d, 'yyyymmdd');
 
-if myFileDate >= latestNum
+if myFileDate >= latestNum-1 % one day diff
     msgbox([mfile ' and the package are up to date.'], 'Check update');
     return;
 end
@@ -2648,8 +2646,11 @@ while 1
     nMos = nMos - 1;
 end
 
-%% Get sorting index for multi-frame and PAR (called by dicm_hdr
+%% Get sorting index for multi-frame and PAR/XML (called by dicm_hdr
 function [ind, nSL] = sort_frames(sl, ic)
+% sl is for slice index, and has B_value as 2nd column for DTI.
+% ic contains other possible index, or cell array, which will be converted into
+% index. The ic column order is important.
 nFrame = size(sl, 1);
 nSL = max(sl(:, 1));
 nVol = floor(nFrame / nSL);
@@ -2661,12 +2662,14 @@ end
 n = max(id); id = id(:, n>1); n = n(n>1); 
 ind = find(n == nVol+badVol, 1);
 if ~isempty(ind) % most fMRI/DTI
-    id = id(:, ind);
+    id = id(:, ind); % use a single column for sorting
 elseif ~badVol && numel(n)>=2 && prod(n(1:2)) == nVol % 2 columns in a
     id = (id(:,2) - 1) * n(1) + id(:,1); % 1 through nVol
+elseif nFrame>nSL % no simple sorting found
+    fprintf(2, ' No unique slice sorting found.\n');
 end
 [~, ind] = sortrows([sl id]); % this sort idea is from julienbesle
-if badVol
+if badVol % only seen in Philips
     try lastV = id(ind,1) > nVol; catch, lastV = []; end
     if sum(lastV) == nFrame-nSL*nVol
         ind(lastV) = []; % remove incomplete volume
@@ -2681,4 +2684,29 @@ if badVol
 end
 ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
 ind = ind(:)';
+
+%% get full path if input pth/file is relative: do not need pth to exist
+function pth = fullpath(pth)
+if ispc
+    pth = strrep(pth, '/', '\');
+    if pth(1) == '/' % root of current drive
+        p = pwd;
+        pth = [p(1) ':' pth];
+    elseif numel(pth)==2 && pth(2)==':'
+        pth = pwd;
+    elseif numel(pth)>2 && pth(2)==':' && pth(3)~='\'
+        pth = [pwd '\' pth(3:end)];
+    end
+    isAbs = numel(pth)>2 && strcmp(pth(2:3), ':\');
+else % unix
+    pth = strrep(pth, '\', '/');
+    if pth(1)=='~', pth = [getenv('HOME') pth(2:end)]; end
+    isAbs = pth(1)=='/';
+end 
+try isAbs = java.io.File(pth).isAbsolute; end % in case above isAbs wrong
+if isAbs
+    pth = fullfile(pth); % just make it formal
+else
+    pth = fullfile(pwd, pth);
+end
 %%
