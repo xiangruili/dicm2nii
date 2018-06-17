@@ -226,7 +226,7 @@ function varargout = nii_tool(cmd, varargin)
 
 % History (yymmdd)
 % 150109 Write it based on Jimmy Shen's NIfTI tool (xiangrui.li@gmail.com)
-% 150202 Include renamed pigz files for Windows to trick Matlab Central
+% 150202 Include renamed pigz files for Windows
 % 150203 Fix closeFile and deleteTmpFile order
 % 150205 Add hdr.machine: needed for .img fopen
 % 150208 Add 4th input for 'save', allowing to save SPM 3D files
@@ -238,7 +238,7 @@ function varargout = nii_tool(cmd, varargin)
 % 150517 func_handle: provide a way to use gunzipOS etc from outside
 % 150617 auto detect rgb_dim 1&3 for 'load' etc using ChrisR method
 % 151025 Change subfunc img2datatype as 'update' for outside access
-% 151109 Include dd.win (exe) from WinAVR-20100110 for partial gz unzip
+% 151109 Include dd.exe from WinAVR-20100110 for partial gz unzip
 % 151205 Partial gunzip: fix fname with space & unknown pigz | dd error.
 % 151222 Take care of img for intent_code 2003/2004: anyone uses it?
 % 160110 Use matlab pref method to replace para file.
@@ -250,7 +250,6 @@ function varargout = nii_tool(cmd, varargin)
 % 161025 Make included linux pigz executible; fix "dd" for windows.
 % 161031 gunzip_mem(), nii_bytes() for hdr/ext read: read uint8 then parse;
 %        Replace hdr.machine with hdr.swap_endian.
-% 170202 check_gzip/check_dd: cd .. if m_dir is pwd, so get full path for m_dir
 % 170212 Extract decode_ext() from 'ext' cmd so call it in 'update' cmd.
 % 170215 gunzipOS: use -c > rather than copyfile for performance.
 % 170322 gzipOS: stop using background gz to avoid file not exist error.
@@ -809,12 +808,11 @@ if err && ~exist([fname '.gz'], 'file')
     end
 end
 
-% Deal with pigz/gzip on path or in nii_tool folder, and matlab gzip/gunzip
+%% Deal with pigz/gzip on path or in nii_tool folder, and matlab gzip/gunzip
 function cmd = check_gzip(gz_unzip)
-m_dir = fileparts(which(mfilename));
+m_dir = fileparts(mfilename('fullpath'));
 % away from pwd, so use OS pigz if both exist. Avoid error if pwd changed later
 if strcmpi(pwd, m_dir), cd ..; clnObj = onCleanup(@() cd(m_dir)); end
-
 if isunix
     pth1 = getenv('PATH');
     if isempty(strfind(pth1, '/usr/local/bin'))
@@ -828,17 +826,17 @@ end
 if ~err, cmd = 'pigz'; return; end
 
 % next, try pigz included with nii_tool
+cmd = [m_dir '/pigz'];
 if ismac % pigz for mac is not included in the package
     if strcmp(gz_unzip, 'gzip')
         fprintf(2, [' Please install pigz for fast compression: ' ...
             'http://macappstore.org/pigz/\n']);
     end
 elseif isunix % linux
-    [st, val] = fileattrib([m_dir '/pigz']);
-    if st && ~val.UserExecute, fileattrib([m_dir '/pigz'], '+x'); end
+    [st, val] = fileattrib(cmd);
+    if st && ~val.UserExecute, fileattrib(cmd, '+x'); end
 end
 
-cmd = fullfile(m_dir, 'pigz');
 [err, ~] = jsystem({cmd '-V'});
 if ~err, return; end
 
@@ -851,13 +849,13 @@ cmd = usejava('jvm');
 
 %% check dd command, return empty if not available
 function dd = check_dd
+m_dir = fileparts(mfilename('fullpath'));
+if strcmpi(pwd, m_dir), cd ..; clnObj = onCleanup(@() cd(m_dir)); end
 [err, ~] = jsystem({'dd' '--version'});
 if ~err, dd = 'dd'; return; end % dd with linix/mac, and maybe windows
 
 if ispc % rename it as exe
-    m_dir = fileparts(which(mfilename));
-    if strcmpi(pwd, m_dir), cd ..; clnObj = onCleanup(@() cd(m_dir)); end
-    dd = fullfile(m_dir, 'dd');
+    dd = [m_dir '\dd'];
     [err, ~] = jsystem({dd '--version'});
     if ~err, return; end
 end
@@ -1212,3 +1210,4 @@ catch % fallback to system if error
     for i = ind, cmd{i} = ['"' cmd{i} '"']; end % add quotes to name with space
     [err, out] = system(sprintf('%s ', cmd{:}));
 end
+%%
