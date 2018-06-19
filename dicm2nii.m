@@ -458,11 +458,11 @@ elseif ischar(src) % 1 dicom or zip/tgz file
 else 
     error('Unknown dicom source.');
 end
-dcmFolder = fullpath(dcmFolder);
+dcmFolder = GetFullPath(dcmFolder);
 
 %% Deal with niiFolder
 if ~isdir(niiFolder), mkdir(niiFolder); end
-niiFolder = [fullpath(niiFolder) filesep];
+niiFolder = [GetFullPath(niiFolder) filesep];
 converter = ['dicm2nii.m 20' reviseDate];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
     more off;
@@ -2684,29 +2684,4 @@ if badVol % only seen in Philips
 end
 ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
 ind = ind(:)';
-
-%% get full path if input pth/file is relative: do not need pth to exist
-function pth = fullpath(pth)
-if ispc
-    pth = strrep(pth, '/', '\');
-    if pth(1) == '/' % root of current drive
-        p = pwd;
-        pth = [p(1) ':' pth];
-    elseif numel(pth)==2 && pth(2)==':'
-        pth = pwd;
-    elseif numel(pth)>2 && pth(2)==':' && pth(3)~='\'
-        pth = [pwd '\' pth(3:end)];
-    end
-    isAbs = numel(pth)>2 && strcmp(pth(2:3), ':\');
-else % unix
-    pth = strrep(pth, '\', '/');
-    if pth(1)=='~', pth = [getenv('HOME') pth(2:end)]; end
-    isAbs = pth(1)=='/';
-end 
-try isAbs = java.io.File(pth).isAbsolute; end % in case above isAbs wrong
-if isAbs
-    pth = fullfile(pth); % just make it formal
-else
-    pth = fullfile(pwd, pth);
-end
 %%
