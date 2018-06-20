@@ -379,7 +379,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180602 extract sort_frames() for multiFrameFields() and philips_par()
 % 180605 multiFrameFields: B=0 to first vol. 
 % 180614 Implement scale_16bit: free precision for tools using 16-bit datatype. 
-% 180617 new fullpath(): avoid what() (thx JulienB). 
+% 180619 use GetFullPath from Jan: (thx JulienB). 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -2649,8 +2649,8 @@ end
 %% Get sorting index for multi-frame and PAR/XML (called by dicm_hdr
 function [ind, nSL] = sort_frames(sl, ic)
 % sl is for slice index, and has B_value as 2nd column for DTI.
-% ic contains other possible index, or cell array, which will be converted into
-% index. The ic column order is important.
+% ic contains other possible parameters which will be converted into index. 
+% The ic column order is important.
 nFrame = size(sl, 1);
 nSL = max(sl(:, 1));
 nVol = floor(nFrame / nSL);
