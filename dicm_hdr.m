@@ -102,6 +102,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 %        philips_par: start to support V3 (thx ChrisR); fix (ap,fh,rl) issue.
 % 180612 philips_par & xml: take care of IndexInREC (may nerver be tested).
 % 180615 Avoid error for dicm without PixelData for search method (thx LucaT).
+% 180620 philips_xml: bug fix to convert str to num for sort_frames.
 
 persistent dict_full;
 s = []; info = '';
@@ -144,7 +145,7 @@ if ~isDicm % may be PAR/HEAD/BV file
         if strcmpi(ext, '.PAR')
             [s, info] = philips_par(fname);
         elseif strcmpi(ext, '.xml')
-%             [s, info] = philips_par(fname);
+            % [s, info] = philips_par(fname);
             [s, info] = philips_xml(fname);
         elseif strcmpi(ext, '.HEAD') % || strcmpi(ext, '.BRIK')
             [s, info] = afni_head(fname);
@@ -1386,7 +1387,13 @@ end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'Dynamic' 'Grad Orient' 'Echo' 'Phase' 'Type' 'Label Type' 'Sequence'};
-id = []; for i = 1:numel(keys), id = [id xml_raw(ch, keys{i})]; end %#ok
+id = [];
+for i = 1:4, id = [id str2num(char(xml_raw(ch, keys{i})))]; end %#ok
+for i = i+1:numel(keys)
+    [~, ~, a] = unique(xml_raw(ch, keys{i}));
+    if numel(unique(a))<2, continue; end
+    id = [id a]; %#ok
+end
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
 sl = str2num(char(xml_raw(ch, 'Slice'))); 
 if isDTI, sl(:,2) = str2num(char(xml_raw(ch, 'Diffusion B Factor'))); end
