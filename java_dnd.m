@@ -4,6 +4,8 @@ function java_dnd(jObj, dropFcn)
 % 170421 Xiangrui Li adapted from dndcontrol class by Maarten van der Seijs:
 % https://www.mathworks.com/matlabcentral/fileexchange/53511
 
+% Required: MLDropTarget.class under the same folder
+
 if ~exist('MLDropTarget', 'class')
     pth = fileparts(mfilename('fullpath'));
     javaclasspath(pth); % dynamic for this session
