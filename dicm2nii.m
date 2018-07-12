@@ -570,7 +570,16 @@ for k = 1:nFile
     if isempty(et), i = 1;
     else
         i = find(et == ETs{m}); % strict equal?
-        if isempty(i), i = numel(ETs{m})+1; ETs{m}(i) = et; end
+        if isempty(i)
+            i = numel(ETs{m}) + 1;
+            ETs{m}(i) = et;
+            if i>1
+                [ETs{m}, ind] = sort(ETs{m});
+                i = find(et == ETs{m});
+                h{m}{end+1}{1} = [];
+                h{m} = h{m}(ind);
+            end
+        end
     end
     j = tryGetField(s, 'InstanceNumber');
     if isempty(j) || j<1
@@ -595,7 +604,7 @@ fldsCk = {'ImageOrientationPatient' 'NumberOfFrames' 'Columns' 'Rows' ...
           'PixelSpacing' 'RescaleIntercept' 'RescaleSlope' 'SamplesPerPixel' ...
           'SpacingBetweenSlices' 'SliceThickness'}; % last for thickness
 for i = 1:nRun
-    h{i} = [h{i}{:}]; % concatenate different EchoNumber
+    h{i} = [h{i}{:}]; % concatenate different EchoTime
     ind = cellfun(@isempty, h{i});
     h{i}(ind) = []; % remove all empty cell for all vendors
     
@@ -1660,8 +1669,7 @@ end
 %% Subfunction: return matlab decompress command if the file is compressed
 function func = compress_func(fname)
 func = '';
-[~,~,ext] = fileparts(fname);
-if strcmpi(ext, '.mgz'), return; end
+if any(regexpi(fname, '\.mgz$')), return; end
 fid = fopen(fname);
 if fid<0, return; end
 sig = fread(fid, 2, '*uint8')';
@@ -1996,9 +2004,9 @@ function s = multiFrameFields(s)
 pffgs = 'PerFrameFunctionalGroupsSequence';
 sfgs = 'SharedFunctionalGroupsSequence';
 if any(~isfield(s, {sfgs pffgs})), return; end
+try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 
 % check slice ordering (Philips often needs SortFrames)
-try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 n = numel(MF_val('DimensionIndexValues', s, 1));
 s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', zeros(1, nFrame));
 s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
@@ -2646,27 +2654,32 @@ while 1
     nMos = nMos - 1;
 end
 
-%% Get sorting index for multi-frame and PAR/XML (called by dicm_hdr
+%% Get sorting index for multi-frame and PAR/XML (called by dicm_hdr)
 function [ind, nSL] = sort_frames(sl, ic)
 % sl is for slice index, and has B_value as 2nd column for DTI.
-% ic contains other possible parameters which will be converted into index. 
-% The ic column order is important.
-nFrame = size(sl, 1);
+% ic contains other possible identifiers which will be converted into index. 
+% The ic column order is important. 
 nSL = max(sl(:, 1));
+nFrame = size(sl, 1);
+if nSL==nFrame, ind = 1:nSL; ind(sl(:,1)) = ind; return; end % single vol
 nVol = floor(nFrame / nSL);
 badVol = nVol*nSL < nFrame; % incomplete volume
 id = zeros(size(ic));
 for i = 1:size(ic,2)
     [~, ~, id(:,i)] = unique(ic(:,i)); % entries to index
 end
-n = max(id); id = id(:, n>1); n = n(n>1); 
-ind = find(n == nVol+badVol, 1);
-if ~isempty(ind) % most fMRI/DTI
-    id = id(:, ind); % use a single column for sorting
-elseif ~badVol && numel(n)>=2 && prod(n(1:2)) == nVol % 2 columns in a
-    id = (id(:,2) - 1) * n(1) + id(:,1); % 1 through nVol
-elseif nFrame>nSL % no simple sorting found
-    fprintf(2, ' No unique slice sorting found.\n');
+n = max(id); id = id(:, n>1); n = n(n>1);
+i = find(n == nVol+badVol, 1);
+if ~isempty(i) % most fMRI/DTI
+    id = id(:, i); % use a single column for sorting
+elseif ~badVol && numel(n)>1
+    [j, i] = find(tril(n' * n, -1) == nVol, 1); % need to ignore diag
+    if ~isempty(i)
+        id = id(:, [i j]); % 2 columns make nVol        
+    elseif numel(n)>2
+        i = find(cumprod(n) == nVol, 1);
+        if ~isempty(i), id = id(:, 1:i); end % first i columns make nVol
+    end
 end
 [~, ind] = sortrows([sl id]); % this sort idea is from julienbesle
 if badVol % only seen in Philips
