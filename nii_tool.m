@@ -260,6 +260,7 @@ function varargout = nii_tool(cmd, varargin)
 % 171206 Allow file name ext other than .nii, .hdr, .img.
 % 180104 check_gzip: add /usr/local/bin to PATH for unix if needed.
 % 180119 use jsystem for better speed.
+% 180710 bug fix for cal_max/cal_min in 'update'.
 
 persistent C para; % C columns: name, length, format, value, offset
 if isempty(C)
@@ -621,7 +622,7 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
     
     mx = double(max(nii.img(:)));
     mn = double(min(nii.img(:)));
-    if nii.hdr.cal_min>mx || nii.hdr.cal_max>mn % reset wrong value
+    if nii.hdr.cal_min>mx || nii.hdr.cal_max<mn % reset wrong value
         nii.hdr.cal_min = 0;
         nii.hdr.cal_max = 0;
     end
@@ -1044,7 +1045,6 @@ dim = hdr.dim(2:8);
 dim(hdr.dim(1)+1:7) = 1; % avoid some error in file
 dim(dim<1) = 1;
 valpix = para.valpix(ind);
-n = prod(dim); % num of voxels
 
 fname = nii_name(hdr.file_name, '.img'); % in case of .hdr/.img pair
 fid = fopen(fname);
@@ -1056,6 +1056,13 @@ if isequal(sig, [31 139]) % .gz
     fid = fopen(fname);
 end
 
+% if ~exist('cln', 'var') && valpix==1 && ~hdr.swap_endian
+%     m = memmapfile(fname, 'Offset', hdr.vox_offset, ...
+%         'Format', {para.format{ind}, dim, 'img'});
+%     nii = m.Data;
+%     return;
+% end
+
 if hdr.swap_endian % switch between LE and BE
     [~, ~, ed] = fopen(fid); % default endian: almost always ieee-le
     fclose(fid);
@@ -1066,7 +1073,7 @@ if hdr.swap_endian % switch between LE and BE
 end
 
 fseek(fid, hdr.vox_offset, 'bof');
-img = fread(fid, n*valpix, ['*' para.format{ind}]); % * to keep original class
+img = fread(fid, prod(dim)*valpix, ['*' para.format{ind}]); % * to keep original class
 fclose(fid);
 
 if any(hdr.datatype == [128 511 2304]) % RGB or RGBA
@@ -1195,19 +1202,17 @@ end
 
 %% faster than system: based on https://github.com/avivrosenberg/matlab-jsystem
 function [err, out] = jsystem(cmd)
-% cmd is cell str, no quote needed for file names with space.
+% cmd is cell str, no quotation marks needed for file names with space.
 try
     pb = java.lang.ProcessBuilder(cmd);
     pb.redirectErrorStream(true); % ErrorStream to InputStream
     process = pb.start();
     scanner = java.util.Scanner(process.getInputStream).useDelimiter('\A');
     if scanner.hasNext(), out = char(scanner.next()); else, out = ''; end
-    %err = process.waitFor();
-    err = process.exitValue; % waitFor may hang. Error if not exited
-    if err, error(out); end
-catch % fallback to system if error
-    ind = find(cellfun(@(x)~isempty(strfind(x, ' ')), cmd));
-    for i = ind, cmd{i} = ['"' cmd{i} '"']; end % add quotes to name with space
+    err = process.exitValue; % err = process.waitFor() may hang
+    if err, error('java.lang.ProcessBuilder error'); end
+catch % fallback to system() if java fails like for Octave
+    cmd = regexprep(cmd, '.+? .+', '"$0"'); % double quotes if with middle space
     [err, out] = system(sprintf('%s ', cmd{:}));
 end
 %%
