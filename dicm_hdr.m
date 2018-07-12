@@ -100,9 +100,10 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 180531 philips_par: use SortFrames to solve XYTZ and incomplete volume.
 % 180605 philips_xml: much faster than xml2par;
 %        philips_par: start to support V3 (thx ChrisR); fix (ap,fh,rl) issue.
-% 180612 philips_par & xml: take care of IndexInREC (may nerver be tested).
+% 180612 philips_par & xml: take care of IndexInREC (may never be tested).
 % 180615 Avoid error for dicm without PixelData for search method (thx LucaT).
 % 180620 philips_xml: bug fix to convert str to num for sort_frames.
+% 180712 bug fix for implict VR in search method (thx LorenaF).
 
 persistent dict_full;
 s = []; info = '';
@@ -220,8 +221,8 @@ if toSearch % search each tag if header is short and not many tags asked
         i = i(mod(i,2)==1);
         if ~isempty(i)
             i = i(1) + 4 + p.expl*2; % Manufacturer should be the earliest one
-            n = ch2int16(b8(i+(0:1)), p.be);
-            dat = deblank(bc(i+1+(1:n)));
+            [n, nvr] = val_len('LO', b8(i+(0:5)), p.expl, p.be); i = i + nvr;
+            dat = deblank(bc(i+(0:n-1)));
             [p, dict] = updateVendor(p, dat);
         end
     end
@@ -233,8 +234,8 @@ if toSearch % search each tag if header is short and not many tags asked
     i = i(mod(i,2)==1);
     if ~isempty(i)
         i = i(1) + 4 + p.expl*2; % take 1st
-        n = ch2int16(b8(i+(0:1)), p.be);
-        p.nFrames = str2double(bc(i+1+(1:n)));
+        [n, nvr] = val_len('IS', b8(i+(0:5)), p.expl, p.be); i = i + nvr;
+        p.nFrames = str2double(bc(i+(0:n-1)));
     end
     
     for k = 1:numel(p.dict.tag)
@@ -1388,18 +1389,16 @@ end
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'Dynamic' 'Grad Orient' 'Echo' 'Phase' 'Type' 'Label Type' 'Sequence'};
 id = [];
-for i = 1:4, id = [id str2num(char(xml_raw(ch, keys{i})))]; end %#ok
-for i = i+1:numel(keys)
-    [~, ~, a] = unique(xml_raw(ch, keys{i}));
-    if numel(unique(a))<2, continue; end
-    id = [id a]; %#ok
+for i = 1:numel(keys)
+    [aa, ~, a] = unique(xml_raw(ch, keys{i}, i<5));
+    if numel(aa)>1, id = [id a]; end %#ok
 end
 sort_frames = dicm2nii('', 'sort_frames', 'func_handle');
-sl = str2num(char(xml_raw(ch, 'Slice'))); 
-if isDTI, sl(:,2) = str2num(char(xml_raw(ch, 'Diffusion B Factor'))); end
+sl = xml_raw(ch, 'Slice'); 
+if isDTI, sl(:,2) = xml_raw(ch, 'Diffusion B Factor'); end
 [ind_sort, nSL] = sort_frames(sl, id);
 nFrame = size(sl, 1);
-a = str2num(char(xml_raw(ch, 'Index'))); % always 0:nFrame-1 ?
+a = xml_raw(ch, 'Index'); % always 0:nFrame-1 ?
 a(a+1) = 1:nFrame; % [~, a] = sort(a);
 a = a(ind_sort)';
 if ~isequal(a, 1:nFrame), s.SortFrames = a; end % used only in dicm2nii
@@ -1432,7 +1431,7 @@ if ~strcmp(s.ComplexImageComponent, 'MIXED')
     keys = [keys {'Rescale Intercept' 'Rescale Slope' 'Scale Slope'}];
 end
 for i = 1:numel(keys)
-    if numel(unique(xml_raw(ch, keys{i}))) > 1
+    if numel(unique(xml_raw(ch, keys{i}, 0))) > 1
         err = sprintf('Inconsistent %s for %s', keys{i}, fullName);
         fprintf(2, ' %s. \n', err);
         s = []; return;
@@ -1515,10 +1514,11 @@ s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
     end
 
     % Return all values for key with original order in Image_Info
-    function val = xml_raw(ch, key)
+    function val = xml_raw(ch, key, isnum)
         expr = ['<Attribute\s+Name="' key '".*?>(.*?)</Attribute>'];
         val = regexp(ch, expr, 'tokens');
         val = [val{:}]';
+        if nargin<3 || isnum, val = str2num(char(val)); end
     end
 
     % Return values for key in Image_Info for volumes iVol
