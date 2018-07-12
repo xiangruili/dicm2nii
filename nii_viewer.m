@@ -1537,8 +1537,7 @@ if aligned % aligned mtx: do it in special way
     R0 = nii_xform_mat(hs.bg.hdr, frm(1)); % original background R
     
     try
-        [~, ~, ext] = fileparts(mtx);
-        if strcmpi(ext, '.mat')
+        if any(regexpi(mtx, '\.mat$'))
             R = load(mtx, '-ascii');
             if ~isequal(size(R), [4 4])
                 error('Invalid transformation matrix file: %s', mtx);
@@ -2193,32 +2192,13 @@ else % earlier matlab
 end
 
 %% 2D/3D smooth wrapper: no input check for 2D
-function out = smooth23(in, method, n, varargin)
-% out = smooth23(in, method, n, varargin)
-% This works the same as smooth3 from Matlab, except it also works if the input
-% is 2D.
-if size(in,3)>1, out = smooth3(in, method, n, varargin{:}); return; end
-if nargin<3 || isempty(n), n = 3; end
-if numel(n)==1, n = [n n]; end
-k = floor(n/2);
-if k<1, out = in; return; end
-n = k * 2 + 1; % odd number
-if strcmp(method, 'box')
-    kernal = ones(n) / n(1)/n(2);
-elseif strcmp(method, 'gaussian')
-    if nargin<4 || isempty(varargin{1}), sd = 0.65; 
-    else, sd = varargin{1}; 
-    end
-    [x, y] = ndgrid(-k(1):k(1), -k(2):k(2));
-    kernal = exp(-(x.*x  +  y.*y) / (2*sd*sd));
-    kernal = kernal / sum(kernal(:));
-else
-    fprintf(2, 'Invalid smooth method: %s\n', method);
-    out = in; return;
-end
-in = [repmat(in(1,:), [k(1) 1]); in; repmat(in(end,:), [k(1) 1])];
-in = [repmat(in(:,1), [1 k(2)])  in  repmat(in(:,end), [1 k(2)])];
-out = conv2(in, kernal, 'valid');
+function im = smooth23(im, varargin)
+% out = smooth23(in, varargin)
+% This works the same as smooth3 from Matlab, but takes care of 2D input.
+is2D = size(im,3) == 1;
+if is2D, im = repmat(im, [1 1 2]); end
+im = smooth3(im, varargin{:});
+if is2D, im = im(:,:,1); end
 
 %% Show xyz and value
 function xyz = set_xyz(hs, I)
@@ -2627,8 +2607,7 @@ p.hsI(1).UserData = p;
 set_cdata(hs);
 
 str = hs.files.getModel.get(jf-1);
-n = numel(noteStr);
-if numel(str)<n || ~strcmp(str(end+(-n+1:0)), noteStr)
+if ~any(regexp(str, [regexptranslate('escape', noteStr) '$']))
     hs.files.getModel.set(jf-1, [str noteStr]);
 end
 
