@@ -2550,7 +2550,7 @@ pth = mfilename('fullpath');
 pth = fileparts(pth);
 str = fileread(fullfile(pth, 'README.md'));
 fileDate = regexp(str, '(?<=version\s)\d{4}\.\d{2}\.\d{2}', 'match', 'once');
-fileNum = datenum(fileDate{1}, 'yyyy.mm.dd');
+fileNum = datenum(fileDate, 'yyyy.mm.dd');
 
 if fileNum >= latestNum
     msgbox([mfile ' and the package are up to date.'], 'Check update');
