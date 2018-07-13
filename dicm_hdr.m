@@ -716,14 +716,7 @@ err = '';
 fid = fopen(fname);
 if fid<0, s = []; err = ['File not exist: ' fname]; return; end
 fullName = fopen(fid); % name with full path
-[pth, nam, ext] = fileparts(fullName);
-if strcmpi(ext, '.xml') % if this is an xml file, convert to a temporary PAR file
-    fclose(fid);
-    fname = fullfile(tempdir, [nam '_tmp.PAR']);
-    xml2par(fullName, fname);
-    delTmpPar = onCleanup(@() delete(fname));
-    fid = fopen(fname);
-end
+[pth, nam] = fileparts(fullName);
 
 str = fread(fid, inf, '*char')'; % read all as char
 fclose(fid);
@@ -736,7 +729,7 @@ V = V{1};
 % Fix V4 bug: based on Chris observation. Only those in table are 1:3
 % The ugly hard-coded order is the simple solution
 if strcmpi(V, 'V4'), ax_order = 1:3; else, ax_order = [3 1 2]; end
-s.SoftwareVersion = [V '\' ext(2:end)]; % xml files have "PRIDE V5"
+s.SoftwareVersion = [V '\PAR'];
 s.PatientName = par_attr(ch, 'Patient name', 0);
 s.StudyDescription = par_attr(ch, 'Examination name', 0);
 s.SeriesDescription = nam;
