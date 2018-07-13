@@ -2530,34 +2530,42 @@ fclose(fid);
 function checkUpdate(mfile)
 webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii';
 try
-    str = urlread(webUrl);
+    verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
+    str = webread(verLink);
 catch me
-    str = sprintf('%s.\n\nPlease download manually.', me.message);
-    errordlg(str, 'Web access error');
-    web(webUrl, '-browser');
-    return;
+    try
+        str = urlread(verLink);
+    catch
+        str = sprintf('%s.\n\nPlease download manually.', me.message);
+        errordlg(str, 'Web access error');
+        web(webUrl, '-browser');
+        return;
+    end
 end
 
-latestStr = regexp(str, '"datePublished".*?(\d{4}-\d{2}-\d{2})"', 'tokens', 'once');
-latestStr = latestStr{1}([1:4 6 7 9 10]);
-latestNum = datenum(latestStr, 'yyyymmdd');
-d = sort({reviseDate('nii_viewer') reviseDate('nii_tool') ...
-          reviseDate('dicm2nii') reviseDate('dicm_hdr')});
-d = ['20' d{end}];
-myFileDate = datenum(d, 'yyyymmdd');
+latestStr = regexp(str, '(?<=version\s)\d{4}\.\d{2}\.\d{2}', 'match', 'once');
+latestNum = datenum(latestStr, 'yyyy.mm.dd');
 
-if myFileDate >= latestNum-1 % one day diff
+pth = mfilename('fullpath');
+pth = fileparts(pth);
+str = fileread(fullfile(pth, 'README.md'));
+fileDate = regexp(str, '(?<=version\s)\d{4}\.\d{2}\.\d{2}', 'match', 'once');
+fileNum = datenum(fileDate{1}, 'yyyy.mm.dd');
+
+if fileNum >= latestNum
     msgbox([mfile ' and the package are up to date.'], 'Check update');
     return;
 end
 
 msg = ['A newer version (' latestStr ') is available on the MathWorks File ' ...
-       'Exchange. Your version is ' d '. Update to the new version?'];
+       'Exchange. Your version is ' fileDate '. Update to the new version?'];
 answer = questdlg(msg, ['Update ' mfile], 'Yes', 'Later', 'Yes');
 if ~strcmp(answer, 'Yes'), return; end
 
 try
-    fileUrl = [webUrl '?controller=file_infos&download=true'];
+
+    fileUrl = 'https://www.mathworks.com/matlabcentral/mlc-downloads/downloads/submissions/42997/versions/95/download/zip';,
+%     fileUrl = [webUrl '?controller=file_infos&download=true'];
     tmp = [tempdir 'tmp/'];
     if exist(tmp, 'dir'), rmdir(tmp, 's'); end
     unzip(fileUrl, tmp);
