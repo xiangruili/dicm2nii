@@ -2529,8 +2529,8 @@ fclose(fid);
 % Simplified from checkVersion in findjobj.m by Yair Altman
 function checkUpdate(mfile)
 webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii';
+verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
 try
-    verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
     str = webread(verLink);
 catch me
     try
@@ -2546,10 +2546,14 @@ end
 latestStr = regexp(str, '(?<=version\s)\d{4}\.\d{2}\.\d{2}', 'match', 'once');
 latestNum = datenum(latestStr, 'yyyy.mm.dd');
 
-pth = mfilename('fullpath');
-pth = fileparts(pth);
-str = fileread(fullfile(pth, 'README.md'));
-fileDate = regexp(str, '(?<=version\s)\d{4}\.\d{2}\.\d{2}', 'match', 'once');
+fileDate = '2013.01.01';
+pth = fileparts(mfilename('fullpath'));
+fname = fullfile(pth, 'README.md');
+if exist(fname, 'file')
+    str = fileread(fullfile(pth, 'README.md'));
+    a = regexp(str, 'version\s(\d{4}\.\d{2}\.\d{2})', 'tokens', 'once');
+    if ~isempty(a), fileDate = a{1}; end
+end
 fileNum = datenum(fileDate, 'yyyy.mm.dd');
 
 if fileNum >= latestNum
