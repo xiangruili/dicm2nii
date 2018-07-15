@@ -463,7 +463,7 @@ dcmFolder = GetFullPath(dcmFolder);
 %% Deal with niiFolder
 if ~isdir(niiFolder), mkdir(niiFolder); end
 niiFolder = [GetFullPath(niiFolder) filesep];
-converter = ['dicm2nii.m 20' reviseDate];
+converter = ['dicm2nii.m ' getVersion];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
     more off;
     disp(['Xiangrui Li''s ' converter ' (feedback to xiangrui.li@gmail.com)']);
@@ -1782,11 +1782,11 @@ switch cmd
         if item == 1 % about
             str = sprintf(['dicm2nii.m by Xiangrui Li\n\n' ...
                 'Feedback to: xiangrui.li@gmail.com\n\n' ...
-                'Last updated on 20%s\n'], reviseDate);
+                'Last updated on %s\n'], getVersion);
             helpdlg(str, 'About dicm2nii')
         elseif item == 2 % license
             try
-                str = fileread([fileparts(which(mfilename)) '/license.txt']);
+                str = fileread([fileparts(mfilename('fullpath')) '/LICENSE']);
             catch
                 str = 'license.txt file not found';
             end
@@ -2168,14 +2168,17 @@ fseek(fid, 0, -1);
 fprintf(fid, '%s\n', errInfo);
 fclose(fid);
 
-%% Get the last date string in history
-function dStr = reviseDate(mfile)
-if nargin<1, mfile = mfilename; end
-dStr = '180527?';
-try str = fileread(which(mfile)); catch, return; end
-str = regexp(str, '.*\n% (\d{6}) ', 'tokens', 'once'); % last one
-if isempty(str), return; end
-dStr = str{1};
+%% Ger version in from file: version yyyy.mm.dd
+function dStr = getVersion(str)
+dStr = '20130101';
+if nargin<1 || isempty(str)
+    pth = fileparts(mfilename('fullpath'));
+    fname = fullfile(pth, 'README.md');
+    if ~exist(fname, 'file'), return; end
+    str = fileread(fullfile(pth, 'README.md'));
+end
+a = regexp(str, 'version\s(\d{4}\.\d{2}\.\d{2})', 'tokens', 'once');
+if ~isempty(a), dStr = a{1}([1:4 6:7 9:10]); end
 
 %% Get position info from Siemens CSA ASCII header
 % The only case this is useful for now is for DTI_ColFA, where Siemens omit 
@@ -2528,7 +2531,6 @@ fclose(fid);
 %% Check for newer version for 42997 at Matlab Central
 % Simplified from checkVersion in findjobj.m by Yair Altman
 function checkUpdate(mfile)
-webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii';
 verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
 try
     str = webread(verLink);
@@ -2538,25 +2540,15 @@ catch me
     catch
         str = sprintf('%s.\n\nPlease download manually.', me.message);
         errordlg(str, 'Web access error');
+        webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997';
         web(webUrl, '-browser');
         return;
     end
 end
 
-latestStr = regexp(str, '(?<=version\s)\d{4}\.\d{2}\.\d{2}', 'match', 'once');
-latestNum = datenum(latestStr, 'yyyy.mm.dd');
-
-fileDate = '2013.01.01';
-pth = fileparts(mfilename('fullpath'));
-fname = fullfile(pth, 'README.md');
-if exist(fname, 'file')
-    str = fileread(fullfile(pth, 'README.md'));
-    a = regexp(str, 'version\s(\d{4}\.\d{2}\.\d{2})', 'tokens', 'once');
-    if ~isempty(a), fileDate = a{1}; end
-end
-fileNum = datenum(fileDate, 'yyyy.mm.dd');
-
-if fileNum >= latestNum
+latestStr = getVersion(str);
+fileDate = getVersion();
+if datenum(fileDate, 'yyyymmdd') >= datenum(latestStr, 'yyyymmdd')
     msgbox([mfile ' and the package are up to date.'], 'Check update');
     return;
 end
@@ -2567,12 +2559,10 @@ answer = questdlg(msg, ['Update ' mfile], 'Yes', 'Later', 'Yes');
 if ~strcmp(answer, 'Yes'), return; end
 
 try
-
-    fileUrl = 'https://www.mathworks.com/matlabcentral/mlc-downloads/downloads/submissions/42997/versions/95/download/zip';,
-%     fileUrl = [webUrl '?controller=file_infos&download=true'];
     tmp = [tempdir 'tmp/'];
     if exist(tmp, 'dir'), rmdir(tmp, 's'); end
-    unzip(fileUrl, tmp);
+    unzip(['https://www.mathworks.com/matlabcentral/mlc-downloads/downloads/' ...
+           'submissions/42997/versions/95/download/zip'], tmp);
     a = dir([tmp 'xiangruili*']);
     if isempty(a), tdir = tmp; else, tdir = [tmp a(1).name '/']; end
     movefile([tdir '*.*'], [fileparts(which(mfile)) '/.'], 'f');
