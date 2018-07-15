@@ -927,10 +927,10 @@ switch cmd
             set_colorbar(hs);
         end
     case 'about'
-        reviseDate = dicm2nii('', 'reviseDate', 'func_handle');
+        getVersion = dicm2nii('', 'getVersion', 'func_handle');
         str = sprintf(['nii_viewer.m by Xiangrui Li\n\n' ...
-            'Last updated on 20%s\n\n', ...
-            'Feedback to: xiangrui.li@gmail.com\n'], reviseDate(mfilename));
+            'Last updated on %s\n\n', ...
+            'Feedback to: xiangrui.li@gmail.com\n'], getVersion());
         helpdlg(str, 'About nii_viewer')
     case 'stack'
         uicontrol(hs.focus); % move focus out of buttons
