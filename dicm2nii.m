@@ -432,7 +432,7 @@ if iscellstr(src) && numel(src)==1, src = src{1}; end
 if isnumeric(src)
     error('Invalid dicom source.');    
 elseif iscellstr(src) % multiple files
-    dcmFolder = folderFromFile(src{1});
+    dcmFolder = filepars(GetFullPath(src{1}));
     n = numel(src);
     fnames = src;
     for i = 1:n
@@ -444,12 +444,12 @@ elseif ~exist(src, 'file') % like input: run1*.dcm
     fnames = dir(src);
     if isempty(fnames), error('%s does not exist.', src); end
     fnames([fnames.isdir]) = [];
-    dcmFolder = folderFromFile(src);
+    dcmFolder = filepars(GetFullPath(src));
     fnames = strcat(dcmFolder, filesep, {fnames.name});    
 elseif isdir(src) % folder
     dcmFolder = src;
 elseif ischar(src) % 1 dicom or zip/tgz file
-    dcmFolder = folderFromFile(src);
+    dcmFolder = filepars(GetFullPath(src));
     unzip_cmd = compress_func(src);
     if isempty(unzip_cmd)
         fnames = dir(src);
@@ -927,11 +927,6 @@ end
 save(fname, 'h', '-v7'); % -v7 better compatibility
 fprintf('Elapsed time by dicm2nii is %.1f seconds\n\n', toc);
 return;
-
-%% Subfunction: return folder name for a file name
-function folder = folderFromFile(fname)
-folder = fileparts(fname);
-if isempty(folder), folder = pwd; end
 
 %% Subfunction: return PatientName
 function subj = PatientName(s)
@@ -2547,14 +2542,12 @@ catch me
 end
 
 latestStr = getVersion(str);
-fileDate = getVersion();
-if datenum(fileDate, 'yyyymmdd') >= datenum(latestStr, 'yyyymmdd')
+if datenum(getVersion(), 'yyyymmdd') >= datenum(latestStr, 'yyyymmdd')
     msgbox([mfile ' and the package are up to date.'], 'Check update');
     return;
 end
 
-msg = ['A newer version (' latestStr ') is available on the MathWorks File ' ...
-       'Exchange. Your version is ' fileDate '. Update to the new version?'];
+msg = ['Update to the newer version (' latestStr ')?'];
 answer = questdlg(msg, ['Update ' mfile], 'Yes', 'Later', 'Yes');
 if ~strcmp(answer, 'Yes'), return; end
 
@@ -2576,18 +2569,19 @@ warndlg(['Package updated successfully. Please restart ' mfile ...
          ', otherwise it may give error.'], 'Check update');
 
 %% Subfunction: return NumberOfImagesInMosaic if Siemens mosaic, or [] otherwise.
-% If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. 
-% If not exists, it may still be mosaic due to Siemens bug seen in syngo MR
-% 2004A 4VA25A phase image. Then we check EchoColumnPosition in CSA, and if it
-% is smaller than half of the slice dim, sSliceArray.lSize is used as nMos. 
-% If no CSA at all, the better way may be to peek into img to get nMos. Then the
-% first attempt is to check whether there are padded zeros. If so we count zeros
+% If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. If not
+% exists, it may still be mosaic due to Siemens bug seen in syngo MR 2004A
+% 4VA25A phase image. Then we check EchoColumnPosition in CSA, and if it is
+% smaller than half of the slice dim, sSliceArray.lSize is used as nMos. If no
+% CSA at all, the better way may be to peek into img to get nMos. Then the first
+% attempt is to check whether there are padded zeros. If so we count zeros
 % either at top or bottom of the img to decide real slice dim. In case there is
-% no padded zeros, we use the single zero lines along phase dir seen in most
-% (not all) mosaic. If the lines are equally spaced, and nMos is divisible by
-% mosaic dim, we accept nMos. Otherwise, we fall back to
-% NumberOfPhaseEncodingSteps, which is used by dcm2nii, but is not reliable for
-% most mosaic due to partial fourier or less 100% phase fov.
+% no padded zeros, we use the single zero lines along row or col seen in most
+% (not all, for example some phase img, derived data like moco series or tmap
+% etc) mosaic. If the lines are equally spaced, and nMos is divisible by mosaic
+% dim, we accept nMos. Otherwise, we fall back to NumberOfPhaseEncodingSteps,
+% which is used by dcm2nii, but is not reliable for most mosaic due to partial
+% fourier or less 100% phase fov.
 function nMos = nMosaic(s)
 nMos = csa_header(s, 'NumberOfImagesInMosaic'); % healthy mosaic dicom
 if ~isempty(nMos), return; end % seen 0 for GLM Design file and others
@@ -2597,11 +2591,10 @@ if ~isempty(nMos), return; end % seen 0 for GLM Design file and others
 % image. For 'syngo MR B17' fieldmap img, lSize>1 even if it is not mosaic.
 res = csa_header(s, 'EchoColumnPosition'); % half of slice res
 if ~isempty(res)
-    res = res * 2;
     dim = max([s.Columns s.Rows]);
     interp = asc_header(s, 'sKSpace.uc2DInterpolation');
     if ~isempty(interp) && interp, dim = dim / 2; end
-    if dim/res >= 2 % nTiles>=2
+    if dim/res/2 >= 2 % nTiles>=2
         nMos = asc_header(s, 'sSliceArray.lSize');
     end
     return; % Siemens non-mosaic returns here
@@ -2613,7 +2606,8 @@ try nMos = s.LocationsInAcquisition; return; end % try Siemens private tag
 
 dim = double([s.Columns s.Rows]); % slice or mosaic dim
 img = dicm_img(s, 0) ~= 0; % peek into img to figure out nMos
-d = -3:0; % assume slice dim>=4
+nPhase = tryGetField(s, 'NumberOfPhaseEncodingSteps', 4);
+d = -nPhase:0; % assume slice dim > phase steps
 c = img(dim(1)+d, dim(2)+d); % corner at bottom-right
 done = false;
 if all(~c(:)) % at least 1 padded slice: not 100% safe
@@ -2627,10 +2621,10 @@ if all(~c(:)) % at least 1 padded slice: not 100% safe
     nMos = dim(2) / (dim(2) - z);
     done = mod(nMos,1)==0 && mod(dim(1),nMos)==0;
 end
-if ~done % this relies on zeros at phase dir. May not work for some mosaic
-    ln = sum(img, 2) == 0; % InPlanePhaseEncodingDirection: COL
-    if sum(ln)<2 % InPlanePhaseEncodingDirection: ROW
-        ln = sum(img) == 0;
+if ~done % this relies on zeros along row or col. May not work for some mosaic
+    ln = sum(img, 2) == 0;
+    if sum(ln)<2
+        ln = sum(img) == 0; % likely PhaseEncodingDirectionPositive=0
         i = find(~ln, 1, 'last'); % last non-zero column in img
         ln(i+2:end) = []; % leave only 1 true for padded zeros
     end
@@ -2638,13 +2632,13 @@ if ~done % this relies on zeros at phase dir. May not work for some mosaic
     done = nMos>1 && all(mod(dim,nMos)==0) && all(diff(find(ln),2)==0);
 end
 if ~done && isfield(s, 'NumberOfPhaseEncodingSteps')
-    nMos = min(dim) / s.NumberOfPhaseEncodingSteps;
+    nMos = min(dim) / nPhase;
     done = nMos>1 && mod(nMos,1)==0 && all(mod(dim,nMos)==0);
 end
 
 if ~done
     errorLog([ProtocolName(s) ': NumberOfImagesInMosaic not available.']);
-    nMos = [];
+    nMos = []; % keep mosaic as it is
     return;
 end
 
@@ -2656,7 +2650,7 @@ while 1
     nMos = nMos - 1;
 end
 
-%% Get sorting index for multi-frame and PAR/XML (called by dicm_hdr)
+%% Get sorting index for multi-frame and PAR/XML (also called by dicm_hdr)
 function [ind, nSL] = sort_frames(sl, ic)
 % sl is for slice index, and has B_value as 2nd column for DTI.
 % ic contains other possible identifiers which will be converted into index. 
