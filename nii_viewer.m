@@ -1531,7 +1531,7 @@ hs = guidata(fh);
 frm = hs.form_code;
 aligned = nargin>2;
 R_back = hs.bg.R;
-if ~exist('flip', 'builtin'), eval('flip=@flipdim'); end
+if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
 if aligned % aligned mtx: do it in special way
     [p, ~, rg, dim] = read_nii(fname, frm, 0); % no re-orient
     R0 = nii_xform_mat(hs.bg.hdr, frm(1)); % original background R
@@ -1750,7 +1750,7 @@ if nargin<3 || reOri
         p.pixdim = p.pixdim(p.perm);
         p.nii.img = permute(p.nii.img, [p.perm 4:8]);
     end
-    if ~exist('flip', 'builtin'), eval('flip=@flipdim'); end
+    if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
     for i = 1:3, if p.flip(i), p.nii.img = flip(p.nii.img, i); end; end
 else
     p.perm = 1:3;
@@ -2654,7 +2654,7 @@ if isempty(pName), pName = pwd; end
 try nii = nii_tool('load', nam); % re-load to be safe
 catch % restore reoriented img
     nii = p.nii;
-    if ~exist('flip', 'builtin'), eval('flip=@flipdim'); end
+    if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
     for k = 1:3, if p.flip(k), nii.img = flip(nii.img, k); end; end
     nii.img = permute(nii.img, [p.perm 4:8]); % all vol in dim(4)
     slope = nii.hdr.scl_slope; if slope==0, slope = 1; end
