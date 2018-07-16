@@ -22,9 +22,9 @@ if ~exist('MLDropTarget', 'class')
 end
 
 dropTarget = handle(javaObjectEDT('MLDropTarget'), 'CallbackProperties');
-set(dropTarget, 'DragEnterCallback', @DragEnterCallback);
-set(dropTarget, 'DragExitCallback', @DragExitCallback);
-set(dropTarget, 'DropCallback', {@DropCallback, dropFcn});
+set(dropTarget, 'DragEnterCallback', @DragEnterCallback, ...
+                'DragExitCallback', @DragExitCallback, ...
+                'DropCallback', {@DropCallback, dropFcn});
 jObj.setDropTarget(dropTarget);
 %%
 
