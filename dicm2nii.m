@@ -380,6 +380,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180605 multiFrameFields: B=0 to first vol. 
 % 180614 Implement scale_16bit: free precision for tools using 16-bit datatype. 
 % 180619 use GetFullPath from Jan: (thx JulienB). 
+% 180721 accept mixture of files and folders as input; GUI uses jFileChooser(). 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -419,26 +420,20 @@ if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
     return;
 end
 
-pf.save_patientName = getpref('dicm2nii_gui_para', 'save_patientName', true);
-pf.save_json = getpref('dicm2nii_gui_para', 'save_json', false);
-pf.use_parfor = getpref('dicm2nii_gui_para', 'use_parfor', true);
-pf.use_seriesUID = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
-pf.lefthand = getpref('dicm2nii_gui_para', 'lefthand', true);
-pf.scale_16bit = getpref('dicm2nii_gui_para', 'scale_16bit', false);
-
 tic;
-unzip_cmd = '';
-if iscellstr(src) && numel(src)==1, src = src{1}; end
 if isnumeric(src)
     error('Invalid dicom source.');    
-elseif iscellstr(src) % multiple files
-    dcmFolder = filepars(GetFullPath(src{1}));
-    n = numel(src);
-    fnames = src;
-    for i = 1:n
-        foo = dir(src{i});
-        if isempty(foo), error('%s does not exist.', src{i}); end
-        fnames{i} = fullfile(dcmFolder, foo.name); 
+elseif iscellstr(src) % multiple files/folders
+    fnames = {};
+    for i = 1:numel(src)
+        if isdir(src{i})
+            fnames = [fnames filesInDir(src{i})];
+        else
+            a = dir(src{i});
+            if isempty(a), continue; end
+            dcmFolder = fileparts(GetFullPath(src{i}));
+            fnames = [fnames fullfile(dcmFolder, a.name)];
+        end
     end
 elseif ~exist(src, 'file') % like input: run1*.dcm
     fnames = dir(src);
@@ -447,18 +442,39 @@ elseif ~exist(src, 'file') % like input: run1*.dcm
     dcmFolder = filepars(GetFullPath(src));
     fnames = strcat(dcmFolder, filesep, {fnames.name});    
 elseif isdir(src) % folder
-    dcmFolder = src;
+    fnames = filesInDir(src);
 elseif ischar(src) % 1 dicom or zip/tgz file
     dcmFolder = filepars(GetFullPath(src));
     unzip_cmd = compress_func(src);
     if isempty(unzip_cmd)
         fnames = dir(src);
         fnames = strcat(dcmFolder, filesep, {fnames.name});
+    else % unzip if compressed file is the source
+        [~, fname, ext1] = fileparts(src);
+        dcmFolder = sprintf('%stmpDcm%s/', niiFolder, fname);
+        if ~isdir(dcmFolder)
+            mkdir(dcmFolder);
+            delTmpDir = onCleanup(@() rmdir(dcmFolder, 's'));
+        end
+        disp(['Extracting files from ' fname ext1 ' ...']);
+        
+        if strcmp(unzip_cmd, 'unzip')
+            cmd = sprintf('unzip -qq -o %s -d %s', src, dcmFolder);
+            err = system(cmd); % first try system unzip
+            if err, unzip(src, dcmFolder); end % Matlab's unzip is too slow
+        elseif strcmp(unzip_cmd, 'untar')
+            if isempty(which('untar'))
+                error('No untar found in matlab path.');
+            end
+            untar(src, dcmFolder);
+        end
+        fnames = filesInDir(dcmFolder);
     end
-else 
+else
     error('Unknown dicom source.');
 end
-dcmFolder = GetFullPath(dcmFolder);
+nFile = numel(fnames);
+if nFile<1, error(' No files found in the data source.'); end
 
 %% Deal with niiFolder
 if ~isdir(niiFolder), mkdir(niiFolder); end
@@ -469,43 +485,13 @@ if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
     disp(['Xiangrui Li''s ' converter ' (feedback to xiangrui.li@gmail.com)']);
 end
 
-%% Unzip if compressed file is the source
-if ~isempty(unzip_cmd)
-    [~, fname, ext1] = fileparts(src);
-    dcmFolder = sprintf('%stmpDcm%s/', niiFolder, fname);
-    if ~isdir(dcmFolder)
-        mkdir(dcmFolder);
-        delTmpDir = onCleanup(@() rmdir(dcmFolder, 's'));
-    end
-    disp(['Extracting files from ' fname ext1 ' ...']);
-
-    if strcmp(unzip_cmd, 'unzip')
-        cmd = sprintf('unzip -qq -o %s -d %s', src, dcmFolder);
-        err = system(cmd); % first try system unzip
-        if err, unzip(src, dcmFolder); end % Matlab's unzip is too slow
-    elseif strcmp(unzip_cmd, 'untar')
-        if isempty(which('untar')), error('No untar found in matlab path.'); end
-        untar(src, dcmFolder);
-    end
-    drawnow;
-end 
-
-%% Get all file names including those in subfolders, if not specified
-if ~exist('fnames', 'var')
-    dirs = genpath(dcmFolder);
-    dirs = regexp(dirs, pathsep, 'split');
-    fnames = {};
-    for i = 1:numel(dirs)
-        if isempty(dirs{i}), continue; end
-        curFolder = [dirs{i} filesep];
-        foo = dir(curFolder); % all files and folders
-        foo([foo.isdir]) = []; % remove folders
-        foo = strcat(curFolder, {foo.name});
-        fnames = [fnames foo]; %#ok<*AGROW>
-    end
-end
-nFile = numel(fnames);
-if nFile<1, error(' No files found in the data source.'); end
+%% user preference
+pf.save_patientName = getpref('dicm2nii_gui_para', 'save_patientName', true);
+pf.save_json        = getpref('dicm2nii_gui_para', 'save_json', false);
+pf.use_parfor       = getpref('dicm2nii_gui_para', 'use_parfor', true);
+pf.use_seriesUID    = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
+pf.lefthand         = getpref('dicm2nii_gui_para', 'lefthand', true);
+pf.scale_16bit      = getpref('dicm2nii_gui_para', 'scale_16bit', false);
 
 %% Check each file, store partial header in cell array hh
 % first 3 fields are must. First 10 indexed in code
@@ -532,7 +518,7 @@ for k = 1:nFile
     end
 end
 
-%% sort headers into cell h by SeriesInstanceUID, EchoNumber and InstanceNumber
+%% sort headers into cell h by SeriesInstanceUID, EchoTime and InstanceNumber
 h = {}; % in case of no dicom files at all
 errInfo = '';
 seriesUIDs = {}; ETs = {};
@@ -1051,8 +1037,8 @@ if isfield(s, 'FrameReferenceTime') && nVol>1
         vTime(j) = tryGetField(s2, 'FrameReferenceTime', 0);
     end
     if vTime(1) > vTime(end) % could also re-read sorted h{i}{1}
-        vTime = vTime(end:-1:1);
-        nii.img = nii.img(:,:,:, end:-1:1);
+        vTime = flip(vTime);
+        nii.img = flip(nii.img, 4);
     end
     s.VolumeTiming = vTime / 1000; % ms to seconds
 end
@@ -1092,12 +1078,11 @@ end
 rotM = diag([1-flp*2 1]); % 1 or -1 on diagnal
 rotM(1:3, 4) = (dim-1) .* flp; % 0 or dim-1
 R = R / rotM; % xform matrix after flip
-if ~exist('flip', 'builtin'), eval('flip = @flipdim;'); end
 for k = 1:3, if flp(k), nii.img = flip(nii.img, k); end; end
 if flp(iPhase), phPos = ~phPos; end
 if isfield(s, 'bvec'), s.bvec(:, flp) = -s.bvec(:, flp); end
 if flp(iSL) && isfield(s, 'SliceTiming') % slices flipped
-    s.SliceTiming = s.SliceTiming(end:-1:1);
+    s.SliceTiming = flip(s.SliceTiming);
     sc = nii.hdr.slice_code;
     if sc>0, nii.hdr.slice_code = sc+mod(sc,2)*2-1; end % 1<->2, 3<->4, 5<->6
 end
@@ -1528,25 +1513,25 @@ if proper<0, R(:,3) = -R(:,3); end
 
 q = sqrt([1 1 1; 1 -1 -1; -1 1 -1; -1 -1 1] * diag(R) + 1) / 2;
 if ~isreal(q(1)), q(1) = 0; end % if trace(R)+1<0, zero it
-[m, ind] = max(q);
+[mx, ind] = max(q);
+mx = mx * 4;
 
-switch ind
-    case 1
-        q(2) = (R(3,2) - R(2,3)) /m/4;
-        q(3) = (R(1,3) - R(3,1)) /m/4;
-        q(4) = (R(2,1) - R(1,2)) /m/4;
-    case 2
-        q(1) = (R(3,2) - R(2,3)) /m/4;
-        q(3) = (R(1,2) + R(2,1)) /m/4;
-        q(4) = (R(3,1) + R(1,3)) /m/4;
-    case 3
-        q(1) = (R(1,3) - R(3,1)) /m/4;
-        q(2) = (R(1,2) + R(2,1)) /m/4;
-        q(4) = (R(2,3) + R(3,2)) /m/4;
-    case 4
-        q(1) = (R(2,1) - R(1,2)) /m/4;
-        q(2) = (R(3,1) + R(1,3)) /m/4;
-        q(3) = (R(2,3) + R(3,2)) /m/4;
+if ind == 1
+    q(2) = (R(3,2) - R(2,3)) /mx;
+    q(3) = (R(1,3) - R(3,1)) /mx;
+    q(4) = (R(2,1) - R(1,2)) /mx;
+elseif ind ==  2
+    q(1) = (R(3,2) - R(2,3)) /mx;
+    q(3) = (R(1,2) + R(2,1)) /mx;
+    q(4) = (R(3,1) + R(1,3)) /mx;
+elseif ind == 3
+    q(1) = (R(1,3) - R(3,1)) /mx;
+    q(2) = (R(1,2) + R(2,1)) /mx;
+    q(4) = (R(2,3) + R(3,2)) /mx;
+elseif ind == 4
+    q(1) = (R(2,1) - R(1,2)) /mx;
+    q(2) = (R(3,1) + R(1,3)) /mx;
+    q(3) = (R(2,3) + R(3,2)) /mx;
 end
 if q(1)<0, q = -q; end % as MRICron
 
@@ -1719,29 +1704,12 @@ switch cmd
         folder = hs.src.Text; % initial folder
         if ~isdir(folder), folder = fileparts(folder); end
         if ~isdir(folder), folder = pwd; end
-        src = uigetdir(folder, 'Select a folder containing convertible files');
+        src = jFileChooser(folder, 'Select folders/files to convert');
         if isnumeric(src), return; end
-        hs.src.Text = src;
         set(hs.fig, 'UserData', src);
-    case 'srcFile'
-        folder = hs.src.Text; % initial folder
-        if ~isdir(folder), folder = fileparts(folder); end
-        if ~isdir(folder), folder = pwd; end
-        ext = '*.zip;*.tgz;*.tar;*.tar.gz;*.dcm;*.PAR;*.xml;*.HEAD;*.fmr;*.vmr;*.dmr';
-        [src, folder] = uigetfile([folder '/' ext], ['Select one or more ' ...
-            'convertible files, or a zip file containing convertible files'], ...
-            'MultiSelect', 'on');
-        if isnumeric(src), return; end
-        src = cellstr(src); % in case only 1 file selected
-        src = strcat(folder, filesep, src);
-        set(fh, 'UserData', src);
-        n = numel(src);
-        if n > 1 % +1 files
-            src = strcat(folder, sprintf(' {%g files}', n));
-        else
-            src = src{1};
-        end
-        hs.src.Text = src;
+        txt = src{1};
+        if numel(src) > 1,  txt = [txt ' {and more}']; end 
+        hs.src.Text = txt;
     case 'set_src'
         str = hs.src.Text;
         ind = strfind(str, '{');
@@ -1852,19 +1820,14 @@ set(fh, 'Toolbar', 'none', 'Menubar', 'none', 'Resize', 'off', 'Color', clr, ...
     'Tag', 'dicm2nii_fig', 'Position', [200 scrSz(4)-600 420 300], 'Visible', 'off', ...
     'Name', 'dicm2nii - DICOM to NIfTI Converter', 'NumberTitle', 'off');
 
-uitxt('Browse source', [8 274 88 16]);
-uicontrol('Style', 'Pushbutton', 'Position', [98 270 48 24], ...
-    'FontSize', fSz, 'String', 'Folder', 'Background', clrButton, ...
-    'TooltipString', ['Browse source folder (can have subfolders) containing' ...
-    ' convertible files'], 'Callback', cb('srcDir'));
-uitxt('or', [148 274 20 16]);
-uicontrol('Style', 'Pushbutton', 'Position', [166 270 48 24], 'FontSize', fSz, ...
-    'String', 'File(s)', 'Background', clrButton, 'Callback', cb('srcFile'), ...
-    'TooltipString', ['Browse convertible file(s), such as dicom, Philips PAR,' ...
+uitxt('Move mouse onto button, text box or check box for help', [8 274 400 16]);
+str = sprintf(['Browse convertible files or folders (can have subfolders) ' ...
+    'containing files.\nConvertible files can be dicom, Philips PAR,' ...
     ' AFNI HEAD, BrainVoyager files, or a zip file containing those files']);
-uitxt('or drag&drop source folder/file(s)', [216 274 200 16]);
+uicontrol('Style', 'Pushbutton', 'Position', [6 235 108 24], ...
+    'FontSize', fSz, 'String', 'DICOM folder/files', 'Background', clrButton, ...
+    'TooltipString', str, 'Callback', cb('srcDir'));
 
-uitxt('Source folder/files', [8 238 110 16]);
 jSrc = javaObjectEDT('javax.swing.JTextField');
 hs.src = javacomponent(jSrc, [114 234 294 24], fh);
 hs.src.FocusLostCallback = cb('set_src');
@@ -1875,7 +1838,7 @@ hs.src.ToolTipText = ['<html>This is the source folder or file(s). You can<br>' 
     'Click Folder or File(s) button above to set the value, or<br>' ...
     'Drag and drop a folder or file(s) into the box'];
 
-uicontrol('Style', 'Pushbutton', 'Position', [8 198 104 24], ...
+uicontrol('Style', 'Pushbutton', 'Position', [6 199 108 24], ...
     'FontSize', fSz, 'String', 'Result folder', 'Background', clrButton, ...
     'TooltipString', 'Browse result folder', 'Callback', cb('dstDialog'));
 jDst = javaObjectEDT('javax.swing.JTextField');
@@ -2569,12 +2532,12 @@ warndlg(['Package updated successfully. Please restart ' mfile ...
          ', otherwise it may give error.'], 'Check update');
 
 %% Subfunction: return NumberOfImagesInMosaic if Siemens mosaic, or [] otherwise.
-% If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. If not
-% exists, it may still be mosaic due to Siemens bug seen in syngo MR 2004A
-% 4VA25A phase image. Then we check EchoColumnPosition in CSA, and if it is
-% smaller than half of the slice dim, sSliceArray.lSize is used as nMos. If no
-% CSA at all, the better way may be to peek into img to get nMos. Then the first
-% attempt is to check whether there are padded zeros. If so we count zeros
+% If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. 
+% If not exists, it may still be mosaic due to Siemens bug seen in syngo MR
+% 2004A 4VA25A phase image. Then we check EchoColumnPosition in CSA, and if it
+% is smaller than half of the slice dim, sSliceArray.lSize is used as nMos. If
+% no CSA at all, the better way may be to peek into img to get nMos. Then the
+% first attempt is to check whether there are padded zeros. If so we count zeros
 % either at top or bottom of the img to decide real slice dim. In case there is
 % no padded zeros, we use the single zero lines along row or col seen in most
 % (not all, for example some phase img, derived data like moco series or tmap
@@ -2587,15 +2550,14 @@ nMos = csa_header(s, 'NumberOfImagesInMosaic'); % healthy mosaic dicom
 if ~isempty(nMos), return; end % seen 0 for GLM Design file and others
 
 % The next fix detects mosaic which is not labeled as MOSAIC in ImageType, nor
-% NumberOfImagesInMosaic exists. This is seen in syngo MR 2004A 4VA25A phase
-% image. For 'syngo MR B17' fieldmap img, lSize>1 even if it is not mosaic.
-res = csa_header(s, 'EchoColumnPosition'); % half of slice res
+% NumberOfImagesInMosaic exists, seen in syngo MR 2004A 4VA25A phase image.
+res = csa_header(s, 'EchoColumnPosition'); % half or full of slice dim
 if ~isempty(res)
     dim = max([s.Columns s.Rows]);
     interp = asc_header(s, 'sKSpace.uc2DInterpolation');
     if ~isempty(interp) && interp, dim = dim / 2; end
     if dim/res/2 >= 2 % nTiles>=2
-        nMos = asc_header(s, 'sSliceArray.lSize');
+        nMos = asc_header(s, 'sSliceArray.lSize'); % mprage lSize=1
     end
     return; % Siemens non-mosaic returns here
 end
@@ -2606,22 +2568,21 @@ try nMos = s.LocationsInAcquisition; return; end % try Siemens private tag
 
 dim = double([s.Columns s.Rows]); % slice or mosaic dim
 img = dicm_img(s, 0) ~= 0; % peek into img to figure out nMos
-nPhase = tryGetField(s, 'NumberOfPhaseEncodingSteps', 4);
-d = -nPhase:0; % assume slice dim > phase steps
-c = img(dim(1)+d, dim(2)+d); % corner at bottom-right
+nP = tryGetField(s, 'NumberOfPhaseEncodingSteps', 4); % sliceDim >= phase steps
+c = img(dim(1)-nP:end, dim(2)-nP:end); % corner at bottom-right
 done = false;
 if all(~c(:)) % at least 1 padded slice: not 100% safe
-    c = img(1:-d(1)+1, dim(2)+d); % top-right
+    c = img(1:nP+1, dim(2)-nP:end); % top-right
     if all(~c(:)) % all right tiles padded: use all to determine
         ln = sum(img);
     else % use several rows at bottom to determine: not as safe as all
-        ln = sum(img(dim(1)+d, :));
+        ln = sum(img(dim(1)-nP:end, :));
     end
     z = find(ln~=0, 1, 'last');
     nMos = dim(2) / (dim(2) - z);
     done = mod(nMos,1)==0 && mod(dim(1),nMos)==0;
 end
-if ~done % this relies on zeros along row or col. May not work for some mosaic
+if ~done % this relies on zeros along row or col seen in most mosaic
     ln = sum(img, 2) == 0;
     if sum(ln)<2
         ln = sum(img) == 0; % likely PhaseEncodingDirectionPositive=0
@@ -2632,7 +2593,7 @@ if ~done % this relies on zeros along row or col. May not work for some mosaic
     done = nMos>1 && all(mod(dim,nMos)==0) && all(diff(find(ln),2)==0);
 end
 if ~done && isfield(s, 'NumberOfPhaseEncodingSteps')
-    nMos = min(dim) / nPhase;
+    nMos = min(dim) / nP;
     done = nMos>1 && mod(nMos,1)==0 && all(mod(dim,nMos)==0);
 end
 
@@ -2693,4 +2654,55 @@ if badVol % only seen in Philips
 end
 ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
 ind = ind(:)';
+
+%% this can be removed for matlab 2013b+
+function y = flip(varargin)
+if exist('flip', 'builtin')
+    y = builtin('flip', varargin{:});
+else
+    if nargin<2, varargin{2} = find(size(varargin{1})>1, 1); end
+    y = flipdim(varargin); %#ok
+end
+
+%% return all file names in a folder, including in sub-folders
+function files = filesInDir(folder)
+dirs = genpath(folder);
+dirs = regexp(dirs, pathsep, 'split');
+files = {};
+for i = 1:numel(dirs)
+    if isempty(dirs{i}), continue; end
+    curFolder = [dirs{i} filesep];
+    a = dir(curFolder); % all files and folders
+    a([a.isdir]) = []; % remove folders
+    a = strcat(curFolder, {a.name});
+    files = [files a]; %#ok<*AGROW>
+end
+
+%% Select both folders and files
+function out = jFileChooser(folder, prompt, multi, button)
+if nargin<4 || isempty(button), button = 'Select'; end
+if nargin<3 || isempty(multi), multi = true; end
+if nargin<2 || isempty(prompt)
+    if multi, prompt = 'Choose files and/or folders';
+    else,     prompt = 'Choose file or folder';
+    end
+end
+if nargin<1 || isempty(folder), folder = pwd; end
+
+jFC = javax.swing.JFileChooser(folder);
+jFC.setFileSelectionMode(jFC.FILES_AND_DIRECTORIES);
+set(jFC, 'MultiSelectionEnabled', logical(multi));
+set(jFC, 'ApproveButtonText', button);
+set(jFC, 'DialogTitle', prompt);
+returnVal = jFC.showOpenDialog([]);
+if returnVal ~= jFC.APPROVE_OPTION, out = returnVal; return; end % numeric
+
+if multi
+    files = jFC.getSelectedFiles();
+    n = numel(files);
+    out = cell(1, n);
+    for i = 1:n, out{i} = char(files(i)); end
+else
+    out = char(jFC.getSelectedFile());
+end
 %%
