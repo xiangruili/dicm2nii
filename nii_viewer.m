@@ -1531,7 +1531,6 @@ hs = guidata(fh);
 frm = hs.form_code;
 aligned = nargin>2;
 R_back = hs.bg.R;
-if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
 if aligned % aligned mtx: do it in special way
     [p, ~, rg, dim] = read_nii(fname, frm, 0); % no re-orient
     R0 = nii_xform_mat(hs.bg.hdr, frm(1)); % original background R
@@ -1750,7 +1749,6 @@ if nargin<3 || reOri
         p.pixdim = p.pixdim(p.perm);
         p.nii.img = permute(p.nii.img, [p.perm 4:8]);
     end
-    if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
     for i = 1:3, if p.flip(i), p.nii.img = flip(p.nii.img, i); end; end
 else
     p.perm = 1:3;
@@ -2022,13 +2020,13 @@ elseif lut == 5, map(:,2) = 0; % violet
 elseif lut == 6, map(:,3) = 0; % yellow
 elseif lut == 7, map(:,1) = 0; % cyan
 elseif any(lut == [8 19 26]), map(:,3) = 0; map(:,1) = 1; % red_yellow
-elseif lut == 9, map(:,1) = 0; map(:,3) = map(end:-1:1,3); % blue_green
+elseif lut == 9, map(:,1) = 0; map(:,3) = flip(map(:,3)); % blue_green
 elseif lut == 10 % two-sided
     map = map(1:2:end,:); % half
     map_neg = map;
     map(:,3) = 0; map(:,1) = 1; % red_yellow
-    map_neg(:,1) = 0; map_neg(:,3) = map_neg(end:-1:1,3); % blue_green
-    map = [map_neg(end:-1:1,:); map];
+    map_neg(:,1) = 0; map_neg(:,3) = flip(map_neg(:,3)); % blue_green
+    map = [flip(map_neg,1); map];
 elseif lut == 11, map(:,2:3) = 0; % vector lines
 elseif lut == 12 % parula not in old matlab, otherwise this can be omitted
     if isempty(parula64)
@@ -2654,7 +2652,6 @@ if isempty(pName), pName = pwd; end
 try nii = nii_tool('load', nam); % re-load to be safe
 catch % restore reoriented img
     nii = p.nii;
-    if ~exist('flip', 'builtin'), eval('flip=@flipdim;'); end
     for k = 1:3, if p.flip(k), nii.img = flip(nii.img, k); end; end
     nii.img = permute(nii.img, [p.perm 4:8]); % all vol in dim(4)
     slope = nii.hdr.scl_slope; if slope==0, slope = 1; end
@@ -3486,6 +3483,15 @@ ae = [ae; ae(1)+180 -ae(2); -ae(1) ae(2); -ae(1)-180 -ae(2)];
 for i = 1:4
     set(hs.ax(i), 'View', ae(i,:));
     camlight(hs.light(i), 'headlight');
+end
+
+%% this can be removed for matlab 2013b+
+function y = flip(varargin)
+if exist('flip', 'builtin')
+    y = builtin('flip', varargin{:});
+else
+    if nargin<2, varargin{2} = find(size(varargin{1})>1, 1); end
+    y = flipdim(varargin{:}); %#ok
 end
 
 %% flip slice dir for nii hdr
