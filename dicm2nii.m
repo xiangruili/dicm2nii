@@ -2516,8 +2516,11 @@ if ~strcmp(answer, 'Yes'), return; end
 try
     tmp = [tempdir 'tmp/'];
     if exist(tmp, 'dir'), rmdir(tmp, 's'); end
-    unzip(['https://www.mathworks.com/matlabcentral/mlc-downloads/downloads/' ...
-           'submissions/42997/versions/95/download/zip'], tmp);
+    unzip(['https://www.mathworks.com/matlabcentral/mlc-downloads/'...
+        'downloads/e5a13851-4a80-11e4-9553-005056977bd0/' ...
+        '80e748a3-0ae1-48a5-a2cb-b8380dac0232/packages/zip'], tmp);
+%     unzip(['https://www.mathworks.com/matlabcentral/mlc-downloads/' ...
+%            'downloads/submissions/42997/versions/95/download/zip'], tmp);
     a = dir([tmp 'xiangruili*']);
     if isempty(a), tdir = tmp; else, tdir = [tmp a(1).name '/']; end
     movefile([tdir '*.*'], [fileparts(which(mfile)) '/.'], 'f');
