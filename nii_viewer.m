@@ -2989,9 +2989,8 @@ end
 try 
     nii = nii_tool('load', strtrim(nam));
 catch me
-    try, nii = dicm2nii(fname, pwd, 'no_save');
-    catch, errordlg(me.message); return;
-    end
+    try, nii = dicm2nii(fname, pwd, 'no_save'); end
+    if isempty(nii), rethrow(me); end
 end
 
 %% Get figure/plot position from FoV for layout
