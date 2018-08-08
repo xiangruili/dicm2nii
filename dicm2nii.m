@@ -414,12 +414,21 @@ end
 
 rst3D = (isnumeric(fmt) && fmt>3) || (ischar(fmt) && ~isempty(regexpi(fmt, '3D')));
 
-%% Deal with data source
 if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
     create_gui; % show GUI if input is not enough
     return;
 end
 
+%% Deal with niiFolder
+if ~isdir(niiFolder), mkdir(niiFolder); end
+niiFolder = [GetFullPath(niiFolder) filesep];
+converter = ['dicm2nii.m ' getVersion];
+if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
+    more off;
+    disp(['Xiangrui Li''s ' converter ' (feedback to xiangrui.li@gmail.com)']);
+end
+
+%% Deal with data source
 tic;
 if isnumeric(src)
     error('Invalid dicom source.');    
@@ -435,16 +444,16 @@ elseif iscellstr(src) % multiple files/folders
             fnames = [fnames fullfile(dcmFolder, a.name)];
         end
     end
+elseif isdir(src) % folder
+    fnames = filesInDir(src);
 elseif ~exist(src, 'file') % like input: run1*.dcm
     fnames = dir(src);
     if isempty(fnames), error('%s does not exist.', src); end
     fnames([fnames.isdir]) = [];
     dcmFolder = filepars(GetFullPath(src));
     fnames = strcat(dcmFolder, filesep, {fnames.name});    
-elseif isdir(src) % folder
-    fnames = filesInDir(src);
 elseif ischar(src) % 1 dicom or zip/tgz file
-    dcmFolder = filepars(GetFullPath(src));
+    dcmFolder = fileparts(GetFullPath(src));
     unzip_cmd = compress_func(src);
     if isempty(unzip_cmd)
         fnames = dir(src);
@@ -475,15 +484,6 @@ else
 end
 nFile = numel(fnames);
 if nFile<1, error(' No files found in the data source.'); end
-
-%% Deal with niiFolder
-if ~isdir(niiFolder), mkdir(niiFolder); end
-niiFolder = [GetFullPath(niiFolder) filesep];
-converter = ['dicm2nii.m ' getVersion];
-if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
-    more off;
-    disp(['Xiangrui Li''s ' converter ' (feedback to xiangrui.li@gmail.com)']);
-end
 
 %% user preference
 pf.save_patientName = getpref('dicm2nii_gui_para', 'save_patientName', true);
@@ -1808,8 +1808,7 @@ fSz = 9 + ~(ispc || ismac) * 2;
 clr = [1 1 1]*206/256;
 clrButton = [1 1 1]*216/256;
 cb = @(cmd) {@gui_callback cmd fh}; % callback shortcut
-uitxt = @(txt,pos) uicontrol('Style', 'text', 'Position', pos, ...
-    'FontSize', fSz, ...
+uitxt = @(txt,pos) uicontrol('Style', 'text', 'Position', pos, 'FontSize', fSz, ...
     'HorizontalAlignment', 'left', 'String', txt, 'BackgroundColor', clr);
 getpf = @(p,dft)getpref('dicm2nii_gui_para', p, dft);
 chkbox = @(parent,val,str,cbk,tip) uicontrol(parent, 'Style', 'checkbox', ...
@@ -1835,7 +1834,7 @@ hs.src.Text = getpf('src', pwd);
 % hs.src.ActionPerformedCallback = cb('set_src'); % fire when pressing ENTER
 hs.src.ToolTipText = ['<html>This is the source folder or file(s). You can<br>' ...
     'Type the source folder name into the box, or<br>' ...
-    'Click Folder or File(s) button above to set the value, or<br>' ...
+    'Click DICOM folder/files button to browse, or<br>' ...
     'Drag and drop a folder or file(s) into the box'];
 
 uicontrol('Style', 'Pushbutton', 'Position', [6 199 108 24], ...
