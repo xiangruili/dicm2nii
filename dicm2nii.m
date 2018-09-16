@@ -1303,8 +1303,17 @@ end
 nSL = hdr.dim(4);
 if isempty(t) && isfield(s, 'RTIA_timer') % GE slice timing
     t = zeros(nSL, 1);
-    for j = 1:nSL, t(j) = tryGetField(h{j}, 'RTIA_timer', nan); end
-    if all(diff(t)==0), t = []; else, t = t/10; end % in ms
+    nFile = numel(h);
+    % seen problem for 1st vol, so use last vol
+    for j = 1:nSL, t(j) = tryGetField(h{nFile-nSL+j}, 'RTIA_timer', 0); end
+    if all(diff(t)==0), t = []; 
+    else
+        t = t - min(t);
+        ma = max(t) / TA;
+        if ma>1, t = t / 10; % was ms*10, old dicom
+        elseif ma<1e-3, t = t * 1000; % was sec, new dicom?
+        end
+    end
 end
 
 if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
@@ -1956,18 +1965,13 @@ if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
 %     end
 elseif isfield(s, 'UserDefineData') % GE
     % https://github.com/rordenlab/dcm2niix/issues/163
+    try
     b = s.UserDefineData;
     i = typecast(b(25:26), 'uint16'); % hdr_offset
-    flag2_off = 917;
     v = typecast(b(i+1:i+4), 'single'); % 5.0 to 40.0
-    if v >= 25.002
-        flag2_off = flag2_off - 140;
-        i = i + 76;
+    if v >= 25.002, i = i + 76; end
+    phPos = bitget(b(i+49), 3) == 0;
     end
-    % isEPI = bitget(b(i+59), 7) > 0;
-    flag1 = bitget(b(i+49), 3) > 0;
-    flag2 = b(i+flag2_off);
-    if flag2 == 2, phPos = ~flag1; end % BOTTOM_UP or TOP_DOWN
 else
     if isfield(s, 'Stack') % Philips
         try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
