@@ -146,7 +146,6 @@ if ~isDicm % may be PAR/HEAD/BV file
         if strcmpi(ext, '.PAR')
             [s, info] = philips_par(fname);
         elseif strcmpi(ext, '.xml')
-            % [s, info] = philips_par(fname);
             [s, info] = philips_xml(fname);
         elseif strcmpi(ext, '.HEAD') % || strcmpi(ext, '.BRIK')
             [s, info] = afni_head(fname);
@@ -156,14 +155,10 @@ if ~isDicm % may be PAR/HEAD/BV file
             [s, info] = bv_file(fname);
         else
             info = ['Unknown file type: ' fname];
-            return;
         end
     catch me
         info = me.message;
-        return;
     end
-    if ~isempty(s), return; end
-    if isempty(info), info = ['Not dicom file: ' fname]; end
     return; 
 end
 
