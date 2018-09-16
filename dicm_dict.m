@@ -21,6 +21,7 @@ function dict = dicm_dict(vendor, flds)
 % 160411 dict contains group and element.
 % 171211 Add Siemens grp 0021 and more.
 % 180514 Guess more Siemens grp 0021 tags, correct BandwidthPerPixelPhaseEncode.
+% 180914 Add vendor UIH.
 
 if nargin<1, vendor = 'SIEMENS'; end
 dict.vendor = vendor;
@@ -1208,7 +1209,49 @@ elseif strncmpi(vendor, 'Philips', 7)
     '2005' '1585' 'DS' 'PIIM_GRADIENT_SLEW_RATE'
     '2005' '1587' 'DS' 'PIIM_MR_STUDY_B1RMS'
     '2050' '0020' 'CS' 'PresentationLUTShape' }];
+elseif strncmpi(vendor, 'UIH', 3)
+    C = [C; {
+    '0061' '1002' 'US' 'GeneratePrivate'
+    '0061' '4002' 'SH' 'FOV'
+    '0065' '1000' 'UL' 'MeasurmentUID'
+    '0065' '1002' 'SH' 'ImageOrientationDisplayed'
+    '0065' '1003' 'LO' 'ReceiveCoil'
+    '0065' '1004' 'SH' 'Interpolation'
+    '0065' '1005' 'SH' 'PEDirectionDisplayed'
+    '0065' '1006' 'IS' 'SliceGroupID'
+    '0065' '1007' 'OB' 'Uprotocol'
+    '0065' '1009' 'FD' 'B_value' % 'BActualValue'
+    '0065' '100A' 'FD' 'BUserValue'
+    '0065' '100B' 'DS' 'BlockSize'
+    '0065' '100C' 'SH' 'ExperimentalStatus'
+    '0065' '100D' 'SH' 'ParallelInformation'
+    '0065' '100F' 'SH' 'SlicePosition'
+    '0065' '1011' 'SH' 'Sections'
+    '0065' '1013' 'FD' 'InPlaneRotAngle'
+    '0065' '1014' 'DS' 'SliceNormalVector'
+    '0065' '1015' 'DS' 'SliceCenterPosition'
+    '0065' '1016' 'UL' 'PixelRotateModel'
+    '0065' '1017' 'LO' 'SARModel'
+    '0065' '1018' 'LO' 'dBdtModel'
+    '0065' '1023' 'LO' 'TablePosition'
+    '0065' '1025' 'DS' 'SliceGap'
+    '0065' '1029' 'SH' 'AcquisitionDuration'
+    '0065' '102B' 'LT' 'ApplicationCategory'
+    '0065' '102C' 'IS' 'RepeatitionIndex'
+    '0065' '102D' 'ST' 'SequenceDisplayName'
+    '0065' '102E' 'LO' 'NoiseDecovarFlag'
+    '0065' '102F' 'FL' 'ScaleFactor'
+    '0065' '1031' 'SH' 'MRSequenceVariant'
+    '0065' '1032' 'SH' 'MRKSpaceFilter'
+    '0065' '1033' 'SH' 'MRTableMode'
+    '0065' '1036' 'OB' 'MRDiscoParameter'
+    '0065' '1037' 'FD' 'DiffusionGradientDirection' % 'MRDiffusionGradOrientation'
+    '0065' '1038' 'FD' 'MRPerfusionNoiseLevel'
+    '0065' '1039' 'SH' 'MRGradRange'
+    '0065' '1050' 'DS' 'LocationsInAcquisition' % MRNumberOfSliceInVolume
+    '0065' '1051' 'SQ' 'MRVFrameSequence'}];
 % elseif strncmpi(vendor, 'OtherVendor', n)
+%     C = [C; {}];
 end
 
 dict.group = uint16(hex2dec(C(:,1)));

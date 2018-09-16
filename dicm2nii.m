@@ -381,6 +381,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180614 Implement scale_16bit: free precision for tools using 16-bit datatype. 
 % 180619 use GetFullPath from Jan: (thx JulienB). 
 % 180721 accept mixture of files and folders as input; GUI uses jFileChooser(). 
+% 180914 support UIH dicm, both GRID (mosaic) and regular. 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -943,6 +944,8 @@ if isfield(s, 'ProtocolDataBlock') % GE, not labeled as \DIFFISION
     end
 elseif strncmpi(s.Manufacturer, 'Philips', 7)
     tf = strcmp(tryGetField(s, 'MRSeriesDiffusion', 'N'), 'Y');
+elseif strncmpi(s.Manufacturer, 'UIH', 3)
+    tf = isfield(s, 'B_value');
 else % Some Siemens DTI are not labeled as \DIFFUSION
     tf = ~isempty(csa_header(s, 'B_value'));
 end
@@ -1339,6 +1342,24 @@ end
 %     t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
 % end
 
+if isempty(t) && strncmpi(s.Manufacturer, 'UIH', 3)
+    t = zeros(nSL, 1);
+    if isfield(s, 'MRVFrameSequence') % mosaic
+        for j = 1:nSL
+            item = sprintf('Item_%g', j);
+            str = s.MRVFrameSequence.(item).AcquisitionDateTime;
+            t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
+        end
+    else
+        dict = dicm_dict('', 'AcquisitionDateTime');
+        for j = 1:nSL
+            s1 = dicm_hdr(h{j}.Filename, dict);
+            t(j) = datenum(s1.AcquisitionDateTime, 'yyyymmddHHMMSS.fff');
+        end
+    end
+    t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+end
+
 if isempty(t) % non-mosaic Siemens: create 't' based on ucMode
     ucMode = asc_header(s, 'sSliceArray.ucMode'); % 1/2/4: Asc/Desc/Inter
     if isempty(ucMode), return; end
@@ -1414,8 +1435,7 @@ elseif nFile>1 % multiple files: order already in slices then volumes
         s2 = h{iDir(j)};
         val = tryGetField(s2, 'B_value');
         if val == 0, continue; end
-        vec = tryGetField(s2, 'DiffusionGradientDirection'); % Siemens/Philips
-        imgRef = isempty(vec); % likely GE if true. B_value=0 won't reach here
+        vec = tryGetField(s2, 'DiffusionGradientDirection'); % Siemens/Philips/UIH
         if isempty(val) || isempty(vec) % likely GE
             s2 = dicm_hdr(s2.Filename, dict);
         end
@@ -1459,9 +1479,9 @@ h{1}.bvec_original = bvec; % original from dicom
 
 % http://wiki.na-mic.org/Wiki/index.php/NAMIC_Wiki:DTI:DICOM_for_DWI_and_DTI
 [ixyz, R] = xform_mat(s, nii.hdr.dim(2:4)); % R takes care of slice dir
-if exist('imgRef', 'var') && imgRef % GE bvec already in image reference
+if strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
     if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
-        bvec = bvec(:, [2 1 3]);
+        bvec = bvec(:, [2 1 3]); % dicom bvec in Freq/Phase/Slice order
         bvec(:, 2) = -bvec(:, 2); % because of transpose?
         if ixyz(3)<3
             errorLog(sprintf(['%s: bvec sign for non-axial acquisition with' ...
@@ -1568,7 +1588,7 @@ R = [R * diag(pixdim) ipp];
 % rest are former: R = verify_slice_dir(R, s, dim, iSL)
 if dim(3)<2, return; end % don't care direction for single slice
 
-if s.Columns > dim(1) % Siemens mosaic: use dim(1) since no transpose to img
+if s.Columns>dim(1) && strncmpi(s.Manufacturer, 'SIEMENS', 7) % Siemens mosaic
     R(:,4) = R * [ceil(sqrt(dim(3))-1)*dim(1:2)/2 0 1]'; % real slice location
     vec = csa_header(s, 'SliceNormalVector'); % mosaic has this
     if ~isempty(vec) % exist for all tested data
@@ -1930,19 +1950,32 @@ end
 
 if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
     phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
-elseif isfield(s, 'ProtocolDataBlock') %GE
-% elseif isfield(s, 'UserDefineData') % GE
-%     % https://github.com/rordenlab/dcm2niix/issues/163
-%     b = s.UserDefineData;
-%     i = typecast(b(25:26), 'uint16'); % hdr_offset
-%     v = typecast(b(i+1:i+4), 'single'); % 5.0 to 40.0
-%     if v >= 26, i = i + 76; end
-%     phPos = bitget(b(i+49), 3) > 0;
-    try % VIEWORDER "1" == bottom_up
-        phPos = s.ProtocolDataBlock.VIEWORDER == '1';
+% elseif isfield(s, 'ProtocolDataBlock') % GE
+%     try % VIEWORDER "1" == bottom_up
+%         phPos = s.ProtocolDataBlock.VIEWORDER == '1';
+%     end
+elseif isfield(s, 'UserDefineData') % GE
+    % https://github.com/rordenlab/dcm2niix/issues/163
+    b = s.UserDefineData;
+    i = typecast(b(25:26), 'uint16'); % hdr_offset
+    flag2_off = 917;
+    v = typecast(b(i+1:i+4), 'single'); % 5.0 to 40.0
+    if v >= 25.002
+        flag2_off = flag2_off - 140;
+        i = i + 76;
     end
-elseif isfield(s, 'Stack') %Philips
-    try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
+    % isEPI = bitget(b(i+59), 7) > 0;
+    flag1 = bitget(b(i+49), 3) > 0;
+    flag2 = b(i+flag2_off);
+    if flag2 == 2, phPos = ~flag1; end % BOTTOM_UP or TOP_DOWN
+else
+    if isfield(s, 'Stack') % Philips
+        try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
+    elseif isfield(s, 'PEDirectionDisplayed') % UIH
+        try d = s.PEDirectionDisplayed(1); catch, return; end
+    else % unknown Manufacturer
+        return;
+    end
     try R = reshape(s.ImageOrientationPatient, 3, 2); catch, return; end
     [~, ixy] = max(abs(R)); % like [1 2]
     if isempty(iPhase) % if no InPlanePhaseEncodingDirection
@@ -1958,6 +1991,15 @@ end
 
 %% subfunction: extract useful fields for multiframe dicom
 function s = multiFrameFields(s)
+if isfield(s, 'MRVFrameSequence') % not real multi-frame dicom
+    try
+    s.ImagePositionPatient = s.MRVFrameSequence.Item_1.ImagePositionPatient;
+    s.AcquisitionDateTime = s.MRVFrameSequence.Item_1.AcquisitionDateTime;
+    item = sprintf('Item_%g', s.LocationsInAcquisition);
+    s.LastFile.ImagePositionPatient = s.MRVFrameSequence.(item).ImagePositionPatient;
+    end
+    return;
+end
 pffgs = 'PerFrameFunctionalGroupsSequence';
 sfgs = 'SharedFunctionalGroupsSequence';
 if any(~isfield(s, {sfgs pffgs})), return; end
@@ -2550,6 +2592,7 @@ warndlg(['Package updated successfully. Please restart ' mfile ...
 function nMos = nMosaic(s)
 nMos = csa_header(s, 'NumberOfImagesInMosaic'); % healthy mosaic dicom
 if ~isempty(nMos), return; end % seen 0 for GLM Design file and others
+if isType(s, '\VFRAME'), nMos = s.LocationsInAcquisition; return; end % UIH
 
 % The next fix detects mosaic which is not labeled as MOSAIC in ImageType, nor
 % NumberOfImagesInMosaic exists, seen in syngo MR 2004A 4VA25A phase image.
