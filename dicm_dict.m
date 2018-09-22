@@ -1235,7 +1235,7 @@ elseif strncmpi(vendor, 'UIH', 3)
     '0065' '1018' 'LO' 'dBdtModel'
     '0065' '1023' 'LO' 'TablePosition'
     '0065' '1025' 'DS' 'SliceGap'
-    '0065' '1029' 'SH' 'AcquisitionDuration'
+    '0065' '1029' 'SH' 'AcquisitionDurationUIH'
     '0065' '102B' 'LT' 'ApplicationCategory'
     '0065' '102C' 'IS' 'RepeatitionIndex'
     '0065' '102D' 'ST' 'SequenceDisplayName'
