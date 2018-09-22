@@ -382,6 +382,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180619 use GetFullPath from Jan: (thx JulienB). 
 % 180721 accept mixture of files and folders as input; GUI uses jFileChooser(). 
 % 180914 support UIH dicm, both GRID (mosaic) and regular. 
+% 180922 fix for UIH masaic -1 col; GE phPos from dcm2niix. 
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -670,10 +671,10 @@ for i = 1:nRun
         if s.isDTI, continue; end % allow missing directions for DTI
         a = zeros(1, nFile);
         for j = 1:nFile, a(j) = tryGetField(h{i}{j}, 'InstanceNumber', 1); end
-        if any(diff(a) ~= 1) % like CMRR ISSS seq or multi echo
+        if any(diff(a) ~= 1) % like CMRR ISSS seq or multi echo. Error for UIH
             errorLog(['InstanceNumber discontinuity detected for ' series '.' ...
                 'See VolumeTiming in NIfTI ext or dcmHeaders.mat.']);
-            dict = dicm_dict('', { 'AcquisitionDate' 'AcquisitionTime'});
+            dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
             vTime = nan(1, nFile);
             for j = 1:nFile
                 s2 = dicm_hdr(h{i}{j}.Filename, dict);
@@ -681,7 +682,7 @@ for i = 1:nRun
                 vTime(j) = datenum(dt, 'yyyymmddHHMMSS.fff');
             end
             vTime = vTime - min(vTime);
-            h{i}{1}.VolumeTiming = vTime*24*3600; % day to seconds
+            h{i}{1}.VolumeTiming = vTime * 86400; % day to seconds
         end
         continue; % no other check for mosaic
     end
@@ -846,18 +847,16 @@ for i = 1:nRun
     elseif sz(3)<2,    img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
     end
 
+    nSL = double(tryGetField(s, 'LocationsInAcquisition'));
     if tryGetField(s, 'SamplesPerPixel', 1) > 1 % color image
         img = permute(img, [1 2 4:8 3]); % put RGB into dim8 for nii_tool
-    elseif tryGetField(s, 'isMos', false) % SIEMENS mosaic
-        img = mos2vol(img, s.LocationsInAcquisition); % mosaic to volume
-    elseif ndims(img) == 3 % may need to reshape to 4D
-        nSL = double(tryGetField(s, 'LocationsInAcquisition'));
-        if ~isempty(nSL)
-            if isfield(s, 'SortFrames'), img = img(:,:,s.SortFrames); end
-            dim = size(img);
-            dim(3:4) = [nSL dim(3)/nSL]; % verified integer earlier
-            img = reshape(img, dim);
-        end
+    elseif tryGetField(s, 'isMos', false) % mosaic
+        img = mos2vol(img, nSL, strncmpi(s.Manufacturer, 'UIH', 3));
+    elseif ndims(img)==3 && ~isempty(nSL) % may need to reshape to 4D
+        if isfield(s, 'SortFrames'), img = img(:,:,s.SortFrames); end
+        dim = size(img);
+        dim(3:4) = [nSL dim(3)/nSL]; % verified integer earlier
+        img = reshape(img, dim);
     end
 
     if any(~isfield(s, flds(6:8))) || ~any(isfield(s, flds(9:10)))
@@ -944,8 +943,8 @@ if isfield(s, 'ProtocolDataBlock') % GE, not labeled as \DIFFISION
     end
 elseif strncmpi(s.Manufacturer, 'Philips', 7)
     tf = strcmp(tryGetField(s, 'MRSeriesDiffusion', 'N'), 'Y');
-elseif strncmpi(s.Manufacturer, 'UIH', 3)
-    tf = isfield(s, 'B_value');
+elseif isfield(s, 'ApplicationCategory') % UIH
+    tf = ~isempty(regexp(s.ApplicationCategory, 'DTI', 'once'));
 else % Some Siemens DTI are not labeled as \DIFFUSION
     tf = ~isempty(csa_header(s, 'B_value'));
 end
@@ -1185,6 +1184,13 @@ if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
         dur = csa_header(s, 'RealDwellTime') * 1e-6; % ns to ms
         dwell = dur * asc_header(s, 'sKSpace.lBaseResolution');
     end
+    if isempty(dwell) && strncmpi(s.Manufacturer, 'UIH', 3)
+        try dwell = s.AcquisitionDuration; % not confirmed yet
+        catch
+            try dwell = s.MRVFrameSequence.Item_1.AcquisitionDuration; end
+        end
+        if ~isempty(dwell), dwell = dwell / dim(iPhase); end
+    end
     
     if ~isempty(dwell)
         s.EffectiveEPIEchoSpacing = dwell;
@@ -1265,16 +1271,15 @@ for i = 1:numel(flds)
 end
 
 %% Subfunction, reshape mosaic into volume, remove padded zeros
-function vol = mos2vol(mos, nSL)
-nMos = ceil(sqrt(nSL)); % always nMos x nMos tiles
+function vol = mos2vol(mos, nSL, isUIH)
+nMos = ceil(sqrt(nSL)); % nMos x nMos tiles for Siemens, maybe nMos x nMos-1 UIH
 [nr, nc, nv] = size(mos); % number of row, col and vol in mosaic
 nr = nr / nMos; nc = nc / nMos; % number of row and col in slice
+if isUIH && nMos*(nMos-1)>=nSL, nc = size(mos,2) / (nMos-1); end % one col less
 vol = zeros([nr nc nSL nv], class(mos));
 for i = 1:nSL
     r =    mod(i-1, nMos) * nr + (1:nr); % 2nd slice is tile(2,1)
     c = floor((i-1)/nMos) * nc + (1:nc);
-    % r = floor((i-1)/nMos) * nr + (1:nr); % 2nd slice is tile(1,2)
-    % c =    mod(i-1, nMos) * nc + (1:nc);
     vol(:, :, i, :) = mos(r, c, :);
 end
 
@@ -1597,7 +1602,7 @@ R = [R * diag(pixdim) ipp];
 % rest are former: R = verify_slice_dir(R, s, dim, iSL)
 if dim(3)<2, return; end % don't care direction for single slice
 
-if s.Columns>dim(1) && strncmpi(s.Manufacturer, 'SIEMENS', 7) % Siemens mosaic
+if s.Columns>dim(1) && ~strncmpi(s.Manufacturer, 'UIH', 3) % Siemens mosaic
     R(:,4) = R * [ceil(sqrt(dim(3))-1)*dim(1:2)/2 0 1]'; % real slice location
     vec = csa_header(s, 'SliceNormalVector'); % mosaic has this
     if ~isempty(vec) % exist for all tested data
@@ -1969,8 +1974,10 @@ elseif isfield(s, 'UserDefineData') % GE
     b = s.UserDefineData;
     i = typecast(b(25:26), 'uint16'); % hdr_offset
     v = typecast(b(i+1:i+4), 'single'); % 5.0 to 40.0
-    if v >= 25.002, i = i + 76; end
-    phPos = bitget(b(i+49), 3) == 0;
+    if v >= 25.002, i = i + 76; flag2_off = 777; else, flag2_off = 917; end
+    sliceOrderFlag = bitget(b(i+flag2_off), 2);
+    phasePolarFlag = bitget(b(i+49), 3);
+    phPos = ~xor(phasePolarFlag, sliceOrderFlag);
     end
 else
     if isfield(s, 'Stack') % Philips
@@ -2596,7 +2603,6 @@ warndlg(['Package updated successfully. Please restart ' mfile ...
 function nMos = nMosaic(s)
 nMos = csa_header(s, 'NumberOfImagesInMosaic'); % healthy mosaic dicom
 if ~isempty(nMos), return; end % seen 0 for GLM Design file and others
-if isType(s, '\VFRAME'), nMos = s.LocationsInAcquisition; return; end % UIH
 
 % The next fix detects mosaic which is not labeled as MOSAIC in ImageType, nor
 % NumberOfImagesInMosaic exists, seen in syngo MR 2004A 4VA25A phase image.
@@ -2612,9 +2618,10 @@ if ~isempty(res)
 end
 
 % The fix below is for dicom labeled as \MOSAIC in ImageType, but no CSA.
-if ~isType(s, '\MOSAIC'), return; end % non-Siemens returns here
-try nMos = s.LocationsInAcquisition; return; end % try Siemens private tag
-
+if ~isType(s, '\MOSAIC') && ~isType(s, '\VFRAME'), return; end % non-mosaic
+try nMos = s.LocationsInAcquisition; return; end % try Siemens/UIH private tag
+try nMos = numel(fieldnames(s.MRVFrameSequence)); return; end % UIH
+    
 dim = double([s.Columns s.Rows]); % slice or mosaic dim
 img = dicm_img(s, 0) ~= 0; % peek into img to figure out nMos
 nP = tryGetField(s, 'NumberOfPhaseEncodingSteps', 4); % sliceDim >= phase steps
@@ -2652,8 +2659,8 @@ if ~done
     return;
 end
 
-nMos = nMos * nMos;
-img = mos2vol(uint8(img), nMos); % find padded slices: useful for STC
+nMos = nMos * nMos; % not work for UIH
+img = mos2vol(uint8(img), nMos, 0); % find padded slices: useful for STC
 while 1
     a = img(:,:,nMos);
     if any(a(:)), break; end
