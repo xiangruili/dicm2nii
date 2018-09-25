@@ -762,7 +762,7 @@ end
 rNames = cell(1, nRun);
 multiSubj = numel(subj)>1;
 j_s = nan(nRun, 1); % index-1 for _s003. needed if 4+ length SeriesNumbers
-maxLen = namelengthmax;
+maxLen = namelengthmax - 3;
 for i = 1:nRun
     s = h{i}{1};
     sN = sNs(i);
@@ -777,8 +777,8 @@ for i = 1:nRun
     if sN>100 && strncmp(s.Manufacturer, 'Philips', 7)
         sN = tryGetField(s, 'AcquisitionNumber', floor(sN/100));
     end
+    j_s(i) = numel(a);
     rNames{i} = sprintf('%s_s%03.0f', a, sN);
-    a = strfind(rNames{i}, '_s'); j_s(i) = a(end) - 1;
     d = numel(rNames{i}) - maxLen;
     if d>0, rNames{i}(j_s(i)+(-d+1:0)) = ''; j_s(i) = j_s(i)-d; end % keep _s007
 end
@@ -792,7 +792,7 @@ fnames = rNames; % copy it, reserve letter cases
 [rNames, iRuns] = sort(lower(fnames));
 j_s = j_s(iRuns);
 for i = 1:nRun
-    if i>1 &&  strcmp(rNames{i}, rNames{i-1}) % truncated StudyID to PatientName
+    if i>1 && strcmp(rNames{i}, rNames{i-1}) % truncated StudyID to PatientName
         a = num2str(i);
         rNames{i}(j_s(i)+(-numel(a)+1:0)) = a; % not 100% unique    
     end
@@ -805,6 +805,9 @@ for i = 1:nRun
                         && ~strcmpi(a, rNames{i+1}(1:j_s(i+1)))) % middle ones
         fnames{iRuns(i)}(j_s(i)+1:end) = [];
     end
+end
+if numel(unique(fnames)) < nRun % may happen to user-modified dicom/par
+    fnames = matlab.lang.makeUniqueStrings(fnames); % since R2014a
 end
 fmtStr = sprintf(' %%-%gs %%dx%%dx%%dx%%d\n', max(cellfun(@numel, fnames))+12);
 
