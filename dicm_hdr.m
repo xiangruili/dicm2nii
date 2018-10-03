@@ -185,7 +185,13 @@ for nb = [0 2e6 20e6 fSize] % if not enough, read more till all read
     b8 = [b8 fread(fid, nb, 'uint8=>uint8')']; %#ok
     i = strfind(char(b8), tg);
     i = i(mod(i,2)==1); % must be odd number
+    if isempty(i) && feof(fid)
+        tg = char([00 86 32 0]); % SpectroscopyData, VR = 'OF'
+        if p.be, tg = tg([2 1 4 3]); end
+        i = strfind(char(b8), tg); i = i(mod(i,2)==1);
+    end
     for k = i(end:-1:1) % last is likely real PixelData
+        if p.expl, p.VR = char(b8(k+(4:5))); end
         p.iPixelData = k + p.expl*4 + 7; % s.PixelData.Start: 0-based
         if numel(b8)<p.iPixelData, b8 = [b8 fread(fid, 12, '*uint8')']; end %#ok
         p.bytes = ch2int32(b8(p.iPixelData+(-3:0)), p.be);
@@ -299,6 +305,7 @@ end
 if p.iPixelData < fSize+1
     s.PixelData.Start = p.iPixelData;
     s.PixelData.Bytes = p.bytes;
+    if isfield(p, 'VR'), s.PixelData.Format = vr2fmt(p.VR); end
 end
 
 if isfield(s, 'CSAImageHeaderInfo') % Siemens CSA image header
@@ -416,7 +423,8 @@ while i<nEnd % loop through multi Item under the SQ
         if ischar(p.iFrames) % 'all' frames
             if j==1 && ~isnan(p.nFrames), rst.FrameStart = nan(1, p.nFrames); end
             rst.FrameStart(j) = i-9;
-        elseif j==1, i0 = i-8; % always read 1st frame, save i0 in case of re-do
+        elseif j==1 % always read 1st frame, save i0 in case of re-do
+            i0 = i-8; rst.FrameStart = i-9;
         elseif j==2 % always read 2nd frame, and find start ind for all frames
             if isnan(p.nFrames) || isempty(tag1) % 1st frame has no asked tag
                 p.iFrames = 'all'; rst = []; j = 0; i = i0; % re-do the SQ
@@ -524,6 +532,7 @@ function fmt = vr2fmt(vr)
         case 'FL', fmt = 'single';
         case 'AT', fmt = 'uint16';
         case 'OW', fmt = 'uint16';
+        case 'OF', fmt = 'single';
         case 'UN', fmt = 'uint8';
         otherwise, fmt = '';
     end
