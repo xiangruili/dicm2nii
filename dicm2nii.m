@@ -496,7 +496,7 @@ pf.lefthand         = getpref('dicm2nii_gui_para', 'lefthand', true);
 pf.scale_16bit      = getpref('dicm2nii_gui_para', 'scale_16bit', false);
 
 %% Check each file, store partial header in cell array hh
-% first 3 fields are must. First 10 indexed in code
+% first 2 fields are must. First 10 indexed in code
 flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'ImageOrientationPatient' 'ImagePositionPatient' 'PixelSpacing' ...
     'SliceThickness' 'SpacingBetweenSlices' ... % these 10 indexed in code
@@ -526,7 +526,7 @@ errInfo = '';
 seriesUIDs = {}; ETs = {};
 for k = 1:nFile
     s = hh{k};
-    if isempty(s) || any(~isfield(s, flds(1:3))) || ~isfield(s, 'PixelData') ...
+    if isempty(s) || any(~isfield(s, flds(1:2))) || ~isfield(s, 'PixelData') ...
             || (isstruct(s.PixelData) && s.PixelData.Bytes<1)
         if ~isempty(errStr{k}) % && isempty(strfind(errInfo, errStr{k}))
             errInfo = sprintf('%s\n%s\n', errInfo, errStr{k});
@@ -844,10 +844,14 @@ for i = 1:nRun
             img(:,:,:,:,j) = img(:,:,:,:,j) * slope + inter;
         end
     end
+    if strcmpi(tryGetField(s, 'DataRepresentation', ''), 'COMPLEX')
+        img = complex(img(:,:,:,1:2:end,:), img(:,:,:,2:2:end,:));
+    end
     sz = size(img); sz(numel(sz)+1:4) = 1;
-    if all(sz(3:4)<2), img = permute(img, [1 2 5 3 4]); % remove dim3,4
-    elseif sz(4)<2,    img = permute(img, [1:3 5 4]); % remove dim4: Frames
-    elseif sz(3)<2,    img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
+    if strcmpi(tryGetField(s, 'SignalDomainColumns', ''), 'TIME') % no permute
+    elseif all(sz(3:4)<2), img = permute(img, [1 2 5 3 4]); % remove dim3,4
+    elseif sz(4)<2,        img = permute(img, [1:3 5 4]); % remove dim4: Frames
+    elseif sz(3)<2,        img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
     end
 
     nSL = double(tryGetField(s, 'LocationsInAcquisition'));
@@ -2021,16 +2025,18 @@ try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 
 % check slice ordering (Philips often needs SortFrames)
 n = numel(MF_val('DimensionIndexValues', s, 1));
-s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', zeros(1, nFrame));
-s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
-[ind, nSL] = sort_frames([a(:,2) s2.B_value'], a(:, [3:end 1]));
-if ~isequal(ind, 1:nFrame)
-    if ind(1) ~= 1 || ind(end) ~= nFrame 
-        s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
+if n>0 && nFrame>1
+    s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', zeros(1, nFrame));
+    s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
+    [ind, nSL] = sort_frames([a(:,2) s2.B_value'], a(:, [3:end 1]));
+    if ~isequal(ind, 1:nFrame)
+        if ind(1) ~= 1 || ind(end) ~= nFrame 
+            s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
+        end
+        s.SortFrames = ind; % will use to sort img and get iVol/iSL for PerFrameSQ
     end
-    s.SortFrames = ind; % will use to sort img and get iVol/iSL for PerFrameSQ
+    if ~isfield(s, 'LocationsInAcquisition'), s.LocationsInAcquisition = nSL; end
 end
-if ~isfield(s, 'LocationsInAcquisition'), s.LocationsInAcquisition = nSL; end
 
 % copy important fields into s
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
@@ -2061,6 +2067,7 @@ if isfield(s.(pffgs).Item_1, fld)
 end
 
 % check ImageOrientationPatient consistency for 1st and last frame only
+if nFrame<2, return; end
 iF = nFrame; if isfield(s, 'SortFrames'), iF = s.SortFrames(iF); end
 a = MF_val('ImagePositionPatient', s, iF);
 if ~isempty(a), s.LastFile.ImagePositionPatient = a; end
