@@ -36,12 +36,12 @@ function img = dicm_img(s, xpose)
 % 171201 Bug fix for compressed dicom without offset table (thx DianaG).
 
 persistent flds dict mem cleanObj;
-if isempty(flds), flds = {'Rows' 'Columns' 'BitsAllocated'}; end
+if isempty(flds), flds = {'Rows' 'Columns'}; end
 if isstruct(s) && ~all(isfield(s, [flds 'PixelData'])), s = s.Filename; end
 if ischar(s) % input is file name
     if isempty(dict)
-        dict = dicm_dict('', ['SamplesPerPixel' 'PlanarConfiguration' ...
-            flds 'BitsStored' 'HighBit' 'PixelRepresentation' ]);
+        dict = dicm_dict('', ['SamplesPerPixel' 'PlanarConfiguration' flds ...
+            'BitsAllocated' 'BitsStored' 'HighBit' 'PixelRepresentation' ]);
     end
     [s, err] = dicm_hdr(s, dict); 
     if isempty(s), error(err); end
@@ -56,10 +56,11 @@ if isnumeric(s.PixelData) % data already in hdr
     return;
 end
 
-if ~isfield(s.PixelData, 'Format')
+if isfield(s.PixelData, 'Format')
+    fmt = s.PixelData.Format;
+    if fmt(1) ~= '*', fmt = ['*' fmt]; end
+elseif isfield(s, 'BitsAllocated')
     fmt = sprintf('*uint%g', s.BitsAllocated);
-else
-    fmt =  s.PixelData.Format;
 end
 
 if nargin<2 || isempty(xpose), xpose = true; end % same as dicomread by default
@@ -80,10 +81,15 @@ else, tsUID = '1.2.840.10008.1.2.1'; % files other than dicom
 end
 
 if any(strcmp(tsUID, {'1.2.840.10008.1.2.1' '1.2.840.10008.1.2.2' '1.2.840.10008.1.2'}))
-    n = double(s.PixelData.Bytes) / (double(s.BitsAllocated) / 8);
+    if isfield(s, 'BitsAllocated'), bpp = double(s.BitsAllocated) / 8;
+    elseif regexp(fmt, 'single$'),  bpp = 4;
+    elseif regexp(fmt, 'double$'),  bpp = 8;
+    else, error('Unknown data type for %s', s.Filename);
+    end
+    n = double(s.PixelData.Bytes) / bpp;
     img = fread(fid, n, fmt);
     
-    if all(isfield(s, {'BitsStored' 'HighBit'})) && ...
+    if all(isfield(s, {'BitsStored' 'HighBit' 'BitsAllocated'})) && ...
             (s.BitsStored ~= s.HighBit+1) && (s.BitsStored ~= s.BitsAllocated)
         img = bitshift(img, s.BitsStored-s.HighBit-1);
     end
