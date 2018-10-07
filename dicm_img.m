@@ -56,11 +56,11 @@ if isnumeric(s.PixelData) % data already in hdr
     return;
 end
 
-if isfield(s.PixelData, 'Format')
-    fmt = s.PixelData.Format;
-    if fmt(1) ~= '*', fmt = ['*' fmt]; end
-elseif isfield(s, 'BitsAllocated')
+if isfield(s, 'BitsAllocated') % some dicom have wrong VR for PixelData
     fmt = sprintf('*uint%g', s.BitsAllocated);
+else
+    fmt =  s.PixelData.Format; % error out if no 'BitsAllocated' or 'Format'
+    if fmt(1) ~= '*', fmt = ['*' fmt]; end
 end
 
 if nargin<2 || isempty(xpose), xpose = true; end % same as dicomread by default
