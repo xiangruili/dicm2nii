@@ -675,7 +675,11 @@ switch cmd
         if val == 11 && val~=p.lut
             hs.lut.UserData = p.lut; % remember old lut
         end
-        if strcmp(cmd, 'lut')
+        if strcmp(cmd, 'smooth')
+            if val==1 && numel(p.nii.img(:,:,:,1))<2
+                set(h, 'Value', 0); return;
+            end
+        elseif strcmp(cmd, 'lut')
             err = false;
             if val == 11 % error check for vector lines
                 err = true;
@@ -1082,7 +1086,7 @@ switch cmd
     case 'maximum' % crosshair to img max
         p = get_para(hs);
         img = p.nii.img(:,:,:,hs.volume.getValue);
-        if numel(unique(img(:)))==1
+        if sum(img(:)~=0) < 1
             errordlg('All value are the same. No maximum!');
             return;
         end
@@ -2179,6 +2183,7 @@ if isempty(v)
 end
 if v > 2011
     d = size(V); d(numel(d)+1:3) = 1;
+    if any(d<2), a = d<2; V = repmat(V, a+1); d(a) = 2; end
     if  v > 2013
         F = griddedInterpolant({1:d(1), 1:d(2), 1:d(3)}, V, method, 'none');
     else
