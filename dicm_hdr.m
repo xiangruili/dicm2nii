@@ -533,6 +533,7 @@ function fmt = vr2fmt(vr)
         case 'AT', fmt = 'uint16';
         case 'OW', fmt = 'uint16';
         case 'OF', fmt = 'single';
+        case 'OD', fmt = 'double';
         case 'UN', fmt = 'uint8';
         otherwise, fmt = '';
     end
