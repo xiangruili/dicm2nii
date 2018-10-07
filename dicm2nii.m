@@ -847,11 +847,11 @@ for i = 1:nRun
     if strcmpi(tryGetField(s, 'DataRepresentation', ''), 'COMPLEX')
         img = complex(img(:,:,:,1:2:end,:), img(:,:,:,2:2:end,:));
     end
-    sz = size(img); sz(numel(sz)+1:4) = 1;
+    [~, ~, d3, d4, ~] = size(img);
     if strcmpi(tryGetField(s, 'SignalDomainColumns', ''), 'TIME') % no permute
-    elseif all(sz(3:4)<2), img = permute(img, [1 2 5 3 4]); % remove dim3,4
-    elseif sz(4)<2,        img = permute(img, [1:3 5 4]); % remove dim4: Frames
-    elseif sz(3)<2,        img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
+    elseif d3<2 && d4<2, img = permute(img, [1 2 5 3 4]); % remove dim3,4
+    elseif d4<2,         img = permute(img, [1:3 5 4]);   % remove dim4: Frames
+    elseif d3<2,         img = permute(img, [1 2 4 5 3]); % remove dim3: RGB
     end
 
     nSL = double(tryGetField(s, 'LocationsInAcquisition'));
