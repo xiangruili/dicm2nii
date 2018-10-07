@@ -344,6 +344,7 @@ C = {
     '0020' '9153' 'FD' 'CardiacTriggerDelayTime'
     '0020' '9156' 'US' 'FrameAcquisitionNumber'
     '0020' '9157' 'UL' 'DimensionIndexValues'
+    '0020' '9158' 'LT' 'FrameComments'
     '0020' '9164' 'UI' 'DimensionOrganizationUID'
     '0020' '9165' 'AT' 'DimensionIndexPointer'
     '0020' '9167' 'AT' 'FunctionalGroupPointer'
