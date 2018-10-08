@@ -980,11 +980,11 @@ foo = afni_key('BRICK_TYPES');
 if any(diff(foo)~=0), err = 'Inconsistent DataType'; s = []; return; end
 foo = foo(1);
 if foo == 0
-    s.BitsAllocated =  8; s.PixelData.Format = '*uint8';
+    bpp =  8; s.PixelData.Format = '*uint8';
 elseif foo == 1
-    s.BitsAllocated = 16; s.PixelData.Format = '*int16';
+    bpp = 16; s.PixelData.Format = '*int16';
 elseif foo == 3
-    s.BitsAllocated = 32; s.PixelData.Format = '*single';
+    bpp = 32; s.PixelData.Format = '*single';
 else
     error('Unsupported BRICK_TYPES: %g', foo);
 end
@@ -1060,7 +1060,7 @@ s.NumberOfTemporalPositions = dim(4);
 s.Manufacturer = '';
 s.Filename = strrep(fname, '.HEAD', '.BRIK');
 s.PixelData.Start = 0; % make it work for dicm_img.m
-s.PixelData.Bytes = prod(dim(1:4)) * s.BitsAllocated / 8;
+s.PixelData.Bytes = prod(dim(1:4)) * bpp / 8;
 
     % subfunction: return value specified by key in afni header str
     function val = afni_key(key)
@@ -1251,14 +1251,6 @@ s.LastFile.ImagePositionPatient = pos(:,2);
 
 % Following make dicm2nii happy
 s.SeriesInstanceUID = sprintf('%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999));
-c = class(s.PixelData);
-if strcmp(c, 'double') %#ok
-    s.BitsAllocated = 64;
-elseif strcmp(c, 'single') %#ok
-    s.BitsAllocated = 32;
-else
-    s.BitsAllocated = str2double(c(isstrprop(c, 'digit')));
-end
 end
 
 %% subfunction: read Freesurfer mgh or mgz file, return dicm info dicm_hdr.
@@ -1305,13 +1297,13 @@ else
 end
 
 switch typ
-    case 0, bpp = 1; fmt = 'uint8';     % MRI_UCHAR
-    case 1, bpp = 4; fmt = 'int32';     % MRI_INT
-    case 2, bpp = 4; fmt = 'int32';     % MRI_LONG
-    case 3, bpp = 4; fmt = 'single';    % MRI_FLOAT
-    case 4, bpp = 2; fmt = 'int16';     % MRI_SHORT
-%     case 5, bpp = 1; fmt = 'uint8';     % MRI_BITMAP *3?
-%     case 6, bpp = 1; fmt = 'uint8';     % MRI_TENSOR *5?
+    case 0, fmt = 'uint8';     % MRI_UCHAR
+    case 1, fmt = 'int32';     % MRI_INT
+    case 2, fmt = 'int32';     % MRI_LONG
+    case 3, fmt = 'single';    % MRI_FLOAT
+    case 4, fmt = 'int16';     % MRI_SHORT
+%     case 5, fmt = 'uint8';     % MRI_BITMAP *3?
+%     case 6, fmt = 'uint8';     % MRI_TENSOR *5?
     otherwise 
         err = sprintf('Unknown datatype: %s', fname); 
         s = []; return;
@@ -1323,7 +1315,6 @@ if numel(img) ~= nv
     err = ['Not enough data in file: ' fname];
     s = []; return;
 end
-s.BitsAllocated = bpp * 8; % for dicm_img
 
 flds = {'RepetitionTime' 'FlipAngle' 'EchoTime' 'InversionTime'};
 parms4 = fread(fid, 4, 'single');
