@@ -883,7 +883,10 @@ if isempty(cmd)
         if isempty(pth), pth = pwd; end
     else
         pth = getenv('TMP');
-        if isempty(pth), pth = '/tmp'; end
+        if isempty(pth)
+            pth = getenv('TMPDIR');
+        end
+        if isempty(pth), pth = '/tmp'; end % last resort
     end
     uid = @()sprintf('_%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999));
 end
