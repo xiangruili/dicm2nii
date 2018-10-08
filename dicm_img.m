@@ -56,11 +56,21 @@ if isnumeric(s.PixelData) % data already in hdr
     return;
 end
 
-if isfield(s, 'BitsAllocated') % some dicom have wrong VR for PixelData
-    fmt = sprintf('*uint%g', s.BitsAllocated);
-else
-    fmt =  s.PixelData.Format; % error out if no 'BitsAllocated' or 'Format'
+if isfield(s.PixelData, 'Format') % all expl dicm
+    fmt = s.PixelData.Format;
+    if isfield(s, 'BitsAllocated')
+        bpp = double(s.BitsAllocated);
+        if bpp==8 && strcmp(fmt, 'uint16'), fmt = 'uint8'; end % ugly fix
+    elseif regexp(fmt, 'single$'), bpp = 32;
+    elseif regexp(fmt, 'double$'), bpp = 64;
+    else, bpp = str2double(regexp(fmt, '(?<=int)\d+', 'match', 'once'));
+    end
     if fmt(1) ~= '*', fmt = ['*' fmt]; end
+elseif isfield(s, 'BitsAllocated')
+    bpp = double(s.BitsAllocated);
+    fmt = sprintf('*uint%g', bpp);
+else
+    error('Unknown data type for %s', s.Filename);
 end
 
 if nargin<2 || isempty(xpose), xpose = true; end % same as dicomread by default
@@ -81,12 +91,7 @@ else, tsUID = '1.2.840.10008.1.2.1'; % files other than dicom
 end
 
 if any(strcmp(tsUID, {'1.2.840.10008.1.2.1' '1.2.840.10008.1.2.2' '1.2.840.10008.1.2'}))
-    if isfield(s, 'BitsAllocated'), bpp = double(s.BitsAllocated) / 8;
-    elseif regexp(fmt, 'single$'),  bpp = 4;
-    elseif regexp(fmt, 'double$'),  bpp = 8;
-    else, error('Unknown data type for %s', s.Filename);
-    end
-    n = double(s.PixelData.Bytes) / bpp;
+    n = double(s.PixelData.Bytes) / (bpp/8);
     img = fread(fid, n, fmt);
     
     if all(isfield(s, {'BitsStored' 'HighBit' 'BitsAllocated'})) && ...
