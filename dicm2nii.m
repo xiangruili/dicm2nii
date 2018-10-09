@@ -1592,7 +1592,7 @@ iSL = ixyz(3); % 1/2/3 for Sag/Cor/Tra slice
 signSL = sign(R(iSL, 3));
 
 try 
-    pixdim = s.PixelSpacing;
+    pixdim = s.PixelSpacing([2 1]);
     xyz_unit = 2; % mm
 catch
     pixdim = [1 1]'; % fake
@@ -2276,12 +2276,12 @@ if ~isfield(s, 'ImagePositionPatient')
     dim = double([s.Columns s.Rows]');
     if all(pos(:,2) == 0) % pos(:,1) for volume center
         if any(~isfield(s,{'PixelSpacing' 'SpacingBetweenSlices'})), return; end
-        R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices]);
+        R = R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices]);
         x = [-dim/2*[1 1]; (nSL-1)/2*[-1 1]];
         pos = R * x + pos(:,1) * [1 1]; % volume center to slice 1&nSL position
     else % this may be how Siemens sets unusual mosaic ImagePositionPatient 
         if ~isfield(s, 'PixelSpacing'), return; end
-        R = R(:,1:2) * diag(s.PixelSpacing);
+        R = R(:,1:2) * diag(s.PixelSpacing([2 1]));
         pos = pos - R * dim/2 * [1 1]; % slice centers to slice position
     end
     if revNum, pos = pos(:, [2 1]); end
