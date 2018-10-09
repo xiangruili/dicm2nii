@@ -2181,13 +2181,17 @@ if isempty(v)
         end
     end
 end
+
+[d1, d2, d3] = size(V);
+if d1<2, V(2,:,:) = nan; d1 = 2; end
+if d2<2, V(:,2,:) = nan; d2 = 2; end
+if d3<2, V(:,:,2) = nan; d3 = 2; end
+if strcmp(method, 'nearest'), I = round(I); end
 if v > 2011
-    d = size(V); d(numel(d)+1:3) = 1;
-    if any(d<2), a = d<2; V = repmat(V, a+1); d(a) = 2; end
     if  v > 2013
-        F = griddedInterpolant({1:d(1), 1:d(2), 1:d(3)}, V, method, 'none');
+        F = griddedInterpolant({1:d1, 1:d2, 1:d3}, V, method, 'none');
     else
-        F = griddedInterpolant({1:d(1), 1:d(2), 1:d(3)}, V, method);
+        F = griddedInterpolant({1:d1, 1:d2, 1:d3}, V, method);
     end
     V = F(I(1,:), I(2,:), I(3,:)); % interpolate
 else % earlier matlab
