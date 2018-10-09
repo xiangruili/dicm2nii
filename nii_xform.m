@@ -180,6 +180,7 @@ else
     img = single(nii.img);
     nii.img = zeros([d d48], 'single');
 end
+if strcmpi(intrp, 'nearest'), I = round(I); end
 for i = 1:prod(d48)
     nii.img(:,:,:,i) = interp3(img(:,:,:,i), I(:,:,:,2), I(:,:,:,1), I(:,:,:,3), intrp, missVal);
 end
