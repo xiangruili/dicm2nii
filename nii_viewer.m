@@ -1900,7 +1900,7 @@ rg = mu + [-2 2]*sd;
 if rg(1)<=0 && mu-sd>0, rg(1) = sd/5; end
 if rg(1)<mi || isnan(rg(1)), rg(1) = mi; end
 if rg(2)>ma || isnan(rg(2)), rg(2) = ma; end
-if rg(1)==rg(2), rg(1) = mi; end
+if rg(1)==rg(2), rg(1) = mi; if rg(1)==rg(2), rg(1) = 0; end; end
 % rg = round(rg, 2, 'significant'); % since 2014b
 rg = str2num(sprintf('%.2g ', rg)); %#ok<*ST2NM>
 if rg(1)==rg(2), rg(1) = mi; end
@@ -2170,11 +2170,11 @@ function V = interp3a(V, I, method)
 persistent v;
 if isempty(v)
     try 
-        griddedInterpolant({1:3, 1:3, 1:3}, ones(3,3,3), 'nearest', 'none');
+        griddedInterpolant(ones(3,3,3), 'nearest', 'none');
         v = 2014;
     catch
         try
-            griddedInterpolant({1:3, 1:3, 1:3}, ones(3,3,3), 'nearest');
+            griddedInterpolant(ones(3,3,3), 'nearest');
             v = 2013;
         catch
             v = 2011;
@@ -2182,16 +2182,15 @@ if isempty(v)
     end
 end
 
-[d1, d2, d3] = size(V);
-if d1<2, V(2,:,:) = nan; d1 = 2; end
-if d2<2, V(:,2,:) = nan; d2 = 2; end
-if d3<2, V(:,:,2) = nan; d3 = 2; end
-if strcmp(method, 'nearest'), I = round(I); end
+if strcmp(method, 'nearest') || any(size(V)<2), I = round(I); end
+if size(V,1)<2, V(2,:,:) = nan; end
+if size(V,2)<2, V(:,2,:) = nan; end
+if size(V,3)<2, V(:,:,2) = nan; end
 if v > 2011
     if  v > 2013
-        F = griddedInterpolant({1:d1, 1:d2, 1:d3}, V, method, 'none');
+        F = griddedInterpolant(V, method, 'none');
     else
-        F = griddedInterpolant({1:d1, 1:d2, 1:d3}, V, method);
+        F = griddedInterpolant(V, method);
     end
     V = F(I(1,:), I(2,:), I(3,:)); % interpolate
 else % earlier matlab
