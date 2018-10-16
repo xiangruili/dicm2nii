@@ -1500,7 +1500,8 @@ h{1}.bvec_original = bvec; % original from dicom
 
 % http://wiki.na-mic.org/Wiki/index.php/NAMIC_Wiki:DTI:DICOM_for_DWI_and_DTI
 [ixyz, R] = xform_mat(s, nii.hdr.dim(2:4)); % R takes care of slice dir
-if strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
+if strncmpi(s.Manufacturer, 'UIH', 3) % UIH dicom in image reference
+elseif strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
     if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
         bvec = bvec(:, [2 1 3]); % dicom bvec in Freq/Phase/Slice order
         bvec(:, 2) = -bvec(:, 2); % because of transpose?
