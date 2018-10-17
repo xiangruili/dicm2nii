@@ -731,9 +731,6 @@ ch = regexp(str, '.*?(?=IMAGE INFORMATION DEFINITION)', 'match', 'once');
 V = regexpi(ch, 'image export tool\s*(V[\d\.]+)', 'tokens', 'once');
 if isempty(V), err = 'Not PAR file'; s = []; return; end
 V = V{1};
-% Fix V4 bug: based on Chris observation. Only those in table are 1:3
-% The ugly hard-coded order is the simple solution
-if strcmpi(V, 'V4'), ax_order = 1:3; else, ax_order = [3 1 2]; end
 s.SoftwareVersion = [V '\PAR'];
 s.PatientName = par_attr(ch, 'Patient name', 0);
 s.StudyDescription = par_attr(ch, 'Examination name', 0);
@@ -760,11 +757,6 @@ s.RepetitionTime = par_attr(ch, 'Repetition time');
 s.WaterFatShift = par_attr(ch, 'Water Fat shift');
 s.EPIFactor = par_attr(ch, 'EPI factor');
 % s.DynamicSeries = par_key(ch, 'Dynamic scan'); % 0 or 1
-isDTI = par_attr(ch, 'Diffusion')>0;
-if isDTI
-    s.ImageType = [s.ImageType '\DIFFUSION\'];
-    s.DiffusionEchoTime = par_attr(ch, 'Diffusion echo time'); % ms
-end
 
 % Get list of para meaning for the table, and col index of each para
 i1 = regexpi(str, 'IMAGE INFORMATION DEFINITION', 'once');
@@ -878,11 +870,6 @@ s.EchoTime = s.EchoTimes(1);
 s.FlipAngle = par_val('image_flip_angle');
 s.CardiacTriggerDelayTimes = par_val('trigger_time', iVol);
 % s.TimeOfAcquisition = par_val('dyn_scan_begin_time', 1:s.NumberOfFrames);
-if isDTI
-    s.B_value = par_val('diffusion_b_factor', iVol);
-    a = par_val('diffusion', iVol);
-    if ~isempty(a), s.bvec_original = a(:, ax_order); end
-end
 
 posMid = par_attr(ch, 'Off Centre midslice'); % (ap,fh,rl) [mm]
 posMid = posMid([3 1 2]); % better precision than those in the table
@@ -917,10 +904,22 @@ s.ImageOrientationPatient = R(1:6)';
 R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices; 1]);
 R(:,4) = posMid; % 4th col is mid slice center position
 
-a = par_val('image offcentre');
-s.SliceLocation = a(ax_order(iOri)); % center loc for 1st slice
+a = par_val('image offcentre', [1 nSL]);
+% Take axis with largest 'image offcentre' range as slice axis. This can be
+% wrong in theory, but the fix based on PAR version do not work
+[~, ind] = max(max(a)-min(a));
+if ind==iOri, ax_order = 1:3; else, ax_order = [3 1 2]; end
+s.SliceLocation = a(1, ax_order(iOri)); % center loc for 1st slice
 if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
     R(:,3) = -R(:,3);
+end
+
+if par_attr(ch, 'Diffusion')>0 % DTI
+    s.ImageType = [s.ImageType '\DIFFUSION\'];
+    s.DiffusionEchoTime = par_attr(ch, 'Diffusion echo time'); % ms
+    s.B_value = par_val('diffusion_b_factor', iVol);
+    a = par_val('diffusion', iVol);
+    if ~isempty(a), s.bvec_original = a(:, ax_order); end
 end
 
 R(:,4) = R * [-([s.Columns s.Rows nSL]-1)/2 1]'; % vol center to corner of 1st
