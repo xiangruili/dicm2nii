@@ -2577,22 +2577,31 @@ msg = ['Update to the newer version (' latestStr ')?'];
 answer = questdlg(msg, ['Update ' mfile], 'Yes', 'Later', 'Yes');
 if ~strcmp(answer, 'Yes'), return; end
 
+url = ['https://www.mathworks.com/matlabcentral/mlc-downloads/'...
+       'downloads/e5a13851-4a80-11e4-9553-005056977bd0/' ...
+       '80e748a3-0ae1-48a5-a2cb-b8380dac0232/packages/zip'];
+tmp = tempdir;
 try
-    tmp = [tempdir 'tmp/'];
-    if exist(tmp, 'dir'), rmdir(tmp, 's'); end
-    unzip(['https://www.mathworks.com/matlabcentral/mlc-downloads/'...
-        'downloads/e5a13851-4a80-11e4-9553-005056977bd0/' ...
-        '80e748a3-0ae1-48a5-a2cb-b8380dac0232/packages/zip'], tmp);
-%     unzip(['https://www.mathworks.com/matlabcentral/mlc-downloads/' ...
-%            'downloads/submissions/42997/versions/95/download/zip'], tmp);
+    fname = websave('dicm2nii_github.zip', url); % 2014a
+    unzip(fname, tmp); delete(fname);
     a = dir([tmp 'xiangruili*']);
     if isempty(a), tdir = tmp; else, tdir = [tmp a(1).name '/']; end
-    movefile([tdir '*.*'], [fileparts(which(mfile)) '/.'], 'f');
-    rmdir(tmp, 's');
-catch me
-    errordlg(['Error in updating: ' me.message], mfile);
-    return;
+catch 
+    % system('git clone https://github.com/xiangruili/dicm2nii.git')
+    url = 'https://github.com/xiangruili/dicm2nii/archive/master.zip';
+    try
+        fname = [tmp 'dicm2nii_github.zip'];
+        urlwrite(url, fname);
+        unzip(fname, tmp); delete(fname);
+        tdir = [tmp 'dicm2nii-master/'];
+    catch me
+        errordlg(['Error in updating: ' me.message], mfile);
+        web('https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii', '-browser');
+        return;
+    end
 end
+movefile([tdir '*.*'], [fileparts(which(mfile)) '/.'], 'f');
+rmdir(tdir, 's');
 rehash;
 warndlg(['Package updated successfully. Please restart ' mfile ...
          ', otherwise it may give error.'], 'Check update');
