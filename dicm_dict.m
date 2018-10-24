@@ -572,11 +572,11 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '1103' 'DS' 'SliceMeasurementDuration' % 90000 ? 
 	'0021' '1104' 'DS' 'TimeAfterStart'
 	'0021' '1106' 'LO' 'ICE_Dims'
-	'0021' '111A' 'SH' 'RFSWDDataType' % measured
+	'0021' '111A' 'SH' 'RFSWDDataType' % measured/predicted
 	'0021' '111C' 'IS' 'PhaseEncodingDirectionPositive' % 1 ?
 	'0021' '1124' 'IS' 'ProtocolSliceNumber' % 0 ?
 	'0021' '1133' 'IS' 'EchoLinePosition' % 96 ?
-	'0021' '1141' 'SH' 'GSWDDataType' % measured
+	'0021' '1141' 'SH' 'GSWDDataType' % measured/predicted
 	'0021' '1142' 'IS' 'RealDwellTime' % 2400 ?
 	'0021' '1145' 'SL' 'AbsTablePosition' % 0 0 -1129 
 	'0021' '1148' 'IS' 'EchoPartitionPosition' % 32?
@@ -584,7 +584,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '114E' 'IS' 'Actual3DImaPartNumber' % 0 ?
 	'0021' '114F' 'LO' 'CoilString' % HE1-4
 	'0021' '1151' 'UL' 'SequenceMask' % 134217734
-	'0021' '1153' 'FD' 'BandwidthPerPixelPhaseEncode' % 5.157 ?
+	'0021' '1153' 'FD' 'BandwidthPerPixelPhaseEncode'
 	'0021' '1156' 'LO' 'PATModeText' % p2
 	'0021' '1158' 'SH' 'AcquisitionMatrixText' % 384p*384 I
 	'0021' '1159' 'IS' 'RelTablePosition' % 0 0 0 ?
