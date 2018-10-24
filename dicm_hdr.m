@@ -388,9 +388,9 @@ else
 end
 % if group==33
 %     fprintf('\t''%04X'' ''%04X'' ''%s'' ''%s'' ', group, elmnt, vr, name);
-%     if numel(dat)>99, fprintf('''Long''');
+%     if numel(dat)>99, fprintf('''%s ...''', dat(1:9));
 %     elseif ischar(dat), fprintf('''%s''', dat);
-%     elseif isnumeric(dat), fprintf(''''); fprintf('%g ', dat); fprintf('''');
+%     elseif isnumeric(dat), fprintf('%g ', dat);
 %     else, fprintf('''SQ''');
 %     end
 %     fprintf('\n');
@@ -901,7 +901,7 @@ if ~isempty(a)
 end
 
 s.ImageOrientationPatient = R(1:6)';
-R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices; 1]);
+R = R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices; 1]);
 R(:,4) = posMid; % 4th col is mid slice center position
 
 a = par_val('image offcentre', [1 nSL]);
@@ -1032,7 +1032,7 @@ R = R(1:3, 1:3);
 R = R ./ (ones(3,1) * sqrt(sum(R.^2)));
 s.ImageOrientationPatient = R(1:6)';
 foo = afni_key('DELTA');
-s.PixelSpacing = abs(foo(1:2));
+s.PixelSpacing = abs(foo([2 1]));
 % s.SpacingBetweenSlices = foo(3);
 s.SliceThickness = abs(foo(3));
 foo = afni_key('BRICK_STATS');
@@ -1151,7 +1151,7 @@ pos = [bv.Slice1CenterX bv.Slice1CenterY bv.Slice1CenterZ
 
 if strcmpi(fType, 'vmr')
     s.SpacingBetweenSlices = s.SliceThickness + bv.GapThickness;
-    s.PixelSpacing = [bv.VoxResX bv.VoxResY]';
+    s.PixelSpacing = [bv.VoxResX bv.VoxResY]'; % order correct?
     if ~isempty(bv.VMRData16)
         nSL = bv.DimZ;
         s.PixelData = bv.VMRData16; % no padded zeros
@@ -1175,7 +1175,7 @@ if strcmpi(fType, 'vmr')
     s.MRAcquisitionType = '3D'; % for dicm2nii to re-orient
 elseif strcmpi(fType, 'fmr') || strcmpi(fType, 'dmr')
     s.SpacingBetweenSlices = s.SliceThickness + bv.SliceGap;
-    s.PixelSpacing = [bv.InplaneResolutionX bv.InplaneResolutionY]';
+    s.PixelSpacing = [bv.InplaneResolutionX bv.InplaneResolutionY]'; % order?
     nSL = bv.NrOfSlices;
     s.LocationsInAcquisition = nSL;
     s.NumberOfTemporalPositions = bv.NrOfVolumes;
@@ -1244,7 +1244,7 @@ else
     return;
 end
 
-pos = pos - R(:,1:2) * diag(s.PixelSpacing) * [s.Columns s.Rows]'/2 * [1 1];
+pos = pos - R(:,1:2) * diag(s.PixelSpacing([2 1])) * [s.Columns s.Rows]'/2 * [1 1];
 s.ImagePositionPatient = pos(:,1);
 s.LastFile.ImagePositionPatient = pos(:,2);
 
@@ -1285,7 +1285,7 @@ if have_ras % 3+9+3=15 single
     c = fread(fid, 3, 'single'); % center xyz
     
     R(1:2,:) = -R(1:2,:); c(1:2) = -c(1:2); % RAS to dicom LPS
-    s.PixelSpacing = pixdim(1:2);
+    s.PixelSpacing = pixdim([2 1]);
     s.SliceThickness = pixdim(3);
     s.ImageOrientationPatient = R(1:6)';
     R = R * diag(pixdim);
@@ -1474,7 +1474,7 @@ if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
 s.InPlanePhaseEncodingDirection = a;
 
 s.ImageOrientationPatient = R(1:6)';
-R = R * diag([s.PixelSpacing; s.SpacingBetweenSlices; 1]);
+R = R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices; 1]);
 R(:,4) = [xml_attr(ch1, 'Off Center RL', 1)
           xml_attr(ch1, 'Off Center AP', 1)
           xml_attr(ch1, 'Off Center FH', 1)]; % vol center for now  
