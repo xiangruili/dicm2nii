@@ -1340,28 +1340,28 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
     end
 end
 
-% Siemens multiframe: read FrameAcquisitionDatetime 1st file
-% if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
-%     s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-%     s2 = dicm_hdr(s, s2, 1:nSL);
-%     try
-%         t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
-%         t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
-%     end
-% end
+% Siemens multiframe: read FrameAcquisitionDatetime from 1st file
+if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+    s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
+    s2 = dicm_hdr(s, s2, 1:nSL);
+    try
+        t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
+        t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+    end
+end
 
 % Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
 % check, but GE/Philips AcquisitionTime seems useless
-% if isempty(t) && ~tryGetField(s, 'isMos', 0) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
-%     dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
-%     t = zeros(nSL, 1);
-%     for j = 1:nSL
-%         s1 = dicm_hdr(h{j}.Filename, dict);
-%         str = [s1.AcquisitionDate s1.AcquisitionTime];
-%         t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
-%     end
-%     t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
-% end
+if isempty(t) && ~tryGetField(s, 'isMos', 0) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+    dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
+    t = zeros(nSL, 1);
+    for j = 1:nSL
+        s1 = dicm_hdr(h{j}.Filename, dict);
+        str = [s1.AcquisitionDate s1.AcquisitionTime];
+        t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
+    end
+    t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+end
 
 if isempty(t) && strncmpi(s.Manufacturer, 'UIH', 3)
     t = zeros(nSL, 1);
@@ -1676,7 +1676,7 @@ end
 expr = ['\n' regexptranslate('escape', key) '.*?=\s*(.*?)\n'];
 str = regexp(str, expr, 'tokens', 'once');
 if isempty(str), return; end
-str = str{1};
+str = strtrim(str{1});
 
 if strncmp(str, '""', 2) % str parameter
     val = str(3:end-2);
@@ -1846,7 +1846,7 @@ fh = figure('dicm' * 256.^(0:3)'); % arbitury integer
 if strcmp('dicm2nii_fig', get(fh, 'Tag')), return; end
 
 scrSz = get(0, 'ScreenSize');
-fSz = 9 + ~(ispc || ismac) * 2;
+fSz = 9; % + ~(ispc || ismac);
 clr = [1 1 1]*206/256;
 clrButton = [1 1 1]*216/256;
 cb = @(cmd) {@gui_callback cmd fh}; % callback shortcut
@@ -1865,12 +1865,12 @@ uitxt('Move mouse onto button, text box or check box for help', [8 274 400 16]);
 str = sprintf(['Browse convertible files or folders (can have subfolders) ' ...
     'containing files.\nConvertible files can be dicom, Philips PAR,' ...
     ' AFNI HEAD, BrainVoyager files, or a zip file containing those files']);
-uicontrol('Style', 'Pushbutton', 'Position', [6 235 108 24], ...
+uicontrol('Style', 'Pushbutton', 'Position', [6 235 112 24], ...
     'FontSize', fSz, 'String', 'DICOM folder/files', 'Background', clrButton, ...
     'TooltipString', str, 'Callback', cb('srcDir'));
 
 jSrc = javaObjectEDT('javax.swing.JTextField');
-hs.src = javacomponent(jSrc, [114 234 294 24], fh);
+hs.src = javacomponent(jSrc, [118 234 294 24], fh);
 hs.src.FocusLostCallback = cb('set_src');
 hs.src.Text = getpf('src', pwd);
 % hs.src.ActionPerformedCallback = cb('set_src'); % fire when pressing ENTER
@@ -1879,11 +1879,11 @@ hs.src.ToolTipText = ['<html>This is the source folder or file(s). You can<br>' 
     'Click DICOM folder/files button to browse, or<br>' ...
     'Drag and drop a folder or file(s) into the box'];
 
-uicontrol('Style', 'Pushbutton', 'Position', [6 199 108 24], ...
+uicontrol('Style', 'Pushbutton', 'Position', [6 199 112 24], ...
     'FontSize', fSz, 'String', 'Result folder', 'Background', clrButton, ...
     'TooltipString', 'Browse result folder', 'Callback', cb('dstDialog'));
 jDst = javaObjectEDT('javax.swing.JTextField');
-hs.dst = javacomponent(jDst, [114 198 294 24], fh);
+hs.dst = javacomponent(jDst, [118 198 294 24], fh);
 hs.dst.FocusLostCallback = cb('set_dst');
 hs.dst.Text = getpf('dst', pwd);
 hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
@@ -2553,6 +2553,7 @@ fclose(fid);
 % Simplified from checkVersion in findjobj.m by Yair Altman
 function checkUpdate(mfile)
 verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
+webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997';
 try
     str = webread(verLink);
 catch me
@@ -2561,7 +2562,6 @@ catch me
     catch
         str = sprintf('%s.\n\nPlease download manually.', me.message);
         errordlg(str, 'Web access error');
-        webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997';
         web(webUrl, '-browser');
         return;
     end
@@ -2596,7 +2596,7 @@ catch
         tdir = [tmp 'dicm2nii-master/'];
     catch me
         errordlg(['Error in updating: ' me.message], mfile);
-        web('https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii', '-browser');
+        web(webUrl, '-browser');
         return;
     end
 end
