@@ -113,6 +113,9 @@ C = {
     '0010' '2110' 'LO' 'ContrastAllergies'
     '0010' '21B0' 'LT' 'AdditionalPatientHistory'
     '0010' '21C0' 'US' 'PregnancyStatus'
+	'0010' '2201' 'LO' 'PatientSpeciesDescription'
+	'0010' '2210' 'CS' 'AnatomicalOrientationType'
+    '0010' '2299' 'LO' 'ResponsibleOrganization'
     '0010' '4000' 'LT' 'PatientComments'
     '0012' '0062' 'CS' 'PatientIdentityRemoved'
     '0012' '0063' 'LO' 'DeidentificationMethod'
@@ -573,7 +576,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '1104' 'DS' 'TimeAfterStart'
 	'0021' '1106' 'LO' 'ICE_Dims'
 	'0021' '111A' 'SH' 'RFSWDDataType' % measured/predicted
-	'0021' '111C' 'IS' 'PhaseEncodingDirectionPositive' % 1 ?
+	'0021' '111C' 'IS' 'PhaseEncodingDirectionPositive' % 1/0
 	'0021' '1124' 'IS' 'ProtocolSliceNumber' % 0 ?
 	'0021' '1133' 'IS' 'EchoLinePosition' % 96 ?
 	'0021' '1141' 'SH' 'GSWDDataType' % measured/predicted
@@ -598,7 +601,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 % 	'0021' '1179' 'CS' 'Private_0021_1179' % ND / DIS2D
 	'0021' '1188' 'DS' 'SliceLocation'
 	'0021' '1189' 'FD' 'InversionTimes' % 900 ?
-	'0021' '118A' 'IS' 'InStackPositionNumber'
+	'0021' '118A' 'IS' 'FrameNumberInSeries' % ? xiangrui names it
 	'0021' '11FE' 'SQ' 'CSAImageHeaderInfo'
 % 	'0021' '1201' 'LO' 'Private_0021_1201' % ACQUISITION
 % 	'0021' '1202' 'LO' 'Private_0021_1202' % ACQUISITION
