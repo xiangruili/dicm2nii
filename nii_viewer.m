@@ -269,6 +269,7 @@ function varargout = nii_viewer(fname, varargin)
 % 180228 'Add overlay' check nii struct in base workspace first.
 % 180309 Implement 'Standard deviation' like for 'time course'.
 % 180522 set_xyz: bug fix for display val >2^15.
+% Later update history can be found at github.
 %%
 
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
@@ -3011,7 +3012,10 @@ if layout==1 % 1x3
     x0 = mm(1) / siz(1); % normalized width of cor/tra image
     z0 = mm(3) / siz(2); % normalized height of sag/cor images
     y1 = mm(2) / siz(2); % normalized height of tra image
-    axPos = [0 0 y0 z0;  y0 0 x0 z0;  y0+x0 0 x0 y1;  y0+x0*2 0 mm(1)/4/siz(1) min(z0,y1)];
+    if y1>z0, y3 = 0; y12 = (y1-z0)/2;
+    else, y3 = (z0-y1)/2; y12 = 0;
+    end
+    axPos = [0 y12 y0 z0;  y0 y12 x0 z0;  y0+x0 y3 x0 y1;  y0+x0*2 0 mm(1)/4/siz(1) min(z0,y1)];
 elseif layout==2 || layout==3 % 2x2
     siz = [sum(mm(1:2)) sum(mm(2:3))]; % image area width/height
     x0 = mm(1) / siz(1); % normalized width of cor/tra images
