@@ -1301,19 +1301,38 @@ if tryGetField(s, 'isDTI', 0), return; end
 hdr.xyzt_units = 8; % seconds
 if hdr.dim(5)<3, return; end % skip structual, fieldmap etc
 
+nSL = hdr.dim(4);
 delay = asc_header(s, 'lDelayTimeInTR')/1000; % in ms now
 if isempty(delay), delay = 0;
 else, h{1}.DelayTimeInTR = delay;
 end
-
 TA = TR - delay;
+
+% Siemens mosaic
 t = csa_header(s, 'MosaicRefAcqTimes'); % in ms
 if ~isempty(t) && isfield(s, 'LastFile') && max(t)-min(t)>TA % MB wrong vol 1
     try t = mb_slicetiming(s, TA); end %#ok<*TRYNC>
 end
 
-nSL = hdr.dim(4);
-if isempty(t) && isfield(s, 'RTIA_timer') % GE slice timing
+if isempty(t) && strncmpi(s.Manufacturer, 'UIH', 3)
+    t = zeros(nSL, 1);
+    if isfield(s, 'MRVFrameSequence') % mosaic
+        for j = 1:nSL
+            item = sprintf('Item_%g', j);
+            str = s.MRVFrameSequence.(item).AcquisitionDateTime;
+            t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
+        end
+    else
+        dict = dicm_dict('', 'AcquisitionDateTime');
+        for j = 1:nSL
+            s1 = dicm_hdr(h{j}.Filename, dict);
+            t(j) = datenum(s1.AcquisitionDateTime, 'yyyymmddHHMMSS.fff');
+        end
+    end
+    t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+end
+
+if isempty(t) && isfield(s, 'RTIA_timer') % GE
     t = zeros(nSL, 1);
     nFile = numel(h);
     % seen problem for 1st vol, so use last vol
@@ -1340,13 +1359,20 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
     end
 end
 
-% Siemens multiframe: read FrameAcquisitionDatetime from 1st file
-if isempty(t) && tryGetField(s,'NumberOfFrames',1)>1 && strncmpi(s.Manufacturer, 'SIEMENS', 7)
-    s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-    s2 = dicm_hdr(s, s2, 1:nSL);
-    try
-        t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
-        t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+% Siemens multiframe: read TimeAfterStart from last file
+if isempty(t) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+    % Use TimeAfterStart, not FrameAcquisitionDatetime. See
+    % https://github.com/rordenlab/dcm2niix/issues/240#issuecomment-433036901
+    try 
+        s.PerFrameFunctionalGroupsSequence.Item_1.CSAImageHeaderInfo.Item_1.TimeAfterStart;
+        % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
+        % s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+        % t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
+        % t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+        s2 = struct('TimeAfterStart', nan(1, nSL));
+        s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+        t = s2.TimeAfterStart; % in secs
+        t = (t - min(t)) * 1000;
     end
 end
 
@@ -1359,24 +1385,6 @@ if isempty(t) && ~tryGetField(s, 'isMos', 0) && strncmpi(s.Manufacturer, 'SIEMEN
         s1 = dicm_hdr(h{j}.Filename, dict);
         str = [s1.AcquisitionDate s1.AcquisitionTime];
         t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
-    end
-    t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
-end
-
-if isempty(t) && strncmpi(s.Manufacturer, 'UIH', 3)
-    t = zeros(nSL, 1);
-    if isfield(s, 'MRVFrameSequence') % mosaic
-        for j = 1:nSL
-            item = sprintf('Item_%g', j);
-            str = s.MRVFrameSequence.(item).AcquisitionDateTime;
-            t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
-        end
-    else
-        dict = dicm_dict('', 'AcquisitionDateTime');
-        for j = 1:nSL
-            s1 = dicm_hdr(h{j}.Filename, dict);
-            t(j) = datenum(s1.AcquisitionDateTime, 'yyyymmddHHMMSS.fff');
-        end
     end
     t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
 end
@@ -2027,9 +2035,19 @@ try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 % check slice ordering (Philips often needs SortFrames)
 n = numel(MF_val('DimensionIndexValues', s, 1));
 if n>0 && nFrame>1
-    s2 = struct('DimensionIndexValues', nan(n, nFrame), 'B_value', zeros(1, nFrame));
-    s2 = dicm_hdr(s, s2, 1:nFrame); a = s2.DimensionIndexValues';
-    [ind, nSL] = sort_frames([a(:,2) s2.B_value'], a(:, [3:end 1]));
+    s2 = struct('InStackPositionNumber', nan(1, nFrame), ...
+                'TemporalPositionIndex', nan(1, nFrame), ...
+                'DimensionIndexValues',  nan(n, nFrame), ...
+                'B_value', zeros(1, nFrame));
+    s2 = dicm_hdr(s, s2, 1:nFrame);
+    if ~isnan(s2.InStackPositionNumber(1))
+        SL = s2.InStackPositionNumber';
+        VL = [s2.TemporalPositionIndex' s2.DimensionIndexValues([3:end 1],:)'];
+    else % use DimensionIndexValues as backup (seen in GE)
+        SL = s2.DimensionIndexValues(2,:)'; % Bruker slice dim in (3,:)?
+        VL = s2.DimensionIndexValues([3:end 1],:)';
+    end
+    [ind, nSL] = sort_frames([SL s2.B_value'], VL);
     if ~isequal(ind, 1:nFrame)
         if ind(1) ~= 1 || ind(end) ~= nFrame 
             s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
