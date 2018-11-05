@@ -1227,8 +1227,8 @@ if any(isfield(s, {'RescaleSlope' 'RescaleIntercept'})) && ~sclApplied
     slope = tryGetField(s, 'RescaleSlope', 1); 
     inter = tryGetField(s, 'RescaleIntercept', 0);
     if isfield(s, 'MRScaleSlope') % Philips: see PAR file for detail
-        inter = inter / (slope * s.MRScaleSlope);
-        slope = 1 / s.MRScaleSlope;
+        inter = inter / (slope * double(s.MRScaleSlope));
+        slope = 1 / double(s.MRScaleSlope);
     end
     val = sort(double([max(nii.img(:)) min(nii.img(:))]) * slope + inter);
     dClass = class(nii.img);
