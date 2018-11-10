@@ -1104,11 +1104,10 @@ nii.hdr.srow_x = R(1,:);
 nii.hdr.srow_y = R(2,:);
 nii.hdr.srow_z = R(3,:);
 
-R0 = R(:, 1:3);
-R0 = bsxfun(@rdivide, R0, sqrt(sum(R0 .* R0))); % normalize
+R0 = normc(R(:, 1:3));
 sNorm = null(R0(:, setdiff(1:3, iSL))');
 if sign(sNorm(ixyz(iSL))) ~= sign(R(ixyz(iSL),iSL)), sNorm = -sNorm; end
-shear = sum((R0(:,iSL)-sNorm).^2) > 0.01;
+shear = norm(R0(:,iSL)-sNorm) > 0.01;
 R0(:,iSL) = sNorm;
 
 % qform
@@ -1125,7 +1124,7 @@ if shear
     nii.hdr.hdrTilt = nii.hdr; % copy all hdr for tilt version
     nii.hdr.qform_code = 0; % disable qform
     gantry = tryGetField(s, 'GantryDetectorTilt', 0);
-    nii.hdr.hdrTilt.pixdim(iSL+1) = sqrt(sum(R(1:3, iSL) .^ 2)) * cosd(gantry);
+    nii.hdr.hdrTilt.pixdim(iSL+1) = norm(R(1:3, iSL)) * cosd(gantry);
     R(1:3, iSL) = sNorm * nii.hdr.hdrTilt.pixdim(iSL+1);
     nii.hdr.hdrTilt.srow_x = R(1,:);
     nii.hdr.hdrTilt.srow_y = R(2,:);
@@ -1503,12 +1502,12 @@ if strncmpi(s.Manufacturer, 'Philips', 7)
     end
 end
 
-h{1}.bval = bval; % store all into header of 1st file
 h{1}.bvec_original = bvec; % original from dicom
 
 % http://wiki.na-mic.org/Wiki/index.php/NAMIC_Wiki:DTI:DICOM_for_DWI_and_DTI
 [ixyz, R] = xform_mat(s, nii.hdr.dim(2:4)); % R takes care of slice dir
 if strncmpi(s.Manufacturer, 'UIH', 3) % UIH dicom in image reference
+    % assume real image reference: unlike confusing GE scheme
 elseif strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
     if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
         bvec = bvec(:, [2 1 3]); % dicom bvec in Freq/Phase/Slice order
@@ -1522,13 +1521,23 @@ elseif strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
     flp = R(ixyz+[0 3 6]) < 0; % negative sign
     flp(3) = ~flp(3); % GE slice dir opposite to LPS for all sag/cor/tra
     if ixyz(3)==1, flp(1) = ~flp(1); end % Sag slice: don't know why
-    for i = 1:3, if flp(i), bvec(:,i) = -bvec(:,i); end; end
+    bvec(:, flp) = -bvec(:, flp);
 else % Siemens/Philips
-    R = R(:, 1:3);
-    R = bsxfun(@rdivide, R, sqrt(sum(R.*R))); % normalize
+    R = normc(R(:, 1:3));
     bvec = bvec * R; % dicom plane to image plane
 end
 
+% bval may need to be scaled by norm(bvec)
+% https://mrtrix.readthedocs.io/en/latest/concepts/dw_scheme.html
+nm = sum(bvec .^ 2, 2);
+if any(nm>1e-4 & nm<0.999) % this check may not be necessary
+    h{1}.bval_original = bval;
+    bval = bval .* nm;
+    nm(nm<1e-4) = 1; % remove zeros after correcting bval
+    bvec = bsxfun(@rdivide, bvec, sqrt(nm));
+end
+
+h{1}.bval = bval; % store all into header of 1st file
 h{1}.bvec = bvec; % computed bvec in image ref
 
 %% subfunction: save bval & bvec files
@@ -1536,7 +1545,7 @@ function save_dti_para(s, fname)
 if ~isfield(s, 'bvec') || all(s.bvec(:)==0), return; end
 if isfield(s, 'bval')
     fid = fopen([fname '.bval'], 'w');
-    fprintf(fid, '%g\t', s.bval); % one row
+    fprintf(fid, '%.5g\t', s.bval); % one row
     fclose(fid);
 end
 
@@ -1627,7 +1636,7 @@ if s.Columns>dim(1) && ~strncmpi(s.Manufacturer, 'UIH', 3) % Siemens mosaic
     end
 elseif isfield(s, 'LastFile') && isfield(s.LastFile, 'ImagePositionPatient')
     R(:, 3) = (s.LastFile.ImagePositionPatient - R(:,4)) / (dim(3)-1);
-    thk = sqrt(sum(R(:,3).^2)); % override slice thickness if it is off
+    thk = norm(R(:,3)); % override slice thickness if it is off
     if abs(pixdim(3)-thk)/thk > 0.01, pixdim(3) = thk; end
     return; % almost all non-mosaic images return from here
 end
@@ -2273,13 +2282,13 @@ if isfield(s, 'ImageOrientationPatient')
     R(:, 1:2) = reshape(s.ImageOrientationPatient, 3, 2);
 else
     if iSL==3
-        R(:,2) = [0 R(3,3) -R(2,3)] / sqrt(sum(R(2:3,3).^2));
+        R(:,2) = [0 R(3,3) -R(2,3)] / norm(R(2:3,3));
         R(:,1) = cross(R(:,2), R(:,3));
     elseif iSL==2
-        R(:,1) = [R(2,3) -R(1,3) 0] / sqrt(sum(R(1:2,3).^2));
+        R(:,1) = [R(2,3) -R(1,3) 0] / norm(R(1:2,3));
         R(:,2) = cross(R(:,3), R(:,1));
     elseif iSL==1
-        R(:,1) = [-R(2,3) R(1,3) 0] / sqrt(sum(R(1:2,3).^2));
+        R(:,1) = [-R(2,3) R(1,3) 0] / norm(R(1:2,3));
         R(:,2) = cross(R(:,1), R(:,3));
     end
 
@@ -2799,4 +2808,8 @@ if multi
 else
     out = char(jFC.getSelectedFile());
 end
+
+%% 
+function v = normc(M)
+v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
 %%
