@@ -1933,10 +1933,8 @@ if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
         I = p.R0 \ (p.R * I) + 1;
         p.ivec = reshape(I(1:3,:)', d);
 
-        R0 = p.R0(1:3, 1:3);
-        R0 = bsxfun(@rdivide, R0, sqrt(sum(R0.^2)));
-        R = p.R(1:3, 1:3);
-        R = bsxfun(@rdivide, R, sqrt(sum(R.^2)));
+        R0 = normc(p.R0(1:3, 1:3));
+        R  = normc(p.R(1:3, 1:3));
         [pd, j] = min(p.pixdim);
         p.Rvec = R0 / R * pd / hs.bg.pixdim(j);
     end
@@ -3506,6 +3504,11 @@ else
     y = flipdim(varargin{:}); %#ok
 end
 
+%% normalize columns
+function v = normc(M)
+v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
+% v = M ./ sqrt(sum(M .* M)); % since 2016a
+
 %% flip slice dir for nii hdr
 % function hdr = flip_slices(hdr)
 % if hdr.sform_code<1 && hdr.sform_code<1, error('No valid form_code'); end
@@ -3519,8 +3522,7 @@ end
 % if hdr.qform_code<1, return; end
 % R = quat2R(hdr);
 % R(:, iSL) = -R(:,iSL);
-% R = R(1:3, 1:3);
-% R = bsxfun(@rdivide, R, sqrt(sum(R .* R))); % normalize
+% R = normc(R(1:3, 1:3));
 % dcm2quat = dicm2nii('', 'dcm2quat', 'func_handle');
 % [q, hdr.pixdim(1)] = dcm2quat(R);
 % hdr.quatern_b = q(2);
