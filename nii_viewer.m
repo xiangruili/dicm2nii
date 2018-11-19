@@ -1253,7 +1253,7 @@ switch cmd
         nii = nii_tool('load', nam);
         d = size(nii.img);
         nii.img = reshape(nii.img, prod(d(1:3)), []);
-        nii.img(k(3,:)<k0, :) = 0;
+        nii.img(k(3,:)<k0, :) = -nii.hdr.scl_inter / nii.hdr.scl_slope;
         nii.img = reshape(nii.img, d);
         nii_tool('save', nii, fname);
     case 'closeFig'
