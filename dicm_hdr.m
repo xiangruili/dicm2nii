@@ -271,7 +271,7 @@ if toSearch % search each tag if header is short and not many tags asked
         [n, nvr] = val_len(vr, b8(i+(0:5)), hasVR, swap); i = i+nvr;
         if n==0, continue; end % dont assign empty tag
 
-        if i+n-1>p.iPixelData, break; end
+        if i+n-1>p.iPixelData, continue; end % give up this tag
         [dat, info] = read_val(b8(i+(0:n-1)), vr, swap);
         if ~isempty(info), toSearch = false; break; end % re-do in regular way
         if ~isempty(dat), s.(p.dict.name{k}) = dat; end
