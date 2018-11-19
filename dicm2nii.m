@@ -1430,13 +1430,13 @@ hdr.slice_duration = min(diff(t1))/1000;
 
 %% subfunction: extract bval & bvec, store in 1st header
 function [h, nii] = get_dti_para(h, nii)
-nSL = nii.hdr.dim(4);
 nDir = nii.hdr.dim(5);
 if nDir<2, return; end
 bval = nan(nDir, 1);
 bvec = nan(nDir, 3);
 s = h{1};
 
+nSL = nii.hdr.dim(4);
 nFile =  numel(h);
 if isfield(s, 'bvec_original') % from BV or PAR file
     bval = s.B_value;
@@ -1459,7 +1459,7 @@ elseif nFile>1 % multiple files: order already in slices then volumes
     dict = dicm_dict(s.Manufacturer, {'B_value' 'B_factor' 'SlopInt_6_9' ...
        'DiffusionDirectionX' 'DiffusionDirectionY' 'DiffusionDirectionZ'});
     iDir = (0:nDir-1) * nFile/nDir + 1; % could be mosaic 
-    for j = 1:nDir % no bval/bvec for 1st file of each excitation
+    for j = 1:nDir % no bval/bvec for B0 volume
         s2 = h{iDir(j)};
         val = tryGetField(s2, 'B_value');
         if val == 0, continue; end
@@ -1531,7 +1531,7 @@ end
 % https://mrtrix.readthedocs.io/en/latest/concepts/dw_scheme.html
 nm = sum(bvec .^ 2, 2);
 if any(nm>1e-4 & nm<0.999) % this check may not be necessary
-    h{1}.bval_original = bval;
+    h{1}.bval_original = bval; % before scaling
     bval = bval .* nm;
     nm(nm<1e-4) = 1; % remove zeros after correcting bval
     bvec = bsxfun(@rdivide, bvec, sqrt(nm));
