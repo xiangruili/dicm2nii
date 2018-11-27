@@ -1139,7 +1139,19 @@ switch cmd
         for j = 3:-1:1, c(j) = get(hs.ijk(j), 'Value'); end % ijk for background
         c = hs.bg.R * [c-1 1]'; % in mm now
         c = c(1:3);
-        b = xyzr2roi(c, r, p.nii.hdr); % overlay space
+        
+        hdr = p.nii.hdr; % this block reorients hdr, since img was reoriented
+        dim = hdr.dim(2:4);
+        R = nii_xform_mat(hdr);
+        [R, perm] = reorient(R, dim, 0);
+        hdr.srow_x = R(1,:);
+        hdr.srow_y = R(2,:);
+        hdr.srow_z = R(3,:);
+        hdr.dim(2:4) = dim(perm);
+        pixdim = hdr.pixdim(2:4);
+        hdr.pixdim(2:4) = pixdim(perm);
+        
+        b = xyzr2roi(c, r, hdr); % overlay space
         
         img = p.nii.img;
         dim = size(img);
