@@ -289,13 +289,9 @@ nii = get_nii(fname);
 [p, hs.form_code, rg, dim] = read_nii(nii); % re-oriented
 p.Ri = inv(p.R);
 nVol = size(p.nii.img, 4);
-hs.bg.dim = p.nii.hdr.dim(2:4); % original dim and pixdim
-hs.bg.pixdim = p.nii.hdr.pixdim(2:4);
-hs.bg.R     = p.R;
-hs.bg.Ri    = p.Ri;
-hs.bg.perm  = p.perm;
-hs.bg.flip  = p.flip;
-hs.bg.hdr   = p.nii.hdr;
+hs.bg.R   = p.R;
+hs.bg.Ri  = p.Ri;
+hs.bg.hdr = p.hdr0;
 if ~isreal(p.nii.img)
     p.phase = angle(p.nii.img); % -pi to pi
     p.phase = mod(p.phase/(2*pi), 1); % 0~1
@@ -846,7 +842,7 @@ switch cmd
         jf = hs.files.getSelectedIndex+1;
         p = get_para(hs, jf);
         if strcmp(cmd, 'hdr')
-            hdr = p.nii.hdr;
+            hdr = p.hdr0;
         elseif strcmp(cmd, 'ext')
             if ~isfield(p.nii, 'ext')
                 errordlg('No extension for the selected NIfTI'); 
@@ -1140,19 +1136,7 @@ switch cmd
         c = hs.bg.R * [c-1 1]'; % in mm now
         c = c(1:3);
         
-        hdr = p.nii.hdr; % this block reorients hdr, since img was reoriented
-        dim = hdr.dim(2:4);
-        R = nii_xform_mat(hdr);
-        [R, perm] = reorient(R, dim, 0);
-        hdr.srow_x = R(1,:);
-        hdr.srow_y = R(2,:);
-        hdr.srow_z = R(3,:);
-        hdr.dim(2:4) = dim(perm);
-        pixdim = hdr.pixdim(2:4);
-        hdr.pixdim(2:4) = pixdim(perm);
-        
-        b = xyzr2roi(c, r, hdr); % overlay space
-        
+        b = xyzr2roi(c, r, p.nii.hdr); % overlay space        
         img = p.nii.img;
         dim = size(img);
         img = reshape(img, [], prod(dim(4:end)))';
@@ -1254,12 +1238,12 @@ switch cmd
         if ~ischar(fname), return; end
         fname = fullfile(pName, fname);
         
-        d = single(p.nii.hdr.dim(2:4));
+        d = single(p.hdr0.dim(2:4));
         I = ones([d 4], 'single');
         [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
         I = permute(I, [4 1 2 3]);
         I = reshape(I, 4, []); % ijk in 4 by nVox
-        R = nii_xform_mat(p.nii.hdr, hs.form_code); % original R
+        R = nii_xform_mat(p.hdr0, hs.form_code); % original R
         k = hs.bg.Ri * R * I; % background ijk
         
         nii = nii_tool('load', nam);
@@ -1548,10 +1532,10 @@ hs = guidata(fh);
 frm = hs.form_code;
 aligned = nargin>2;
 R_back = hs.bg.R;
+R0 = nii_xform_mat(hs.bg.hdr, frm(1)); % original background R
+[~, perm, flp] = reorient(R0, hs.bg.hdr.dim(2:4), 0);
 if aligned % aligned mtx: do it in special way
     [p, ~, rg, dim] = read_nii(fname, frm, 0); % no re-orient
-    R0 = nii_xform_mat(hs.bg.hdr, frm(1)); % original background R
-    
     try
         if any(regexpi(mtx, '\.mat$'))
             R = load(mtx, '-ascii');
@@ -1560,13 +1544,14 @@ if aligned % aligned mtx: do it in special way
             end
         else % see nii_xform
             R = eye(4);
-            warp = nii_tool('img', mtx);
-            if ~isequal(size(warp), [hs.bg.dim 3])
+            warp = nii_tool('img', mtx); % FSL warp nifti
+            if ~isequal(size(warp), [hs.bg.hdr.dim(2:4) 3])
                 error('warp file and template file img size don''t match.');
             end
             if det(R0(1:3,1:3))<0, warp(:,:,:,1) = -warp(:,:,:,1); end
-            [~, perm, flp] = reorient(R0, hs.bg.dim);
-            if ~isequal(perm, 1:3), warp = permute(warp, [perm 4]); end
+            if ~isequal(perm, 1:3)
+                warp = permute(warp, [perm 4]);
+            end
             for j = 1:3
                 if flp(j), warp = flip(warp, j); end
             end
@@ -1579,7 +1564,7 @@ if aligned % aligned mtx: do it in special way
     end
 
     % see nii_xform for more comment on following method
-    R = R0 / diag([hs.bg.pixdim 1]) * R * diag([p.pixdim 1]);
+    R = R0 / diag([hs.bg.hdr.pixdim(2:4) 1]) * R * diag([p.pixdim 1]);
     [~, i1] = max(abs(p.R(1:3,1:3)));
     [~, i0] = max(abs(R(1:3,1:3)));
     flp = sign(R(i0+[0 4 8])) ~= sign(p.R(i1+[0 4 8]));
@@ -1599,23 +1584,23 @@ if aligned % aligned mtx: do it in special way
         if p.flip(j), p.nii.img = flip(p.nii.img, j); end
     end
     p.alignMtx = mtx; % info only for NIfTI essentials
-else
+else % regular overlay
     [p, frm, rg, dim] = read_nii(fname, frm);
 
     % Silently use another background R_back matching overlay: very rare
     if frm>0 && frm ~= hs.form_code(1) && any(frm == hs.form_code)
         R = nii_xform_mat(hs.bg.hdr, frm); % img alreay re-oriented
-        R_back = reorient(R, hs.bg.dim);
-    elseif frm==0 && isequal(p.nii.hdr.dim(2:4), hs.bg.dim)
+        R_back = reorient(R, hs.bg.hdr.dim(2:4));
+    elseif frm==0 && isequal(p.hdr0.dim(2:4), hs.bg.hdr.dim(2:4))
         p.R = hs.bg.R; % best guess: use background xform
-        p.perm = hs.bg.perm;
+        p.perm = perm;
         p.nii.img = permute(p.nii.img, [p.perm 4:8]);
         for i = 1:3
-            if p.flip(i) ~= hs.bg.flip(i)
+            if p.flip(i) ~= flp(i)
                 p.nii.img = flip(p.nii.img, i);
             end
         end
-        p.flip = hs.bg.flip;
+        p.flip = flp;
         warndlg(['There is no valid coordinate system for the overlay. ' ...
          'The viewer supposes the same coordinate as the background.'], ...
          'Missing valid tranformation');
@@ -1733,21 +1718,28 @@ rotM(1:3, 4) = (dim(perm)-1) .* flp; % 0 or dim-1
 R = R / rotM; % xform matrix after flip
 
 %% Load, re-orient nii, extract essential nii stuff
-% nii.img may be re-oriented, but nii.hdr is not touched
+% nifti may be re-oriented, p.hdr0 stores original nii.hdr
 function [p, frm, rg, dim] = read_nii(fname, ask_code, reOri)
 if nargin<2, ask_code = []; end
 if ischar(fname), p.nii = nii_tool('load', fname);
 else, p.nii = fname; fname = p.nii.hdr.file_name;
 end
+p.hdr0 = p.nii.hdr; % original hdr
 c = p.nii.hdr.intent_code;
 if c>=3000 && c<=3099 && isfield(p.nii, 'ext') && any([p.nii.ext.ecode] == 32)
     p.nii = cii2nii(p.nii);
 end
 
-ndim = p.nii.hdr.dim(1);
+if nargin<3 || reOri
+	[p.nii, p.perm, p.flip] = nii_reorient(p.nii, 0);
+else
+    p.perm = 1:3;
+    p.flip = false(1,3);
+end
+
 dim = p.nii.hdr.dim(2:8);
-dim(dim<1 | dim>32767 | mod(dim,1)>0) = 1;
-if ndim>4 % 4+ dim, put all into dim4
+dim(dim<1 | mod(dim,1)~=0) = 1;
+if p.nii.hdr.dim(1)>4 % 4+ dim, put all into dim4
     if sum(dim(4:7)>1)>1
         warndlg([fname ' has 5 or more dimension. Dimension above 4 are ' ...
             'all treated as volumes for visualization']);        
@@ -1759,18 +1751,6 @@ end
 [p.R, frm] = nii_xform_mat(p.nii.hdr, ask_code);
 dim = dim(1:3);
 p.pixdim = p.nii.hdr.pixdim(2:4);
-if nargin<3 || reOri
-    [p.R, p.perm, p.flip] = reorient(p.R, dim);
-    if ~isequal(p.perm, 1:3)
-        dim = dim(p.perm);
-        p.pixdim = p.pixdim(p.perm);
-        p.nii.img = permute(p.nii.img, [p.perm 4:8]);
-    end
-    for i = 1:3, if p.flip(i), p.nii.img = flip(p.nii.img, i); end; end
-else
-    p.perm = 1:3;
-    p.flip = false(1,3);
-end
 
 if size(p.nii.img,4)<4 && ~isfloat(p.nii.img)
     p.nii.img = single(p.nii.img); 
@@ -1924,6 +1904,7 @@ if abs(rg(2))>10, rg(2) = ceil(rg(2)/2)*2; end % even number
 function vector_lines(hs, i, iaxis)
 p = get_para(hs, i);
 d = single(size(p.nii.img));
+pixdim = hs.bg.hdr.pixdim(2:4); % before reorient
 if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
     delete(p.hsI);
     lut = hs.lut.UserData; % last lut
@@ -1948,7 +1929,7 @@ if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
         R0 = normc(p.R0(1:3, 1:3));
         R  = normc(p.R(1:3, 1:3));
         [pd, j] = min(p.pixdim);
-        p.Rvec = R0 / R * pd / hs.bg.pixdim(j);
+        p.Rvec = R0 / R * pd / pixdim(j);
     end
     p.hsI(1).UserData = p;
 end
@@ -1959,9 +1940,8 @@ img(:,:,:,p.flip) = -img(:,:,:,p.flip);
 if isfield(p, 'mask') % ignore modulation
     img = bsxfun(@times, img, p.mask);
 end
-if any(abs(diff(hs.bg.pixdim))>1e-4) % non isovoxel background
-    pd = hs.bg.pixdim;
-    pd = pd / min(pd);
+if any(abs(diff(pixdim))>1e-4) % non isovoxel background
+    pd = pixdim / min(pixdim);
     for j = 1:3, img(:,:,:,j) = img(:,:,:,j) / pd(j); end
 end
 
@@ -2561,7 +2541,7 @@ if ~any(frm == codes)
 else
     R0 = nii_xform_mat(hdr, frm); % may be the same as p.R
 end
-R0 = reorient(R0, hdr.dim(2:4)); % do this since img was done when loaded
+% R0 = reorient(R0, hdr.dim(2:4)); % do this since img was done when loaded
 
 % if isfield(p, 'alignMtx'), R = R0 / p.R * R; end % inverse
 % this wont work if lines is background & Mprage is overlay
@@ -2972,6 +2952,7 @@ elseif any(p.nii.hdr.intent_code == [1002 3007]) % Label
 elseif p.nii.hdr.intent_code > 0 % some stats
     if p.lb < 0
         p.lut = 10; % two-sided
+        p.lb = str2double(sprintf('%.2g', p.ub/2));
     else
         a = setdiff(8:9, luts); % red-yellow & blue-green
         if isempty(a), a = 8; end % red-yellow
@@ -3520,6 +3501,43 @@ end
 function v = normc(M)
 v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
 % v = M ./ sqrt(sum(M .* M)); % since 2016a
+
+%% reorient nii to diagnal major
+function [nii, perm, flp] = nii_reorient(nii, leftHand)
+[R, frm] = nii_xform_mat(nii.hdr);
+dim = nii.hdr.dim(2:4);
+pixdim = nii.hdr.pixdim(2:4);
+[R, perm, flp] = reorient(R, dim, leftHand);
+if ~isequal(perm, 1:3)
+    nii.hdr.dim(2:4) = dim(perm);
+    nii.hdr.pixdim(2:4) = pixdim(perm);
+    fps = bitand(nii.hdr.dim_info, [3 12 48]) ./ [1 4 16];
+    nii.hdr.dim_info = [1 4 16] * fps(perm)' + bitand(nii.hdr.dim_info, 192);
+    nii.img = permute(nii.img, [perm 4:8]);
+end
+sc = nii.hdr.slice_code;
+if sc>0 && perm(3)~=3 && flp(perm==3)
+    nii.hdr.slice_code = sc+mod(sc,2)*2-1; % 1<->2, 3<->4, 5<->6
+end
+if ~isequal(perm, 1:3) || any(flp)
+    if frm(1) == nii.hdr.sform_code % only update matching form
+        nii.hdr.srow_x = R(1,:);
+        nii.hdr.srow_y = R(2,:);
+        nii.hdr.srow_z = R(3,:);
+    end
+    if frm(1) == nii.hdr.qform_code
+        nii.hdr.qoffset_x = R(1,4);
+        nii.hdr.qoffset_y = R(2,4);
+        nii.hdr.qoffset_z = R(3,4);
+        R0 = normc(R(1:3, 1:3));
+        dcm2quat = dicm2nii('', 'dcm2quat', 'func_handle');
+        [q, nii.hdr.pixdim(1)] = dcm2quat(R0);
+        nii.hdr.quatern_b = q(2);
+        nii.hdr.quatern_c = q(3);
+        nii.hdr.quatern_d = q(4);
+    end
+end
+for i = 1:3, if flp(i), nii.img = flip(nii.img, i); end; end
 
 %% flip slice dir for nii hdr
 % function hdr = flip_slices(hdr)
