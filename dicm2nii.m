@@ -2499,10 +2499,9 @@ end
 % matlab.internal.webservices.toJSON(s)
 function save_json(s, fname)
 flds = fieldnames(s);
-nFields = numel(flds);
 fid = fopen([fname '.json'], 'w'); % overwrite silently if exist
 fprintf(fid, '{\n');
-for i = 1:nFields
+for i = 1:numel(flds)
     nam = flds{i};
     if ~isfield(s, nam), continue; end
     val = s.(nam);
