@@ -4,7 +4,7 @@
     "inputs":
         [
             {"name":"cmd", "kind":"required", "type":"choices={'hdr'}"},
-            {"name":"varargin", "kind":"required", "type":"filepath=*.hdr,*.nii,*.nii.gz"}
+            {"name":"filename", "kind":"required", "type":"filepath=*.hdr,*.nii,*.nii.gz"}
         ]
 },
 "nii_tool":
@@ -12,7 +12,7 @@
     "inputs":
         [
             {"name":"cmd", "kind":"required", "type":"choices={'load', 'img', 'ext'}"},
-            {"name":"varargin", "kind":"required", "type":[["struct"], ["filepath=*.hdr,*.nii,*.nii.gz"]]}
+            {"name":"filename", "kind":"required", "type":[["struct"], ["filepath=*.hdr,*.nii,*.nii.gz"]]}
         ]
 },
 "nii_tool":
@@ -20,7 +20,7 @@
     "inputs":
         [
             {"name":"cmd", "kind":"required", "type":"choices={'init'}"},
-            {"name":"varargin", "kind":"required", "type":"numeric"}
+            {"name":"img", "kind":"required", "type":"numeric"}
         ]
 },
 "nii_tool":
@@ -28,7 +28,7 @@
     "inputs":
         [
             {"name":"cmd", "kind":"required", "type":"choices={'save', 'update'}"},
-            {"name":"varargin", "kind":"required", "type":"struct"}
+            {"name":"nii", "kind":"required", "type":"struct"}
         ]
 },
 "nii_tool":
@@ -36,7 +36,7 @@
     "inputs":
         [
             {"name":"cmd", "kind":"required", "type":"choices={'cat3D'}"},
-            {"name":"varargin", "kind":"required", "type":"filepath=*.hdr,*.nii,*.nii.gz"}
+            {"name":"filename", "kind":"required", "type":"filepath=*.hdr,*.nii,*.nii.gz"}
         ]
 },
 "nii_moco":
