@@ -801,21 +801,26 @@ s.NumberOfTemporalPositions = s.NumberOfFrames/nSL;
 iVol = (0:s.NumberOfTemporalPositions-1)*nSL + 1; % already XYZT
 fld = 'ComplexImageComponent';
 typ = {'MAGNITUDE' 'REAL' 'IMAGINARY' 'PHASE'};
-imgType = para(iVol, colIndex('image_type_mr')); % 0:3
+imgType = para(iVol, colIndex('image_type_mr'));
 imgType(imgType==16) = 0;
 imgType(imgType==17) = 3;
 imgType(imgType==18) = 1;
-imgType(imgType>3)   = 0; % unknown treated as magnitude
+ind = imgType + 1;
+a = unique(imgType(imgType>3)); % unknown type
+for i = 1:numel(a)
+    ind(imgType==a(i)) = i+4;
+    typ{i+4} = sprintf('image_type%g', a(i));
+end
 if numel(iVol) == 1
-    s.ComplexImageComponent = typ{imgType(1)+1};
-elseif any(diff(imgType) ~= 0) % more than 1 type of image
+    s.ComplexImageComponent = typ{ind(1)};
+elseif any(diff(ind) ~= 0) % more than 1 type of image
     s.(fld) = 'MIXED';
-    s.Volumes.(fld) = typ(imgType+1); % one for each vol
+    s.Volumes.(fld) = typ(ind); % one for each vol
     s.Volumes.RescaleIntercept = para(iVol, colIndex('rescale intercept'));
     s.Volumes.RescaleSlope = para(iVol, colIndex('rescale slope'));
     s.Volumes.MRScaleSlope = para(iVol, colIndex('scale slope'));
 else
-    s.ComplexImageComponent = typ(imgType(1)+1); % cellstr
+    s.ComplexImageComponent = typ(ind(1)); % cellstr
 end
 
 % These columns should be the same for nifti-convertible images: 
@@ -858,6 +863,7 @@ else
 end
 s.Columns = res(1);
 s.Rows = res(2);
+if gap < 0, gap = 0; end 
 s.SpacingBetweenSlices = gap + s.SliceThickness;
 a = par_val('pixel spacing');
 s.PixelSpacing = a(:);
