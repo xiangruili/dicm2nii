@@ -1841,8 +1841,16 @@ switch cmd
             return;
         end
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
-        if get(hs.gzip,  'Value'), rstFmt = rstFmt + 1; end % 1 or 3 
-        if get(hs.rst3D, 'Value'), rstFmt = rstFmt + 4; end % 4 to 7
+        if rstFmt == 4
+            if get(hs.gzip,  'Value')
+                rstFmt = 'bids';
+            else
+                rstFmt = 'bidsnii';
+            end % 1 or 3
+        else
+            if get(hs.gzip,  'Value'), rstFmt = rstFmt + 1; end % 1 or 3
+            if get(hs.rst3D, 'Value'), rstFmt = rstFmt + 4; end % 4 to 7
+        end
         set(h, 'Enable', 'off', 'string', 'Conversion in progress');
         clnObj = onCleanup(@()set(h, 'Enable', 'on', 'String', 'Start conversion')); 
         drawnow;
@@ -2919,3 +2927,12 @@ end
 function v = normc(M)
 v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
 %%
+
+function BtnModalityTable(h,TT,TS)
+if all(any(ismember(TT.Data{:,2:3},'skip'),2))
+    warndlg('All images are skipped... Please select the type and modality for all scans','No scan selected');
+    return;
+end
+setappdata(0,'ModalityTable',TT.Data)
+setappdata(0,'SubjectTable',TS.Data)
+delete(h)
