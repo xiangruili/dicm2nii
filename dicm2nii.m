@@ -17,7 +17,8 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 %      5 or '.nii.gz 3D'     for 3D nii compressed.
 %      6 or '.hdr 3D'        for 3D hdr/img pair uncompressed (SPM8).
 %      7 or '.hdr.gz 3D'     for 3D hdr/img pair compressed.
-% 
+%      'bids'                for bids data structure (http://bids.neuroimaging.io/)
+%
 % Typical examples:
 %  DICM2NII; % bring up user interface if there is no input argument
 %  DICM2NII('D:/myProj/zip/subj1.zip', 'D:/myProj/subj1/data'); % zip file
@@ -383,6 +384,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180721 accept mixture of files and folders as input; GUI uses jFileChooser(). 
 % 180914 support UIH dicm, both GRID (mosaic) and regular. 
 % 180922 fix for UIH masaic -1 col; GE phPos from dcm2niix. 
+% 190122 add BIDS support. tanguy.duval@inserm.fr
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -400,8 +402,18 @@ if nargin<3 || isempty(fmt), fmt = 1; end % default .nii.gz
 no_save = ischar(fmt) && strcmp(fmt, 'no_save');
 if no_save, fmt = 'nii'; end
 
+bids = false;
+if ischar(fmt) && strcmpi(fmt,'BIDS')
+    bids = true;
+    fmt = '.nii.gz';
+end
+if ischar(fmt) && strcmpi(fmt,'BIDSNII')
+    bids = true;
+    fmt = '.nii';
+end
+
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
-      (ischar(fmt) && ~isempty(regexpi(fmt, 'nii')))
+        (ischar(fmt) && ~isempty(regexpi(fmt, 'nii')))
     ext = '.nii';
 elseif (isnumeric(fmt) && any(fmt==[2 3 6 7])) || (ischar(fmt) && ...
         (~isempty(regexpi(fmt, 'hdr')) || ~isempty(regexpi(fmt, 'img'))))
@@ -818,7 +830,98 @@ if ~no_save
     fprintf('Converting %g series (%s) into %g-D %s: subject %s\n', ...
             nRun, vendor, 4-rst3D, ext, subjStr);
 end
+
+%% Parse BIDS
+if bids
+    if multiSubj
+        fprintf('Multiple subjects detected!!!!! Skipping...\nPlease convert subjects one by one with BIDS options\n')
+        fprintf('%s\n',subj{:})
+        return;
+    end
+    % Table: subject Name
+    try
+        asciiInds=[1:47 58:64 91:96 123:127];
+        for j=1:numel(asciiInds)
+            subj=strrep(subj,char(asciiInds(j)),'');
+        end
+        Subject = subj;
+    catch
+        Subject = {'01'};
+    end
+    Session = {'01'};
+    S = table(Subject,Session);
+    
+    % Table: Type/Modality
+    valueset = {'skip','skip';
+        'anat','T1w';
+        'anat','T2w';
+        'anat','T1rho';
+        'anat','T1map';
+        'anat','T2map';
+        'anat','T2star';
+        'anat','FLAIR';
+        'anat','FLASH';
+        'anat','PD';
+        'anat','PDmap';
+        'dwi' ,'dwi';
+        'fmap','phasediff';
+        'fmap','phase1';
+        'fmap','phase2';
+        'fmap','magnitude1';
+        'fmap','magnitude2';
+        'fmap','fieldmap'};
+    Modality = categorical(repmat({'skip'},[length(fnames),1]),valueset(:,2));
+    Type = categorical(repmat({'skip'},[length(fnames),1]),unique(valueset(:,1)));
+    Name = fnames';
+    T = table(Name,Type,Modality);
+    
+    % GUI
+    scrSz = get(0, 'ScreenSize');
+    clr = [1 1 1]*206/256;
+    hf = uifigure('Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
+    set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
+
+    % tables
+    TS = uitable(hf,'Data',S,'Position',[20 hf.Position(4)-110 hf.Position(3)-160 90]);
+    TT = uitable(hf,'Data',T,'Position',[20 20 hf.Position(3)-160 hf.Position(4)-120]);
+    TS.ColumnEditable = [true true];
+    TT.ColumnEditable = [false true true];
+    setappdata(0,'ModalityTable',TT.Data)
+    setappdata(0,'SubjectTable',TS.Data)
+
+    % button
+    B = uibutton(hf,'Position',[hf.Position(3)-120 20 100 30]);
+    B.Text = 'OK';
+    B.ButtonPushedFcn = @(btn,event) BtnModalityTable(hf,TT, TS);
+    
+    waitfor(hf);
+    % get results
+    ModalityTable = getappdata(0,'ModalityTable');
+    SubjectTable = getappdata(0,'SubjectTable');
+end
+
+%% Convert
 for i = 1:nRun
+    if bids
+        if any(ismember(ModalityTable{i,2:3},'skip')), continue; end
+        if isempty(char(SubjectTable{1,2})) % no session
+            ses = '';
+        else
+            ses = ['ses-' char(SubjectTable{1,2})];
+        end
+        % folder
+        modalityfolder = fullfile(['sub-' char(SubjectTable{1,1})],...
+                                    ses,...
+                                    char(ModalityTable{i,2}));
+        mkdir(fullfile(niiFolder, modalityfolder));
+        
+        % filename
+        fnames{i} = fullfile(modalityfolder,...
+                      ['sub-' char(SubjectTable{1,1}) '_' ses '_' char(ModalityTable{i,3})]);
+        fnames{i} = strrep(fnames{i},'__','_');
+        
+    end
+    
     nFile = numel(h{i});
     h{i}{1}.NiftiName = fnames{i}; % for convenience of error info
     s = h{i}{1};
@@ -879,7 +982,7 @@ for i = 1:nRun
     [nii, h{i}] = set_nii_hdr(nii, h{i}, pf); % set most nii hdr
 
     % Save bval and bvec files after bvec perm/sign adjusted in set_nii_hdr
-    fname = [niiFolder fnames{i}]; % name without ext
+    fname = fullfile(niiFolder,fnames{i}); % name without ext
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
 
     nii = split_components(nii, h{i}{1}); % split Philips vol components
@@ -897,27 +1000,32 @@ for i = 1:nRun
         fprintf(fmtStr, nam, nii(j).hdr.dim(2:5));
         nii(j).ext = set_nii_ext(nii(j).json); % NIfTI extension
         if pf.save_json, save_json(nii(j).json, fname); end
-        nii_tool('save', nii(j), [niiFolder nam ext], rst3D);
+        nii_tool('save', nii(j), fullfile(niiFolder,[nam ext]), rst3D);
     end
         
     if isfield(nii(1).hdr, 'hdrTilt')
         nii = nii_xform(nii(1), nii.hdr.hdrTilt);
         fprintf(fmtStr, [fnames{i} '_Tilt'], nii.hdr.dim(2:5));
-        nii_tool('save', nii, [fname '_Tilt' ext], rst3D); % save xformed nii
+        nii_tool('save', nii, fullfile(fname, ['_Tilt' ext]), rst3D); % save xformed nii
     end
     
     h{i} = h{i}{1}; % keep 1st dicm header only
     if isnumeric(h{i}.PixelData), h{i} = rmfield(h{i}, 'PixelData'); end % BV
 end
 
-h = cell2struct(h, fnames, 2); % convert into struct
-fname = [niiFolder 'dcmHeaders.mat'];
-if exist(fname, 'file') % if file exists, we update fields only
-    S = load(fname);
-    for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
-    h = S.h; %#ok
+if ~bids
+    h = cell2struct(h, fnames, 2); % convert into struct
+    fname = [niiFolder 'dcmHeaders.mat'];
+    if exist(fname, 'file') % if file exists, we update fields only
+        S = load(fname);
+        for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
+        h = S.h; %#ok
+    end
+    save(fname, 'h', '-v7'); % -v7 better compatibility
+else
+    rmappdata(0,'ModalityTable');
+    rmappdata(0,'SubjectTable');
 end
-save(fname, 'h', '-v7'); % -v7 better compatibility
 fprintf('Elapsed time by dicm2nii is %.1f seconds\n\n', toc);
 return;
 
@@ -1734,8 +1842,16 @@ switch cmd
             return;
         end
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
-        if get(hs.gzip,  'Value'), rstFmt = rstFmt + 1; end % 1 or 3 
-        if get(hs.rst3D, 'Value'), rstFmt = rstFmt + 4; end % 4 to 7
+        if rstFmt == 4
+            if get(hs.gzip,  'Value')
+                rstFmt = 'bids';
+            else
+                rstFmt = 'bidsnii';
+            end % 1 or 3
+        else
+            if get(hs.gzip,  'Value'), rstFmt = rstFmt + 1; end % 1 or 3
+            if get(hs.rst3D, 'Value'), rstFmt = rstFmt + 4; end % 4 to 7
+        end
         set(h, 'Enable', 'off', 'string', 'Conversion in progress');
         clnObj = onCleanup(@()set(h, 'Enable', 'on', 'String', 'Start conversion')); 
         drawnow;
@@ -1910,7 +2026,7 @@ hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
 
 uitxt('Output format', [8 166 82 16]);
 hs.rstFmt = uicontrol('Style', 'popup', 'Background', 'white', 'FontSize', fSz, ...
-    'Value', getpf('rstFmt',1), 'Position', [92 162 82 24], 'String', {' .nii' ' .hdr/.img'}, ...
+    'Value', getpf('rstFmt',1), 'Position', [92 162 82 24], 'String', {' .nii' ' .hdr/.img' ' BIDS (http://bids.neuroimaging.io)'}, ...
     'TooltipString', 'Choose output file format');
 
 hs.gzip = chkbox(fh, getpf('gzip',true), 'Compress', '', 'Compress into .gz files');
@@ -2812,3 +2928,12 @@ end
 function v = normc(M)
 v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
 %%
+
+function BtnModalityTable(h,TT,TS)
+if all(any(ismember(TT.Data{:,2:3},'skip'),2))
+    warndlg('All images are skipped... Please select the type and modality for all scans','No scan selected');
+    return;
+end
+setappdata(0,'ModalityTable',TT.Data)
+setappdata(0,'SubjectTable',TS.Data)
+delete(h)
