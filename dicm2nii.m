@@ -411,6 +411,9 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     bids = true;
     fmt = '.nii';
 end
+if bids && verLessThan('matlab','9.4')
+    fprintf('BIDS conversion requires MATLAB R2018a or more. return.')
+end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
         (ischar(fmt) && ~isempty(regexpi(fmt, 'nii')))
@@ -875,10 +878,18 @@ if bids
     Name = fnames';
     T = table(Name,Type,Modality);
     
+    ModalityTablePref = getpref('dicm2nii_gui_para', 'ModalityTable', T);
+    for i = 1:nRun
+        match = strcmp(T{i,1},ModalityTablePref{:,1});
+        if any(match)
+            T{i,2:3} = ModalityTablePref{match,2:3};
+        end
+    end
+
     % GUI
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
-    hf = uifigure('Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
+    hf = uifigure('bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
@@ -898,6 +909,18 @@ if bids
     % get results
     ModalityTable = getappdata(0,'ModalityTable');
     SubjectTable = getappdata(0,'SubjectTable');
+    % setpref
+    ModalityTableSavePref = ModalityTable(~any(ismember(ModalityTable{:,2:3},'skip'),2),:);
+    for imod = 1:size(ModalityTableSavePref,1)
+        match = strcmp(ModalityTableSavePref{imod,1},ModalityTablePref{:,1});
+        if any(match) % replace old pref
+            ModalityTablePref{match,2:3} = ModalityTableSavePref{imod,2:3};
+        else % append new pref
+            ModalityTablePref{end+1,1}   = ModalityTableSavePref{imod,1};
+            ModalityTablePref{end,2:3} = ModalityTableSavePref{imod,2:3};
+        end
+    end
+    setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref);
 end
 
 %% Convert
@@ -1843,6 +1866,10 @@ switch cmd
         end
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
         if rstFmt == 4
+            if verLessThan('matlab','9.4')
+                warndlg('BIDS conversion requires MATLAB R2018a or more.','MATLAB outdated');
+                return;
+            end
             if get(hs.gzip,  'Value')
                 rstFmt = 'bids';
             else
