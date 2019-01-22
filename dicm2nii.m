@@ -889,7 +889,7 @@ if bids
     % GUI
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
-    hf = uifigure('Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
+    hf = uifigure('bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
