@@ -411,8 +411,8 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     bids = true;
     fmt = '.nii';
 end
-if bids && verLessThan('matlab','9.0')
-    fprintf('BIDS conversion requires MATLAB R2016a or more. return.')
+if bids && verLessThan('matlab','9.4')
+    fprintf('BIDS conversion requires MATLAB R2018a or more. return.')
 end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
@@ -1866,8 +1866,9 @@ switch cmd
         end
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
         if rstFmt == 4
-            if verLessThan('matlab','9.0')
-                warndlg('BIDS conversion requires MATLAB R2016a or more.','MATLAB outdated')
+            if verLessThan('matlab','9.4')
+                warndlg('BIDS conversion requires MATLAB R2018a or more.','MATLAB outdated');
+                return;
             end
             if get(hs.gzip,  'Value')
                 rstFmt = 'bids';
