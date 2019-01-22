@@ -384,6 +384,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % 180721 accept mixture of files and folders as input; GUI uses jFileChooser(). 
 % 180914 support UIH dicm, both GRID (mosaic) and regular. 
 % 180922 fix for UIH masaic -1 col; GE phPos from dcm2niix. 
+% 190122 add BIDS support. tanguy.duval@inserm.fr
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
