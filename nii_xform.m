@@ -133,7 +133,7 @@ end
 
 if ~iscell(target) 
     s = hdr.sform_code;
-    q = hdr.sform_code;
+    q = hdr.qform_code;
     sq = [nii.hdr.sform_code nii.hdr.qform_code];
     if s>0 && (any(s == sq) || (s>2 && (any(sq==3) || any(sq==4))))
         R0 = [hdr.srow_x; hdr.srow_y; hdr.srow_z; 0 0 0 1];
