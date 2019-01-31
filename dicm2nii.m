@@ -431,8 +431,19 @@ end
 
 rst3D = (isnumeric(fmt) && fmt>3) || (ischar(fmt) && ~isempty(regexpi(fmt, '3D')));
 
-if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
+if nargin==0
     create_gui; % show GUI if input is not enough
+    return;
+end
+
+if isempty(src) || (nargin<2 || isempty(niiFolder))
+    if isdeployed
+        load('dicm2nii_help.mat');
+        disp(H)
+    else
+        help('dicm2nii')
+    end
+    
     return;
 end
 
@@ -2723,6 +2734,7 @@ fclose(fid);
 function checkUpdate(mfile)
 verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
 webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997';
+if ~isdeployed
 try
     str = webread(verLink);
 catch me
@@ -2774,6 +2786,7 @@ rmdir(tdir, 's');
 rehash;
 warndlg(['Package updated successfully. Please restart ' mfile ...
          ', otherwise it may give error.'], 'Check update');
+end
 
 %% Subfunction: return NumberOfImagesInMosaic if Siemens mosaic, or [] otherwise.
 % If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. 
