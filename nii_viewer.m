@@ -3500,7 +3500,7 @@ end
 %% normalize columns
 function v = normc(M)
 v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
-% v = M ./ sqrt(sum(M .* M)); % since 2016a
+% v = M ./ sqrt(sum(M .* M)); % since 2016b
 
 %% reorient nii to diagnal major
 function [nii, perm, flp] = nii_reorient(nii, leftHand)
