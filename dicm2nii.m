@@ -1042,7 +1042,7 @@ if ~bids
     if exist(fname, 'file') % if file exists, we update fields only
         S = load(fname);
         for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
-        h = S.h; %#ok
+        h = S.h;
     end
     save(fname, 'h', '-v7'); % -v7 better compatibility
 else
@@ -1083,6 +1083,8 @@ elseif strncmpi(s.Manufacturer, 'Philips', 7)
     tf = strcmp(tryGetField(s, 'MRSeriesDiffusion', 'N'), 'Y');
 elseif isfield(s, 'ApplicationCategory') % UIH
     tf = ~isempty(regexp(s.ApplicationCategory, 'DTI', 'once'));
+elseif isfield(s, 'AcquisitionContrast') % Bruker    
+    tf = ~isempty(regexpi(s.AcquisitionContrast, 'DIFF', 'once'));
 else % Some Siemens DTI are not labeled as \DIFFUSION
     tf = ~isempty(csa_header(s, 'B_value'));
 end
@@ -1580,6 +1582,35 @@ elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
         s2 = dicm_hdr(s, s2, iDir); % call search_MF_val
         bval = s2.B_value';
         bvec = s2.DiffusionGradientDirection';
+%         if all(isnan(bvec(:))) % Bruker
+%             a = nan(1, nDir);
+%             s2 = struct('DiffusionB_ValueXX', a, 'DiffusionB_ValueXY', a, ...
+%                         'DiffusionB_ValueXZ', a, 'DiffusionB_ValueYY', a, ...
+%                         'DiffusionB_ValueYZ', a, 'DiffusionB_ValueZZ', a);
+%             s2 = dicm_hdr(s, s2, iDir);
+%             bm = reshape(struct2array(s2), [nDir 6]);
+%             a = zeros(3);
+%             for i = 1:nDir % https://github.com/rordenlab/dcm2niix/issues/265
+%                 a(:) = bm(i, [1:3 2 4 5 3 5 6]);
+%                 [V, ~] = eig(a);
+%                 bvec(i,:) = V(:,3);
+%             end
+%         end
+        if isfield(s, 'Private_0177_1101') && all(isnan(bvec(:))) % Bruker
+            str = char(s.Private_0177_1101');
+            expr = 'DiffusionBMatrix\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)';
+            [C, ind] = regexp(str, expr, 'tokens', 'end', 'once');
+            dim = str2double(C);
+            if isequal(dim, [nDir 9])
+                a = sscanf(str(ind+1:end), '%f', [9 nDir]);
+                a = reshape(a, 3, 3, []);
+                [~, i] = sort(iDir); a(:,:,i) = a;
+                for i = 1:nDir
+                    [V, ~] = eig(a(:,:,i));
+                    bvec(i,:) = V(:,3);
+                end
+            end
+        end
     else % 1 vol per file, e.g. Siemens
         for i = 1:nFile
             bval(i) = MF_val('B_value', h{i}, 1);
@@ -1637,7 +1668,7 @@ h{1}.bvec_original = bvec; % original from dicom
 
 % http://wiki.na-mic.org/Wiki/index.php/NAMIC_Wiki:DTI:DICOM_for_DWI_and_DTI
 [ixyz, R] = xform_mat(s, nii.hdr.dim(2:4)); % R takes care of slice dir
-if strncmpi(s.Manufacturer, 'UIH', 3) % UIH dicom in image reference
+if strncmpi(s.Manufacturer, 'UIH', 3) || strncmpi(s.Manufacturer, 'Bruker', 6)
     % assume real image reference: unlike confusing GE scheme
 elseif strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
     if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
@@ -2152,6 +2183,12 @@ else
         try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
     elseif isfield(s, 'PEDirectionDisplayed') % UIH
         try d = s.PEDirectionDisplayed(1); catch, return; end
+    elseif isfield(s, 'Private_0177_1100') % Bruker
+        expr ='(?<=\<\+?)[LRAPSI]{1}(?=;\s*phase\>)';
+        d = regexp(char(s.Private_0177_1100'), expr, 'match', 'once');
+        id = regexp('LRAPSI', d);
+        id = id + mod(id,2)*2-1;
+        str = 'LRAPFH'; d = str(id);
     else % unknown Manufacturer
         return;
     end
@@ -2727,7 +2764,7 @@ try
     str = webread(verLink);
 catch me
     try
-        str = urlread(verLink);
+        str = urlread(verLink); %#ok
     catch
         str = sprintf('%s.\n\nPlease download manually.', me.message);
         errordlg(str, 'Web access error');
@@ -2760,7 +2797,7 @@ catch
     url = 'https://github.com/xiangruili/dicm2nii/archive/master.zip';
     try
         fname = [tmp 'dicm2nii_github.zip'];
-        urlwrite(url, fname);
+        urlwrite(url, fname); %#ok
         unzip(fname, tmp); delete(fname);
         tdir = [tmp 'dicm2nii-master/'];
     catch me
