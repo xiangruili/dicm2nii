@@ -1596,19 +1596,29 @@ elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
 %                 bvec(i,:) = V(:,3);
 %             end
 %         end
-        if isfield(s, 'Private_0177_1101') && all(isnan(bvec(:))) % Bruker
-            str = char(s.Private_0177_1101');
-            expr = 'DiffusionBMatrix\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)';
+%         if isfield(s, 'Private_0177_1101') && all(isnan(bvec(:))) % Bruker
+%             str = char(s.Private_0177_1101');
+%             expr = 'DiffusionBMatrix\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)\s+';
+%             [C, ind] = regexp(str, expr, 'tokens', 'end', 'once');
+%             if isequal(str2double(C), [nDir 9])
+%                 bm = sscanf(str(ind:end), '%f', nDir*9);
+%                 bm = reshape(bm, 3, 3, []);
+%                 [~, i] = sort(iDir); bm(:,:,i) = bm;
+%                 for i = 1:nDir
+%                     [V, ~] = eig(bm(:,:,i));
+%                     bvec(i,:) = V(:,3);
+%                 end
+%                 % errorLog('bvec is from B-matrix, so sign may be wrong.');
+%             end
+%         end
+        if isfield(s, 'Private_0177_1100') && all(isnan(bvec(:))) % Bruker
+            str = char(s.Private_0177_1100');
+            expr = 'DwGradVec\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)\s+'; % DwDir incomplete            
             [C, ind] = regexp(str, expr, 'tokens', 'end', 'once');
-            dim = str2double(C);
-            if isequal(dim, [nDir 9])
-                a = sscanf(str(ind+1:end), '%f', [9 nDir]);
-                a = reshape(a, 3, 3, []);
-                [~, i] = sort(iDir); a(:,:,i) = a;
-                for i = 1:nDir
-                    [V, ~] = eig(a(:,:,i));
-                    bvec(i,:) = V(:,3);
-                end
+            if isequal(str2double(C), [nDir 3])
+                bvec = sscanf(str(ind+1:end), '%f', nDir*3);
+                bvec = normc(reshape(bvec, 3, []))';
+                [~, i] = sort(iDir); bvec(i,:) = bvec;
             end
         end
     else % 1 vol per file, e.g. Siemens
@@ -2237,7 +2247,7 @@ if n>0 && nFrame>1
         VL = s2.DimensionIndexValues([3:end 1],:)';
     end
     [ind, nSL] = sort_frames([SL s2.B_value'], VL);
-    if ~isequal(ind, 1:nFrame)
+    if ~isequal(ind, 1:nFrame) % && strncmpi(s.Manufacturer, 'Philips', 7)
         if ind(1) ~= 1 || ind(end) ~= nFrame 
             s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
         end
@@ -2990,7 +3000,9 @@ end
 
 %% 
 function v = normc(M)
-v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
+den = sqrt(sum(M .* M));
+den(den==0) = 1;
+v = bsxfun(@rdivide, M, den);
 %%
 
 function BtnModalityTable(h,TT,TS)
