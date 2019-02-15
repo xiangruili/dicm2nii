@@ -640,7 +640,9 @@ for i = 1:nRun
         end
         if ~isfield(s, 'EchoTimes') && isfield(s, 'EchoTime')
             h{i}{1}.EchoTimes = nan(1, nFile);
-            for k = 1:nFile, h{i}{1}.EchoTimes(k) = h{i}{k}.EchoTime; end
+            for k = 1:nFile
+                h{i}{1}.EchoTimes(k) = tryGetField(h{i}{k}, 'EchoTime', 0); 
+            end
         end
     end
     
@@ -837,7 +839,8 @@ end
 %% Parse BIDS
 if bids
     if multiSubj
-        fprintf('Multiple subjects detected!!!!! Skipping...\nPlease convert subjects one by one with BIDS options\n')
+        fprintf(['Multiple subjects detected!!!!! Skipping...\n' ...
+            'Please convert subjects one by one with BIDS options\n'])
         fprintf('%s\n',subj{:})
         return;
     end
@@ -940,7 +943,7 @@ for i = 1:nRun
         
         % filename
         fnames{i} = fullfile(modalityfolder,...
-                      ['sub-' char(SubjectTable{1,1}) '_' ses '_' char(ModalityTable{i,3})]);
+              ['sub-' char(SubjectTable{1,1}) '_' ses '_' char(ModalityTable{i,3})]);
         fnames{i} = strrep(fnames{i},'__','_');
         
     end
@@ -1029,7 +1032,7 @@ for i = 1:nRun
     if isfield(nii(1).hdr, 'hdrTilt')
         nii = nii_xform(nii(1), nii.hdr.hdrTilt);
         fprintf(fmtStr, [fnames{i} '_Tilt'], nii.hdr.dim(2:5));
-        nii_tool('save', nii, fullfile(fname, ['_Tilt' ext]), rst3D); % save xformed nii
+        nii_tool('save', nii, [fname '_Tilt' ext], rst3D); % save xformed nii
     end
     
     h{i} = h{i}{1}; % keep 1st dicm header only
@@ -1511,11 +1514,16 @@ end
 % Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
 % check, but GE/Philips AcquisitionTime seems useless
 if isempty(t) && ~tryGetField(s, 'isMos', 0) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
-    dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
+    dict = dicm_dict('', {'AcquisitionDateTime' 'AcquisitionDate' 'AcquisitionTime'});
     t = zeros(nSL, 1);
     for j = 1:nSL
         s1 = dicm_hdr(h{j}.Filename, dict);
-        str = [s1.AcquisitionDate s1.AcquisitionTime];
+        try str = s1.AcquisitionDateTime;
+        catch
+            try str = [s1.AcquisitionDate s1.AcquisitionTime];
+            catch, t = []; break;
+            end
+        end
         t(j) = datenum(str, 'yyyymmddHHMMSS.fff');
     end
     t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
@@ -1568,89 +1576,90 @@ if nDir<2, return; end
 bval = nan(nDir, 1);
 bvec = nan(nDir, 3);
 s = h{1};
+ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
+% With this method, the code will get correct ref if bvec ref scheme changes 
+% some day, e.g. if GE saves (0018,9089) in the future.
+% ref = 0: IMG, UIH for now;
+% ref = 1: PCS, Siemens/Philips or unknown vendor, this is default
+% ref = 2: FPS, Bruker for now (need to verify)
+% ref = 3: FPS_GE, confusing signs
+%  Since some dicom do not save bval or bvec for bval=0 case, it is better to
+%  loop all directions to detect 'ref'.
 
 nSL = nii.hdr.dim(4);
 nFile =  numel(h);
 if isfield(s, 'bvec_original') % from BV or PAR file
     bval = s.B_value;
     bvec = s.bvec_original;
+    % ref = tryGetField(s, 'bvec_ref', 1); % not implemented yet
 elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
-    if nFile== 1 % all vol in 1 file, for Philips
+    if nFile== 1 % all vol in 1 file, for Philips/Bruker
         iDir = 1:nSL:nSL*nDir;
         if isfield(s, 'SortFrames'), iDir = s.SortFrames(iDir); end
-        s2 = struct('B_value', bval', 'DiffusionGradientDirection', bvec');
+        s2 = struct('B_value', bval', 'DiffusionGradientDirection', bvec', ...
+            'MRDiffusionGradOrientation', bvec');
         s2 = dicm_hdr(s, s2, iDir); % call search_MF_val
         bval = s2.B_value';
         bvec = s2.DiffusionGradientDirection';
-%         if all(isnan(bvec(:))) % Bruker
-%             a = nan(1, nDir);
-%             s2 = struct('DiffusionB_ValueXX', a, 'DiffusionB_ValueXY', a, ...
-%                         'DiffusionB_ValueXZ', a, 'DiffusionB_ValueYY', a, ...
-%                         'DiffusionB_ValueYZ', a, 'DiffusionB_ValueZZ', a);
-%             s2 = dicm_hdr(s, s2, iDir);
-%             bm = reshape(struct2array(s2), [nDir 6]);
-%             a = zeros(3);
-%             for i = 1:nDir % https://github.com/rordenlab/dcm2niix/issues/265
-%                 a(:) = bm(i, [1:3 2 4 5 3 5 6]);
-%                 [V, ~] = eig(a);
-%                 bvec(i,:) = V(:,3);
-%             end
-%         end
-%         if isfield(s, 'Private_0177_1101') && all(isnan(bvec(:))) % Bruker
-%             str = char(s.Private_0177_1101');
-%             expr = 'DiffusionBMatrix\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)\s+';
-%             [C, ind] = regexp(str, expr, 'tokens', 'end', 'once');
-%             if isequal(str2double(C), [nDir 9])
-%                 bm = sscanf(str(ind:end), '%f', nDir*9);
-%                 bm = reshape(bm, 3, 3, []);
-%                 [~, i] = sort(iDir); bm(:,:,i) = bm;
-%                 for i = 1:nDir
-%                     [V, ~] = eig(bm(:,:,i));
-%                     bvec(i,:) = V(:,3);
-%                 end
-%                 % errorLog('bvec is from B-matrix, so sign may be wrong.');
-%             end
-%         end
+        if all(isnan(bvec(:)))
+            bvec = s2.MRDiffusionGradOrientation';
+            if ~all(isnan(bvec(:))), ref = 0; end % UIH
+        end
         if isfield(s, 'Private_0177_1100') && all(isnan(bvec(:))) % Bruker
             str = char(s.Private_0177_1100');
             expr = 'DwGradVec\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)\s+'; % DwDir incomplete            
             [C, ind] = regexp(str, expr, 'tokens', 'end', 'once');
             if isequal(str2double(C), [nDir 3])
-                bvec = sscanf(str(ind+1:end), '%f', nDir*3);
+                ref = 2;
+                bvec = sscanf(str(ind:end), '%f', nDir*3);
                 bvec = normc(reshape(bvec, 3, []))';
                 [~, i] = sort(iDir); bvec(i,:) = bvec;
             end
         end
-    else % 1 vol per file, e.g. Siemens
-        for i = 1:nFile
+    elseif nDir == nFile % 1 vol per file, e.g. Siemens/UIH
+        for i = 1:nDir
             bval(i) = MF_val('B_value', h{i}, 1);
-            bvec(i,:) = MF_val('DiffusionGradientDirection', h{i}, 1);
+            a = MF_val('DiffusionGradientDirection', h{i}, 1);
+            if isempty(a)
+                a = MF_val('MRDiffusionGradOrientation', h{i}, 1);
+                if ~isempty(a), ref = 0; end % UIH
+            end
+            if ~isempty(a), bvec(i,:) = a; end
         end
+    else
+        errorLog('Number of files and diffusion directions not match');
+        return;
     end
 elseif nFile>1 % multiple files: order already in slices then volumes
     dict = dicm_dict(s.Manufacturer, {'B_value' 'B_factor' 'SlopInt_6_9' ...
-       'DiffusionDirectionX' 'DiffusionDirectionY' 'DiffusionDirectionZ'});
-    iDir = (0:nDir-1) * nFile/nDir + 1; % could be mosaic 
+       'DiffusionDirectionX' 'DiffusionDirectionY' 'DiffusionDirectionZ' ...
+       'MRDiffusionGradOrientation'});
+    iDir = (0:nDir-1) * nFile/nDir + 1; % could be mosaic or multiframe
     for j = 1:nDir % no bval/bvec for B0 volume
         s2 = h{iDir(j)};
         val = tryGetField(s2, 'B_value');
         if val == 0, continue; end
-        vec = tryGetField(s2, 'DiffusionGradientDirection'); % Siemens/Philips/UIH
-        if isempty(val) || isempty(vec) % likely GE
+        vec = tryGetField(s2, 'DiffusionGradientDirection'); % Siemens/Philips
+        if isempty(val) || isempty(vec) % GE/UIH
             s2 = dicm_hdr(s2.Filename, dict);
         end
         
         if isempty(val), val = tryGetField(s2, 'B_factor'); end % old Philips
         if isempty(val) && isfield(s2, 'SlopInt_6_9') % GE
-            val = s2.SlopInt_6_9(1);
+            val = mod(s2.SlopInt_6_9(1), 100000);
         end
         if isempty(val), val = 0; end % may be B_value=0
         bval(j) = val;
         
+        if isempty(vec)
+            vec = tryGetField(s2, 'MRDiffusionGradOrientation');
+            if ref==1 && ~isempty(vec), ref = 0; end % UIH
+        end
         if isempty(vec) % GE, old Philips
             vec(1) = tryGetField(s2, 'DiffusionDirectionX', 0);
             vec(2) = tryGetField(s2, 'DiffusionDirectionY', 0);
             vec(3) = tryGetField(s2, 'DiffusionDirectionZ', 0);
+            if ref==1 && strncmpi(s.Manufacturer, 'GE', 2), ref = 3; end
         end
         bvec(j,:) = vec;
     end
@@ -1678,11 +1687,16 @@ h{1}.bvec_original = bvec; % original from dicom
 
 % http://wiki.na-mic.org/Wiki/index.php/NAMIC_Wiki:DTI:DICOM_for_DWI_and_DTI
 [ixyz, R] = xform_mat(s, nii.hdr.dim(2:4)); % R takes care of slice dir
-if strncmpi(s.Manufacturer, 'UIH', 3) || strncmpi(s.Manufacturer, 'Bruker', 6)
-    % assume real image reference: unlike confusing GE scheme
-elseif strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
+if ref == 1 % PCS: Siemens/Philips
+    R = normc(R(:, 1:3));
+    bvec = bvec * R; % dicom plane to image plane
+elseif ref == 2 % FPS: Bruker in Freq/Phase/Slice reference
     if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
-        bvec = bvec(:, [2 1 3]); % dicom bvec in Freq/Phase/Slice order
+        bvec = bvec(:, [2 1 3]);
+    end
+elseif ref == 3 % FPS: GE in Freq/Phase/Slice reference
+    if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
+        bvec = bvec(:, [2 1 3]);
         bvec(:, 2) = -bvec(:, 2); % because of transpose?
         if ixyz(3)<3
             errorLog(sprintf(['%s: bvec sign for non-axial acquisition with' ...
@@ -1694,15 +1708,12 @@ elseif strncmpi(s.Manufacturer, 'GE', 2) % GE bvec already in image reference
     flp(3) = ~flp(3); % GE slice dir opposite to LPS for all sag/cor/tra
     if ixyz(3)==1, flp(1) = ~flp(1); end % Sag slice: don't know why
     bvec(:, flp) = -bvec(:, flp);
-else % Siemens/Philips
-    R = normc(R(:, 1:3));
-    bvec = bvec * R; % dicom plane to image plane
 end
 
 % bval may need to be scaled by norm(bvec)
 % https://mrtrix.readthedocs.io/en/latest/concepts/dw_scheme.html
 nm = sum(bvec .^ 2, 2);
-if any(nm>1e-4 & nm<0.999) % this check may not be necessary
+if any(nm>0.01 & abs(nm-1)>0.01) % this check may not be necessary
     h{1}.bval_original = bval; % before scaling
     bval = bval .* nm;
     nm(nm<1e-4) = 1; % remove zeros after correcting bval
@@ -2094,7 +2105,8 @@ hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
 
 uitxt('Output format', [8 166 82 16]);
 hs.rstFmt = uicontrol('Style', 'popup', 'Background', 'white', 'FontSize', fSz, ...
-    'Value', getpf('rstFmt',1), 'Position', [92 162 82 24], 'String', {' .nii' ' .hdr/.img' ' BIDS (http://bids.neuroimaging.io)'}, ...
+    'Value', getpf('rstFmt',1), 'Position', [92 162 82 24], ...
+    'String', {' .nii' ' .hdr/.img' ' BIDS (http://bids.neuroimaging.io)'}, ...
     'TooltipString', 'Choose output file format');
 
 hs.gzip = chkbox(fh, getpf('gzip',true), 'Compress', '', 'Compress into .gz files');
@@ -2194,7 +2206,7 @@ else
     elseif isfield(s, 'PEDirectionDisplayed') % UIH
         try d = s.PEDirectionDisplayed(1); catch, return; end
     elseif isfield(s, 'Private_0177_1100') % Bruker
-        expr ='(?<=\<\+?)[LRAPSI]{1}(?=;\s*phase\>)';
+        expr ='(?<=\<\+?)[LRAPSI]{1}(?=;\s*phase\>)'; % <+P;phase> or <P;phase>  
         d = regexp(char(s.Private_0177_1100'), expr, 'match', 'once');
         id = regexp('LRAPSI', d);
         id = id + mod(id,2)*2-1;
@@ -2234,10 +2246,9 @@ try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 % check slice ordering (Philips often needs SortFrames)
 n = numel(MF_val('DimensionIndexValues', s, 1));
 if n>0 && nFrame>1
-    s2 = struct('InStackPositionNumber', nan(1, nFrame), ...
-                'TemporalPositionIndex', nan(1, nFrame), ...
-                'DimensionIndexValues',  nan(n, nFrame), ...
-                'B_value', zeros(1, nFrame));
+    na = nan(1, nFrame);
+    s2 = struct('InStackPositionNumber', na, 'TemporalPositionIndex', na, ...
+                'DimensionIndexValues', nan(n,nFrame), 'B_value', zeros(1, nFrame));
     s2 = dicm_hdr(s, s2, 1:nFrame);
     if ~isnan(s2.InStackPositionNumber(1))
         SL = s2.InStackPositionNumber';
@@ -2247,6 +2258,7 @@ if n>0 && nFrame>1
         VL = s2.DimensionIndexValues([3:end 1],:)';
     end
     [ind, nSL] = sort_frames([SL s2.B_value'], VL);
+    if isempty(ind), s = []; return; end
     if ~isequal(ind, 1:nFrame) % && strncmpi(s.Manufacturer, 'Philips', 7)
         if ind(1) ~= 1 || ind(end) ~= nFrame 
             s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
@@ -2294,7 +2306,6 @@ val = MF_val(fld, s, iF);
 if ~isempty(val) && isfield(s, fld) && any(abs(val-s.(fld))>1e-4)
     s = []; return; % inconsistent orientation, skip
 end
-
 
 %% subfunction: return value from Shared or PerFrame FunctionalGroupsSequence
 function val = MF_val(fld, s, iFrame)
@@ -2406,14 +2417,14 @@ fseek(fid, 0, -1);
 fprintf(fid, '%s\n', errInfo);
 fclose(fid);
 
-%% Ger version in from file: version yyyy.mm.dd
+%% Get version yyyymmdd from README.md 
 function dStr = getVersion(str)
-dStr = '20130101';
+dStr = '20190209';
 if nargin<1 || isempty(str)
     pth = fileparts(mfilename('fullpath'));
     fname = fullfile(pth, 'README.md');
     if ~exist(fname, 'file'), return; end
-    str = fileread(fullfile(pth, 'README.md'));
+    str = fileread(fname);
 end
 a = regexp(str, 'version\s(\d{4}\.\d{2}\.\d{2})', 'tokens', 'once');
 if ~isempty(a), dStr = a{1}([1:4 6:7 9:10]); end
@@ -2913,6 +2924,7 @@ nFrame = size(sl, 1);
 if nSL==nFrame, ind = 1:nSL; ind(sl(:,1)) = ind; return; end % single vol
 nVol = floor(nFrame / nSL);
 badVol = nVol*nSL < nFrame; % incomplete volume
+ic(isnan(ic)) = 0;
 id = zeros(size(ic));
 for i = 1:size(ic,2)
     [~, ~, id(:,i)] = unique(ic(:,i)); % entries to index
