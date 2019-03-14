@@ -3006,10 +3006,6 @@ setappdata(0,'ModalityTable',TT.Data)
 setappdata(0,'SubjectTable',TS.Data)
 delete(h)
 
-function previewDicom(ax,s)
-nSL = double(tryGetField(s(1), 'LocationsInAcquisition'));
-if isempty(nSL)
-nSL = length(s);
 function my_closereq(src,callbackdata)
 % Close request function 
 % to display a question dialog box
@@ -3021,6 +3017,12 @@ switch selection
         setappdata(0,'Canceldicm2nii',true)
     case 'Cancel'
         return
+end
+
+function previewDicom(ax,s)
+nSL = double(tryGetField(s(1), 'LocationsInAcquisition'));
+if isempty(nSL)
+    nSL = length(s);
 end
 imagesc(ax,dicm_img(s{round(nSL/2)}));
 ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
