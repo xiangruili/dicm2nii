@@ -18,7 +18,8 @@ if exist(tsvfile,'file') && ~isempty(T)
     ind = find(strcmp(table2cell(T(:,1)),id),1);
     if isempty(ind)
         ind = size(T,1)+1;
-        T(end+1,1) = {id};
+        T.(T.Properties.VariableNames{1}) = string(T.(T.Properties.VariableNames{1}));
+        T.(T.Properties.VariableNames{1})(end+1) = {string(id)};
     end
     
     for ii=1:2:length(varargin)
@@ -40,7 +41,7 @@ if exist(tsvfile,'file') && ~isempty(T)
 
 else
     T=table;
-    T(end+1,:) = {id, varargin{2:2:end}};
+    T(end+1,:) = {string(id), varargin{2:2:end}};
     if isempty(inputname(1))
         idName = 'id';
     else
