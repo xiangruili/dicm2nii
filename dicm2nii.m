@@ -900,9 +900,10 @@ if bids
     end
 
     % GUI
+    setappdata(0,'Canceldicm2nii',false)
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
-    hf = uifigure('bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
+    hf = uifigure('bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr,'CloseRequestFcn',@my_closereq);
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
@@ -927,6 +928,9 @@ if bids
     TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)});
     
     waitfor(hf);
+    if getappdata(0,'Canceldicm2nii')
+        return;
+    end
     % get results
     ModalityTable = getappdata(0,'ModalityTable');
     SubjectTable = getappdata(0,'SubjectTable');
@@ -950,10 +954,10 @@ for i = 1:nRun
         if any(ismember(ModalityTable{i,2:3},'skip')), continue; end
         if isempty(char(SubjectTable{1,2})) % no session
             ses = '';
-            sessionid='01'; 
+            session_id='01'; 
         else
-            sessionid=char(SubjectTable{1,2}); 
-            ses = ['ses-' sessionid];
+            session_id=char(SubjectTable{1,2}); 
+            ses = ['ses-' session_id];
         end
         % folder
         modalityfolder = fullfile(['sub-' char(SubjectTable{1,1})],...
@@ -970,7 +974,7 @@ for i = 1:nRun
                 
         % _session.tsv
         tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-        write_tsv(sessionid,tsvfile,'acq_time',SubjectTable.AcquisitionDate,'Comment',SubjectTable.Comment)
+        write_tsv(session_id,tsvfile,'acq_time',SubjectTable.AcquisitionDate,'Comment',SubjectTable.Comment)
 
     end
     
@@ -3000,6 +3004,17 @@ function previewDicom(ax,s)
 nSL = double(tryGetField(s(1), 'LocationsInAcquisition'));
 if isempty(nSL)
 nSL = length(s);
+function my_closereq(src,callbackdata)
+% Close request function 
+% to display a question dialog box
+selection = uiconfirm(src,'Cancel Dicom conversion?',...
+    'Close dicm2nii');
+switch selection
+    case 'OK'
+        delete(src)
+        setappdata(0,'Canceldicm2nii',true)
+    case 'Cancel'
+        return
 end
 imagesc(ax,dicm_img(s{round(nSL/2)}));
 ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
