@@ -431,19 +431,8 @@ end
 
 rst3D = (isnumeric(fmt) && fmt>3) || (ischar(fmt) && ~isempty(regexpi(fmt, '3D')));
 
-if nargin==0
+if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
     create_gui; % show GUI if input is not enough
-    return;
-end
-
-if isempty(src) || (nargin<2 || isempty(niiFolder))
-    if isdeployed
-        load('dicm2nii_help.mat');
-        disp(H)
-    else
-        help('dicm2nii')
-    end
-    
     return;
 end
 
@@ -628,6 +617,7 @@ for i = 1:nRun
     end
     if ~isfield(s, 'Manufacturer'), s.Manufacturer = 'Unknown'; end
     subjs{i} = PatientName(s);
+    acqs{i} =  AcquisitionDateField(s);
     vendor{i} = s.Manufacturer;
     if isfield(s, 'SeriesNumber'), sNs(i) = s.SeriesNumber; 
     else, sNs(i) = fix(toc*1e6); 
@@ -750,11 +740,13 @@ for i = 1:nRun
 end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); 
 subjs = subjs(keep); vendor = vendor(keep);
+acqs  = acqs(keep);
 
 %% sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
 [subjs, ind] = sort(subjs);
 subj = unique(subjs); 
+acq = unique(acqs);
 h = h(ind); sNs = sNs(ind); studyIDs = studyIDs(ind); % by subjs now
 nStudy = ones(1, nRun); % one for each series
 for i = 1:numel(subj)
@@ -852,6 +844,12 @@ if bids
         fprintf('%s\n',subj{:})
         return;
     end
+    if numel(acq)>1
+        fprintf('Multiple acquitisition detected!!!!! Skipping...\nPlease convert sessions one by one with BIDS options\n')
+        fprintf('%s\n',acq{:})
+        return;
+    end
+
     % Table: subject Name
     try
         asciiInds=[1:47 58:64 91:96 123:127];
@@ -862,8 +860,11 @@ if bids
     catch
         Subject = {'01'};
     end
-    Session = {'01'};
-    S = table(Subject,Session);
+    Session                = {'01'};
+    AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
+    AcquisitionDate.Format = 'yyyy-MM-dd';
+    Comment                = {'N/A'};
+    S = table(Subject,Session,AcquisitionDate,Comment);
     
     % Table: Type/Modality
     valueset = {'skip','skip';
@@ -893,7 +894,8 @@ if bids
     for i = 1:nRun
         match = strcmp(T{i,1},ModalityTablePref{:,1});
         if any(match)
-            T{i,2:3} = ModalityTablePref{match,2:3};
+            T.Type(i) = ModalityTablePref.Type(match);
+            T.Modality(i) = ModalityTablePref.Modality(match);
         end
     end
 
@@ -906,7 +908,7 @@ if bids
     % tables
     TS = uitable(hf,'Data',S,'Position',[20 hf.Position(4)-110 hf.Position(3)-160 90]);
     TT = uitable(hf,'Data',T,'Position',[20 20 hf.Position(3)-160 hf.Position(4)-120]);
-    TS.ColumnEditable = [true true];
+    TS.ColumnEditable = [true true true true];
     TT.ColumnEditable = [false true true];
     setappdata(0,'ModalityTable',TT.Data)
     setappdata(0,'SubjectTable',TS.Data)
