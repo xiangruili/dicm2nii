@@ -1090,6 +1090,12 @@ function subj = PatientName(s)
 subj = tryGetField(s, 'PatientName');
 if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
 
+%% Subfunction: return PatientName
+function acq = AcquisitionDateField(s)
+acq = tryGetField(s, 'AcquisitionDate');
+if isempty(acq), acq = tryGetField(s, 'SeriesDate', []); end
+if isempty(acq), acq = tryGetField(s, 'StudyDate', []); end
+
 %% Subfunction: return SeriesDescription
 function name = ProtocolName(s)
 name = tryGetField(s, 'SeriesDescription');
@@ -2665,7 +2671,7 @@ else
     b = reshape(ipp, nSL, nVol)';
 end
 [~, sliceN] = sort(a); % no descend since wrong for PAR/singleDicom
-if any(abs(diff(a,2))>tol), err = 'Inconsistent slice spacing'; return; end
+if any(abs(diff(a,2))>tol), warning('Inconsistent slice spacing'); end
 if nVol>1
     b = diff(b);
     if any(abs(b(:))>tol), err = 'Irregular slice order'; return; end
