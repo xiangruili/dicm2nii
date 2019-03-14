@@ -916,6 +916,14 @@ if bids
     B.Text = 'OK';
     B.ButtonPushedFcn = @(btn,event) BtnModalityTable(hf,TT, TS);
     
+    % preview panel
+    ax = uiaxes(hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],'Colormap',gray(64));
+    previewDicom(ax,h{1});
+    axis(ax,'off');
+    ax.YTickLabel = [];
+    ax.XTickLabel = [];
+    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)});
+    
     waitfor(hf);
     % get results
     ModalityTable = getappdata(0,'ModalityTable');
@@ -2977,3 +2985,11 @@ end
 setappdata(0,'ModalityTable',TT.Data)
 setappdata(0,'SubjectTable',TS.Data)
 delete(h)
+
+function previewDicom(ax,s)
+nSL = double(tryGetField(s(1), 'LocationsInAcquisition'));
+if isempty(nSL)
+nSL = length(s);
+end
+imagesc(ax,dicm_img(s{round(nSL/2)}));
+ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
