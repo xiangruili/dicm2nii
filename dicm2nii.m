@@ -950,20 +950,28 @@ for i = 1:nRun
         if any(ismember(ModalityTable{i,2:3},'skip')), continue; end
         if isempty(char(SubjectTable{1,2})) % no session
             ses = '';
+            sessionid='01'; 
         else
-            ses = ['ses-' char(SubjectTable{1,2})];
+            sessionid=char(SubjectTable{1,2}); 
+            ses = ['ses-' sessionid];
         end
         % folder
         modalityfolder = fullfile(['sub-' char(SubjectTable{1,1})],...
                                     ses,...
                                     char(ModalityTable{i,2}));
-        mkdir(fullfile(niiFolder, modalityfolder));
+        if ~exist(fullfile(niiFolder, modalityfolder),'dir')
+            mkdir(fullfile(niiFolder, modalityfolder));
+        end
         
         % filename
         fnames{i} = fullfile(modalityfolder,...
                       ['sub-' char(SubjectTable{1,1}) '_' ses '_' char(ModalityTable{i,3})]);
         fnames{i} = strrep(fnames{i},'__','_');
-        
+                
+        % _session.tsv
+        tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+        write_tsv(sessionid,tsvfile,'acq_time',SubjectTable.AcquisitionDate,'Comment',SubjectTable.Comment)
+
     end
     
     nFile = numel(h{i});
