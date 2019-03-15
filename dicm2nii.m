@@ -3020,7 +3020,7 @@ switch selection
 end
 
 function previewDicom(ax,s)
-nSL = double(tryGetField(s(1), 'LocationsInAcquisition'));
+nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
 if isempty(nSL)
     nSL = length(s);
 end
