@@ -974,7 +974,7 @@ for i = 1:nRun
                 
         % _session.tsv
         tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-        write_tsv(session_id,tsvfile,'acq_time',SubjectTable.AcquisitionDate,'Comment',SubjectTable.Comment)
+        write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
 
     end
     
