@@ -11,16 +11,14 @@ function write_tsv(id,tsvfile,varargin)
 
 if iscell(tsvfile), tsvfile = tsvfile{1}; end
 if exist(tsvfile,'file') % read already existing tsvfile
-    opts = detectImportOptions(tsvfile,'FileType','text');
-    opts.VariableTypes{1}='char';
-    T = readtable(tsvfile,opts);
+    T = readtable(tsvfile,'FileType','text','Delimiter','\t','Format',repmat('%s',[1,length(varargin)/2+1]));
 end
 varargin(1:2:end) = cellfun(@genvarname,varargin(1:2:end),'uni',0);
 if exist(tsvfile,'file') && ~isempty(T) % append to already existing tsvfile
     ind = find(strcmp(table2cell(T(:,1)),id),1);
     if isempty(ind)
         ind = size(T,1)+1;
-        T.(T.Properties.VariableNames{1}){end+1} = char(string(id));
+        T.(T.Properties.VariableNames{1}){end+1,1} = char(string(id));
     end
     
     for ii=1:2:length(varargin)
