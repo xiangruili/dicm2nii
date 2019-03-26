@@ -412,7 +412,7 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     fmt = '.nii';
 end
 if bids && verLessThan('matlab','9.4')
-    fprintf('BIDS conversion requires MATLAB R2018a or more. return.')
+    fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n')
 end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
@@ -892,7 +892,7 @@ if bids
     
     ModalityTablePref = getpref('dicm2nii_gui_para', 'ModalityTable', T);
     for i = 1:nRun
-        match = strcmp(T{i,1},ModalityTablePref{:,1});
+        match = cellfun(@(Mod) strcmp(Mod,T{i,1}),table2cell(ModalityTablePref(:,1)));
         if any(match)
             T.Type(i) = ModalityTablePref.Type(match);
             T.Modality(i) = ModalityTablePref.Modality(match);
@@ -903,24 +903,72 @@ if bids
     setappdata(0,'Canceldicm2nii',false)
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
-    hf = uifigure('bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr,'CloseRequestFcn',@my_closereq);
+    figargs = {'bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],...
+               'Color', clr,...
+               'CloseRequestFcn',@my_closereq};
+    if verLessThan('matlab','9.4')
+        hf = figure(figargs{1});
+        set(hf,figargs{2:end});
+    else
+        hf = uifigure(figargs{:});
+    end
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
-    TS = uitable(hf,'Data',S,'Position',[20 hf.Position(4)-110 hf.Position(3)-160 90]);
-    TT = uitable(hf,'Data',T,'Position',[20 20 hf.Position(3)-160 hf.Position(4)-120]);
+    if verLessThan('matlab','9.4')
+        SCN = S.Properties.VariableNames;
+        S   = table2cell(S); 
+        S{3}= datestr(S{3},'yyyy-mm-dd');
+        TCN = T.Properties.VariableNames;
+        T   = cellfun(@char,table2cell(T),'uni',0);
+    end
+    TS = uitable(hf,'Data',S);
+    TT = uitable(hf,'Data',T);
+    TSpos = [20 hf.Position(4)-110 hf.Position(3)-160 90];
+    TTpos = [20 20 hf.Position(3)-160 hf.Position(4)-120];
+    if verLessThan('matlab','9.4')
+        setpixelposition(TS,TSpos);
+        set(TS,'Units','Normalized')
+        setpixelposition(TT,TTpos);
+        set(TT,'Units','Normalized')
+    else
+        TS.Position = TSpos;
+        TT.Position = TTpos;
+    end
     TS.ColumnEditable = [true true true true];
+    if verLessThan('matlab','9.4')
+        TS.ColumnName = SCN;
+        TT.ColumnName = TCN;
+    end
     TT.ColumnEditable = [false true true];
     setappdata(0,'ModalityTable',TT.Data)
     setappdata(0,'SubjectTable',TS.Data)
 
     % button
-    B = uibutton(hf,'Position',[hf.Position(3)-120 20 100 30]);
-    B.Text = 'OK';
-    B.ButtonPushedFcn = @(btn,event) BtnModalityTable(hf,TT, TS);
+   	Bpos = [hf.Position(3)-120 20 100 30];
+    BCB  = @(btn,event) BtnModalityTable(hf,TT, TS);
+    if verLessThan('matlab','9.4')
+        B = uicontrol(hf,'Style','pushbutton','String','OK');
+        set(B,'Callback',BCB);
+        setpixelposition(B,Bpos)
+        set(B,'Units','Normalized')
+    else
+        B = uibutton(hf,'Position',Bpos);
+        B.Text = 'OK';
+        B.ButtonPushedFcn = BCB;
+    end
     
     % preview panel
-    ax = uiaxes(hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],'Colormap',gray(64));
+    axesArgs = {hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],...
+                   'Colormap',gray(64)};
+    if verLessThan('matlab','9.4')
+        ax = imagesc(dicm_img(h{1}{1}));
+        ax = ax.Parent;
+        setpixelposition(ax,axesArgs{3})
+        colormap(ax,axesArgs{5})
+    else
+        ax = uiaxes(axesArgs{:});
+    end
     previewDicom(ax,h{1});
     axis(ax,'off');
     ax.YTickLabel = [];
@@ -935,14 +983,17 @@ if bids
     ModalityTable = getappdata(0,'ModalityTable');
     SubjectTable = getappdata(0,'SubjectTable');
     % setpref
-    ModalityTableSavePref = ModalityTable(~any(ismember(ModalityTable{:,2:3},'skip'),2),:);
+    if istable(ModalityTable)
+        ModalityTable = cellfun(@char,table2cell(ModalityTable),'uni',0);
+    end
+    ModalityTableSavePref = ModalityTable(~any(ismember(ModalityTable(:,2:3),'skip'),2),:);
     for imod = 1:size(ModalityTableSavePref,1)
-        match = strcmp(ModalityTableSavePref{imod,1},ModalityTablePref{:,1});
+        match = cellfun(@(Mod) strcmp(Mod,ModalityTableSavePref{imod,1}),table2cell(ModalityTablePref(:,1)));
         if any(match) % replace old pref
-            ModalityTablePref{match,2:3} = ModalityTableSavePref{imod,2:3};
+            ModalityTablePref.Type(match) = ModalityTableSavePref{imod,2};
+            ModalityTablePref.Modality(match) = ModalityTableSavePref{imod,3};
         else % append new pref
-            ModalityTablePref{end+1,1}   = ModalityTableSavePref{imod,1};
-            ModalityTablePref{end,2:3} = ModalityTableSavePref{imod,2:3};
+            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(end,:)];
         end
     end
     setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref);
@@ -951,7 +1002,7 @@ end
 %% Convert
 for i = 1:nRun
     if bids
-        if any(ismember(ModalityTable{i,2:3},'skip')), continue; end
+        if any(ismember(ModalityTable(i,2:3),'skip')), continue; end
         if isempty(char(SubjectTable{1,2})) % no session
             ses = '';
             session_id='01'; 
@@ -974,8 +1025,11 @@ for i = 1:nRun
                 
         % _session.tsv
         tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-        write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
-
+        if verLessThan('matlab','9.4')
+            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
+        else
+            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+        end
     end
     
     nFile = numel(h{i});
@@ -1906,8 +1960,7 @@ switch cmd
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
         if rstFmt == 4
             if verLessThan('matlab','9.4')
-                warndlg('BIDS conversion requires MATLAB R2018a or more.','MATLAB outdated');
-                return;
+                fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n');
             end
             if get(hs.gzip,  'Value')
                 rstFmt = 'bids';
@@ -2998,7 +3051,12 @@ v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
 %%
 
 function BtnModalityTable(h,TT,TS)
-if all(any(ismember(TT.Data{:,2:3},'skip'),2))
+if verLessThan('matlab','9.4')
+    dat = TT.Data;
+else
+    dat = cellfun(@char,table2cell(TT.Data),'uni',0);
+end
+if all(any(ismember(dat(:,2:3),'skip'),2))
     warndlg('All images are skipped... Please select the type and modality for all scans','No scan selected');
     return;
 end
@@ -3009,8 +3067,12 @@ delete(h)
 function my_closereq(src,callbackdata)
 % Close request function 
 % to display a question dialog box
-selection = uiconfirm(src,'Cancel Dicom conversion?',...
-    'Close dicm2nii');
+if verLessThan('matlab','9.4')
+    selection = questdlg('Cancel Dicom conversion?','Close dicm2nii','OK','Cancel','Cancel');
+else
+    selection = uiconfirm(src,'Cancel Dicom conversion?',...
+        'Close dicm2nii');
+end
 switch selection
     case 'OK'
         delete(src)
@@ -3024,5 +3086,13 @@ nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
 if isempty(nSL)
     nSL = length(s);
 end
-imagesc(ax,dicm_img(s{round(nSL/2)}));
+if verLessThan('matlab','9.4')
+    axis(ax);
+    imagesc(dicm_img(s{round(nSL/2)}));
+    axis(ax,'off');
+    ax.YTickLabel = [];
+    ax.XTickLabel = [];
+else
+    imagesc(ax,dicm_img(s{round(nSL/2)}));
+end
 ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
