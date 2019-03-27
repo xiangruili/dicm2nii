@@ -412,7 +412,7 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     fmt = '.nii';
 end
 if bids && verLessThan('matlab','9.4')
-    fprintf('BIDS conversion requires MATLAB R2018a or more. return.')
+    fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n')
 end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
@@ -617,6 +617,7 @@ for i = 1:nRun
     end
     if ~isfield(s, 'Manufacturer'), s.Manufacturer = 'Unknown'; end
     subjs{i} = PatientName(s);
+    acqs{i} =  AcquisitionDateField(s);
     vendor{i} = s.Manufacturer;
     if isfield(s, 'SeriesNumber'), sNs(i) = s.SeriesNumber; 
     else, sNs(i) = fix(toc*1e6); 
@@ -741,11 +742,13 @@ for i = 1:nRun
 end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); 
 subjs = subjs(keep); vendor = vendor(keep);
+acqs  = acqs(keep);
 
 %% sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
 [subjs, ind] = sort(subjs);
 subj = unique(subjs); 
+acq = unique(acqs);
 h = h(ind); sNs = sNs(ind); studyIDs = studyIDs(ind); % by subjs now
 nStudy = ones(1, nRun); % one for each series
 for i = 1:numel(subj)
@@ -844,6 +847,12 @@ if bids
         fprintf('%s\n',subj{:})
         return;
     end
+    if numel(acq)>1
+        fprintf('Multiple acquitisition detected!!!!! Skipping...\nPlease convert sessions one by one with BIDS options\n')
+        fprintf('%s\n',acq{:})
+        return;
+    end
+
     % Table: subject Name
     try
         asciiInds=[1:47 58:64 91:96 123:127];
@@ -854,8 +863,11 @@ if bids
     catch
         Subject = {'01'};
     end
-    Session = {'01'};
-    S = table(Subject,Session);
+    Session                = {'01'};
+    AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
+    AcquisitionDate.Format = 'yyyy-MM-dd';
+    Comment                = {'N/A'};
+    S = table(Subject,Session,AcquisitionDate,Comment);
     
     % Table: Type/Modality
     valueset = {'skip','skip';
@@ -883,44 +895,112 @@ if bids
     
     ModalityTablePref = getpref('dicm2nii_gui_para', 'ModalityTable', T);
     for i = 1:nRun
-        match = strcmp(T{i,1},ModalityTablePref{:,1});
+        match = cellfun(@(Mod) strcmp(Mod,T{i,1}),table2cell(ModalityTablePref(:,1)));
         if any(match)
-            T{i,2:3} = ModalityTablePref{match,2:3};
+            T.Type(i) = ModalityTablePref.Type(match);
+            T.Modality(i) = ModalityTablePref.Modality(match);
         end
     end
 
     % GUI
+    setappdata(0,'Canceldicm2nii',false)
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
-    hf = uifigure('bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],'Color', clr);
+    figargs = {'bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],...
+               'Color', clr,...
+               'CloseRequestFcn',@my_closereq};
+    if verLessThan('matlab','9.4')
+        hf = figure(figargs{1});
+        set(hf,figargs{2:end});
+        % add help
+        set(hf,'ToolBar','none')
+        set(hf,'MenuBar','none')
+    else
+        hf = uifigure(figargs{:});
+    end
+    uimenu(hf,'Text','help','Callback',@(src,evnt) showHelp(valueset))
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
-    TS = uitable(hf,'Data',S,'Position',[20 hf.Position(4)-110 hf.Position(3)-160 90]);
-    TT = uitable(hf,'Data',T,'Position',[20 20 hf.Position(3)-160 hf.Position(4)-120]);
-    TS.ColumnEditable = [true true];
+    if verLessThan('matlab','9.4')
+        SCN = S.Properties.VariableNames;
+        S   = table2cell(S); 
+        S{3}= datestr(S{3},'yyyy-mm-dd');
+        TCN = T.Properties.VariableNames;
+        T   = cellfun(@char,table2cell(T),'uni',0);
+    end
+    TS = uitable(hf,'Data',S);
+    TT = uitable(hf,'Data',T);
+    TSpos = [20 hf.Position(4)-110 hf.Position(3)-160 90];
+    TTpos = [20 20 hf.Position(3)-160 hf.Position(4)-120];
+    if verLessThan('matlab','9.4')
+        setpixelposition(TS,TSpos);
+        set(TS,'Units','Normalized')
+        setpixelposition(TT,TTpos);
+        set(TT,'Units','Normalized')
+    else
+        TS.Position = TSpos;
+        TT.Position = TTpos;
+    end
+    TS.ColumnEditable = [true true true true];
+    if verLessThan('matlab','9.4')
+        TS.ColumnName = SCN;
+        TT.ColumnName = TCN;
+    end
     TT.ColumnEditable = [false true true];
     setappdata(0,'ModalityTable',TT.Data)
     setappdata(0,'SubjectTable',TS.Data)
 
     % button
-    B = uibutton(hf,'Position',[hf.Position(3)-120 20 100 30]);
-    B.Text = 'OK';
-    B.ButtonPushedFcn = @(btn,event) BtnModalityTable(hf,TT, TS);
+   	Bpos = [hf.Position(3)-120 20 100 30];
+    BCB  = @(btn,event) BtnModalityTable(hf,TT, TS);
+    if verLessThan('matlab','9.4')
+        B = uicontrol(hf,'Style','pushbutton','String','OK');
+        set(B,'Callback',BCB);
+        setpixelposition(B,Bpos)
+        set(B,'Units','Normalized')
+    else
+        B = uibutton(hf,'Position',Bpos);
+        B.Text = 'OK';
+        B.ButtonPushedFcn = BCB;
+    end
+    
+    % preview panel
+    axesArgs = {hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],...
+                   'Colormap',gray(64)};
+    if verLessThan('matlab','9.4')
+        ax = imagesc(dicm_img(h{1}{1}));
+        ax = ax.Parent;
+        setpixelposition(ax,axesArgs{3})
+        colormap(ax,axesArgs{5})
+    else
+        ax = uiaxes(axesArgs{:});
+    end
+    previewDicom(ax,h{1});
+    axis(ax,'off');
+    ax.YTickLabel = [];
+    ax.XTickLabel = [];
+    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)});
     
     waitfor(hf);
+    if getappdata(0,'Canceldicm2nii')
+        return;
+    end
     % get results
     ModalityTable = getappdata(0,'ModalityTable');
     SubjectTable = getappdata(0,'SubjectTable');
     % setpref
-    ModalityTableSavePref = ModalityTable(~any(ismember(ModalityTable{:,2:3},'skip'),2),:);
+    if istable(ModalityTable)
+        ModalityTable = cellfun(@char,table2cell(ModalityTable),'uni',0);
+    end
+    ModalityTableSavePref = ModalityTable(~any(ismember(ModalityTable(:,2:3),'skip'),2),:);
     for imod = 1:size(ModalityTableSavePref,1)
-        match = strcmp(ModalityTableSavePref{imod,1},ModalityTablePref{:,1});
+        match = cellfun(@(Mod) strcmp(Mod,ModalityTableSavePref{imod,1}),table2cell(ModalityTablePref(:,1)));
         if any(match) % replace old pref
-            ModalityTablePref{match,2:3} = ModalityTableSavePref{imod,2:3};
+            ModalityTablePref.Type(match) = ModalityTableSavePref{imod,2};
+            ModalityTablePref.Modality(match) = ModalityTableSavePref{imod,3};
         else % append new pref
-            ModalityTablePref{end+1,1}   = ModalityTableSavePref{imod,1};
-            ModalityTablePref{end,2:3} = ModalityTableSavePref{imod,2:3};
+            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(end,:)];
         end
     end
     setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref);
@@ -929,23 +1009,34 @@ end
 %% Convert
 for i = 1:nRun
     if bids
-        if any(ismember(ModalityTable{i,2:3},'skip')), continue; end
+        if any(ismember(ModalityTable(i,2:3),'skip')), continue; end
         if isempty(char(SubjectTable{1,2})) % no session
             ses = '';
+            session_id='01'; 
         else
-            ses = ['ses-' char(SubjectTable{1,2})];
+            session_id=char(SubjectTable{1,2}); 
+            ses = ['ses-' session_id];
         end
         % folder
         modalityfolder = fullfile(['sub-' char(SubjectTable{1,1})],...
                                     ses,...
                                     char(ModalityTable{i,2}));
-        mkdir(fullfile(niiFolder, modalityfolder));
+        if ~exist(fullfile(niiFolder, modalityfolder),'dir')
+            mkdir(fullfile(niiFolder, modalityfolder));
+        end
         
         % filename
         fnames{i} = fullfile(modalityfolder,...
               ['sub-' char(SubjectTable{1,1}) '_' ses '_' char(ModalityTable{i,3})]);
         fnames{i} = strrep(fnames{i},'__','_');
-        
+                
+        % _session.tsv
+        tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+        if verLessThan('matlab','9.4')
+            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
+        else
+            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+        end
     end
     
     nFile = numel(h{i});
@@ -1059,6 +1150,12 @@ return;
 function subj = PatientName(s)
 subj = tryGetField(s, 'PatientName');
 if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
+
+%% Subfunction: return PatientName
+function acq = AcquisitionDateField(s)
+acq = tryGetField(s, 'AcquisitionDate');
+if isempty(acq), acq = tryGetField(s, 'SeriesDate', []); end
+if isempty(acq), acq = tryGetField(s, 'StudyDate', []); end
 
 %% Subfunction: return SeriesDescription
 function name = ProtocolName(s)
@@ -1919,8 +2016,7 @@ switch cmd
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
         if rstFmt == 4
             if verLessThan('matlab','9.4')
-                warndlg('BIDS conversion requires MATLAB R2018a or more.','MATLAB outdated');
-                return;
+                fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n');
             end
             if get(hs.gzip,  'Value')
                 rstFmt = 'bids';
@@ -2690,7 +2786,7 @@ else
     b = reshape(ipp, nSL, nVol)';
 end
 [~, sliceN] = sort(a); % no descend since wrong for PAR/singleDicom
-if any(abs(diff(a,2))>tol), err = 'Inconsistent slice spacing'; return; end
+if any(abs(diff(a,2))>tol), warning('Inconsistent slice spacing'); end
 if nVol>1
     b = diff(b);
     if any(abs(b(:))>tol), err = 'Irregular slice order'; return; end
@@ -2781,6 +2877,7 @@ fclose(fid);
 function checkUpdate(mfile)
 verLink = 'https://github.com/xiangruili/dicm2nii/blob/master/README.md';
 webUrl = 'https://www.mathworks.com/matlabcentral/fileexchange/42997';
+if ~isdeployed
 try
     str = webread(verLink);
 catch me
@@ -2832,6 +2929,7 @@ rmdir(tdir, 's');
 rehash;
 warndlg(['Package updated successfully. Please restart ' mfile ...
          ', otherwise it may give error.'], 'Check update');
+end
 
 %% Subfunction: return NumberOfImagesInMosaic if Siemens mosaic, or [] otherwise.
 % If NumberOfImagesInMosaic in CSA is >1, it is mosaic, and we are done. 
@@ -3018,10 +3116,81 @@ v = bsxfun(@rdivide, M, den);
 %%
 
 function BtnModalityTable(h,TT,TS)
-if all(any(ismember(TT.Data{:,2:3},'skip'),2))
+if verLessThan('matlab','9.4')
+    dat = TT.Data;
+else
+    dat = cellfun(@char,table2cell(TT.Data),'uni',0);
+end
+if all(any(ismember(dat(:,2:3),'skip'),2))
     warndlg('All images are skipped... Please select the type and modality for all scans','No scan selected');
     return;
 end
 setappdata(0,'ModalityTable',TT.Data)
 setappdata(0,'SubjectTable',TS.Data)
 delete(h)
+
+function my_closereq(src,callbackdata)
+% Close request function 
+% to display a question dialog box
+if verLessThan('matlab','9.4')
+    selection = questdlg('Cancel Dicom conversion?','Close dicm2nii','OK','Cancel','Cancel');
+else
+    selection = uiconfirm(src,'Cancel Dicom conversion?',...
+        'Close dicm2nii');
+end
+switch selection
+    case 'OK'
+        delete(src)
+        setappdata(0,'Canceldicm2nii',true)
+    case 'Cancel'
+        return
+end
+
+function previewDicom(ax,s)
+nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
+if isempty(nSL)
+    nSL = length(s);
+end
+if verLessThan('matlab','9.4')
+    axis(ax);
+    imagesc(dicm_img(s{round(nSL/2)}));
+    axis(ax,'off');
+    colormap(ax,'gray')
+    ax.YTickLabel = [];
+    ax.XTickLabel = [];
+else
+    imagesc(ax,dicm_img(s{round(nSL/2)}));
+end
+ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
+
+function showHelp(valueset)
+%%
+msg = {'BIDS Converter module for dicm2nii',...
+    'tanguy.duval@inserm.fr',...
+    'http://bids.neuroimaging.io',...
+    '------------------------------------------',...
+    'Info Table',...
+    '  Subject:            subject id. 1rst layer in directory structure',...
+    '                       ex: John',...
+    '                       No space, no dash, no underscore!',...
+    '  Session:            session id. 2nd  layer in directory structure',...
+    '                       ex: 01',...
+    '                       No space, no dash, no underscore!',...
+    '  AcquisitionDate:    Session date. 1rst Column in the session',...
+    '                        description file (sub-Subject_sessions.tsv).',...
+    '  Comment:            Comments.     2nd  Column in the session',...
+    '                        description file (sub-Subject_sessions.tsv).',...
+    '------------------------------------------',...
+    'Sequence Table',...
+    '  Name:                 SerieDescription extracted from the dicom field.',...
+    '  Type:                 type of imaging modality. 3rd layer in directory structure.',...
+    ['                        ex: ' strjoin(unique(valueset(:,1)),', ')],...
+    '                         ''skip'' to skip conversion',...
+    '  Modality:             Modality. suffix of filename. ',...
+    ['                        ex: ' strjoin(unique(valueset(:,2)),', ')],...
+    '                         ''skip'' to skip conversion',...
+    ''};
+h = msgbox(msg,'Help on BIDS converter');
+set(findall(h,'Type','Text'),'FontName','FixedWidth');
+Pos = get(h,'Position'); Pos(3) = 450;
+set(h,'Position',Pos)
