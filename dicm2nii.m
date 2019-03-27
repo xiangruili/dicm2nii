@@ -912,10 +912,10 @@ if bids
         % add help
         set(hf,'ToolBar','none')
         set(hf,'MenuBar','none')
-        uimenu(hf,'Text','help','Callback',@(src,evnt) showHelp(valueset))
     else
         hf = uifigure(figargs{:});
     end
+    uimenu(hf,'Text','help','Callback',@(src,evnt) showHelp(valueset))
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
