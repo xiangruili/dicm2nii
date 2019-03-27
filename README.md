@@ -1,3 +1,20 @@
+# INSTALL BIDS converter
+Copy paste in your Matlab command line:
+````matlab
+% download
+websave('dicm2nii.zip','https://github.com/tanguyduval/dicm2nii/archive/master.zip')
+unzip dicm2nii.zip
+% add to Matlab path
+addpath('dicm2nii-master')
+% set preferences for BIDS
+setpref('dicm2nii_gui_para','rstFmt',3)
+setpref('dicm2nii_gui_para','save_json',true)
+% run
+dicm2nii
+````
+
+If you don't have Matlab, download compiled versions:
+https://github.com/tanguyduval/dicm2nii/releases
 
 # DICOM to NIfTI conversion, DICOM and NIfTI tools, NIfTI visualization (version 2019.01.12)
 
