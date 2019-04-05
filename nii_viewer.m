@@ -2142,7 +2142,10 @@ if strcmp(get(h, 'Tag'), 'OK') % done
 
     i = get(hs.dpi, 'Value');
     str = get(hs.dpi, 'String');
-    pf.dpi = str{i}; 
+    pf.dpi = str{i};
+    
+    hs1 = guidata(fh);
+    set(hs1.pref, 'UserData', pf);
         
     setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
     delete(get(h, 'Parent'));
@@ -2929,13 +2932,11 @@ function c = img_cog(img)
 % Return the index of center of gravity in img (must be 3D).
 img(isnan(img)) = 0;
 img = double(abs(img));
-gs = sum(img(:));
+img = img / sum(img(:));
 c = ones(3,1);
 for i = 1:3
-    if size(img,i)==1, continue; end
-    a = shiftdim(img, i-1);
-    a = sum(sum(a,3),2);
-    c(i) = (1:size(img,i)) * a / gs;
+    a = permute(img, [i 1:i-1 i+1:3]);
+    c(i) = (1:size(img,i)) * sum(sum(a,3),2);
 end
 
 %% set up disp parameter for new nifti
