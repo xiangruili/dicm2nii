@@ -60,7 +60,9 @@ if isfield(s.PixelData, 'Format') % all expl dicm
     fmt = s.PixelData.Format;
     if isfield(s, 'BitsAllocated')
         bpp = double(s.BitsAllocated);
-        if bpp==8 && strcmp(fmt, 'uint16'), fmt = 'uint8'; end % ugly fix
+        if bpp==8 && strcmp(fmt, 'uint16'), fmt = 'uint8'; % ugly fix
+        elseif bpp==16 && strcmp(fmt, 'uint8'), fmt = 'uint16'; % by CorradoC
+        end
     elseif regexp(fmt, 'single$'), bpp = 32;
     elseif regexp(fmt, 'double$'), bpp = 64;
     else, bpp = str2double(regexp(fmt, '(?<=int)\d+', 'match', 'once'));
