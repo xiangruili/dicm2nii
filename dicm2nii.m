@@ -3129,7 +3129,7 @@ setappdata(0,'ModalityTable',TT.Data)
 setappdata(0,'SubjectTable',TS.Data)
 delete(h)
 
-function my_closereq(src,callbackdata)
+function my_closereq(src,~)
 % Close request function 
 % to display a question dialog box
 if verLessThan('matlab','9.4')
