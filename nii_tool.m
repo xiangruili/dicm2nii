@@ -317,6 +317,7 @@ elseif strcmpi(cmd, 'save')
     end
     if isempty(fext), fext = '.nii'; end % default single .nii file
     fname = fullfile(pth, fname); % without file ext
+    if nargout, varargout{1} = []; end
     isNii = strcmpi(fext, '.nii'); % will use .img/.hdr if not .nii
     
     % Deal with NIfTI version and sizeof_hdr
