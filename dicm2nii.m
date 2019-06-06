@@ -1839,6 +1839,7 @@ function val = csa_header(s, key)
 val = [];
 fld = 'CSAImageHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
+if isfield(s, key), val = s.(key); return; end % general tag: 2nd choice
 fld = 'CSASeriesHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 
@@ -3063,7 +3064,7 @@ if exist('flip', 'builtin')
     y = builtin('flip', varargin{:});
 else
     if nargin<2, varargin{2} = find(size(varargin{1})>1, 1); end
-    y = flipdim(varargin); %#ok
+    y = flipdim(varargin{:}); %#ok
 end
 
 %% return all file names in a folder, including in sub-folders
