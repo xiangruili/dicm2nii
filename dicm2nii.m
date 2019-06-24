@@ -1151,11 +1151,11 @@ function subj = PatientName(s)
 subj = tryGetField(s, 'PatientName');
 if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
 
-%% Subfunction: return PatientName
+%% Subfunction: return AcquisitionDate
 function acq = AcquisitionDateField(s)
 acq = tryGetField(s, 'AcquisitionDate');
-if isempty(acq), acq = tryGetField(s, 'SeriesDate', []); end
-if isempty(acq), acq = tryGetField(s, 'StudyDate', []); end
+if isempty(acq), acq = tryGetField(s, 'SeriesDate', ''); end
+if isempty(acq), acq = tryGetField(s, 'StudyDate' , ''); end
 
 %% Subfunction: return SeriesDescription
 function name = ProtocolName(s)
