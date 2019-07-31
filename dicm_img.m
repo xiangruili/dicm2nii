@@ -35,13 +35,12 @@ function img = dicm_img(s, xpose)
 % 160521 support dicom with BitsStored~=HighBit+1 (thx RayL).
 % 171201 Bug fix for compressed dicom without offset table (thx DianaG).
 
-persistent flds dict mem cleanObj;
-if isempty(flds), flds = {'Rows' 'Columns'}; end
-if isstruct(s) && ~all(isfield(s, [flds 'PixelData'])), s = s.Filename; end
+persistent dict mem cleanObj;
+if isstruct(s) && ~all(isfield(s, {'Rows' 'Columns' 'PixelData'})), s = s.Filename; end
 if ischar(s) % input is file name
     if isempty(dict)
-        dict = dicm_dict('', ['SamplesPerPixel' 'PlanarConfiguration' flds ...
-            'BitsAllocated' 'BitsStored' 'HighBit' 'PixelRepresentation' ]);
+        dict = dicm_dict('', {'SamplesPerPixel' 'PlanarConfiguration' 'Rows' 'Columns' ...
+            'BitsAllocated' 'BitsStored' 'HighBit' 'PixelRepresentation'});
     end
     [s, err] = dicm_hdr(s, dict); 
     if isempty(s), error(err); end
@@ -60,7 +59,9 @@ if isfield(s.PixelData, 'Format') % all expl dicm
     fmt = s.PixelData.Format;
     if isfield(s, 'BitsAllocated')
         bpp = double(s.BitsAllocated);
-        if bpp==8 && strcmp(fmt, 'uint16'), fmt = 'uint8'; end % ugly fix
+        if bpp==8 && strcmp(fmt, 'uint16'), fmt = 'uint8'; % ugly fix
+        elseif bpp==16 && strcmp(fmt, 'uint8'), fmt = 'uint16'; % by CorradoC
+        end
     elseif regexp(fmt, 'single$'), bpp = 32;
     elseif regexp(fmt, 'double$'), bpp = 64;
     else, bpp = str2double(regexp(fmt, '(?<=int)\d+', 'match', 'once'));

@@ -223,8 +223,10 @@ if toSearch % search each tag if header is short and not many tags asked
         if ~isempty(i)
             i = i(1) + 4 + p.expl*2; % Manufacturer should be the earliest one
             [n, nvr] = val_len('LO', b8(i+(0:5)), p.expl, p.be); i = i + nvr;
-            dat = deblank(bc(i+(0:n-1)));
-            [p, dict] = updateVendor(p, dat);
+            if i+n<p.iPixelData
+                dat = deblank(bc(i+(0:n-1)));
+                [p, dict] = updateVendor(p, dat);
+            end
         end
     end
     
@@ -236,7 +238,7 @@ if toSearch % search each tag if header is short and not many tags asked
     if ~isempty(i)
         i = i(1) + 4 + p.expl*2; % take 1st
         [n, nvr] = val_len('IS', b8(i+(0:5)), p.expl, p.be); i = i + nvr;
-        p.nFrames = str2double(bc(i+(0:n-1)));
+        if i+n<p.iPixelData, p.nFrames = str2double(bc(i+(0:n-1))); end
     end
     
     for k = 1:numel(p.dict.tag)

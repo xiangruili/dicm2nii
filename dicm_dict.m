@@ -1267,7 +1267,7 @@ elseif strncmpi(vendor, 'UIH', 3)
     '0065' '1032' 'SH' 'MRKSpaceFilter'
     '0065' '1033' 'SH' 'MRTableMode'
     '0065' '1036' 'OB' 'MRDiscoParameter'
-    '0065' '1037' 'FD' 'DiffusionGradientDirection' % 'MRDiffusionGradOrientation'
+    '0065' '1037' 'FD' 'MRDiffusionGradOrientation'
     '0065' '1038' 'FD' 'MRPerfusionNoiseLevel'
     '0065' '1039' 'SH' 'MRGradRange'
     '0065' '1050' 'DS' 'LocationsInAcquisition' % MRNumberOfSliceInVolume
