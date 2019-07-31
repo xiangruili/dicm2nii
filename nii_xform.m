@@ -142,7 +142,31 @@ if ~iscell(target)
         R0 = quat2R(hdr);
         frm = q;
     else
-        error('No matching transformation between source and template.');
+        switch q
+            case 1
+                targetqspace = 'Scanner space';
+            case 2
+                targetqspace = 'Coordinates aligned to another file''s, or to anatomical "truth". ';
+            case 3
+                targetqspace = 'Coordinates aligned to Talairach-Tournoux Atlas';
+            case 4
+                targetqspace = 'MNI 152 normalized coordinates.';
+            otherwise
+                targetqspace = 'Undefined coordinate system';
+        end
+        switch sq(2)
+            case 1
+                sourceqspace = 'Scanner space';
+            case 2
+                sourceqspace = 'Coordinates aligned to another file''s, or to anatomical "truth". ';
+            case 3
+                sourceqspace = 'Coordinates aligned to Talairach-Tournoux Atlas';
+            case 4
+                sourceqspace = 'MNI 152 normalized coordinates.';
+            otherwise
+                sourceqspace = 'Undefined coordinate system';
+        end
+        error(sprintf('target file: %s\nsource file: %s',targetqspace,sourceqspace),'No matching transformation between source and template.');
     end
 
     if sq(1) == frm || (sq(1)>2 && frm>2) || sq(2)<1
