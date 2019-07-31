@@ -882,6 +882,8 @@ if bids
         'anat','PD';
         'anat','PDmap';
         'dwi' ,'dwi';
+        'func','bold';
+        'func','task-rest_bold';
         'fmap','phasediff';
         'fmap','phase1';
         'fmap','phase2';
