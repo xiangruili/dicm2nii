@@ -166,7 +166,7 @@ if ~iscell(target)
             otherwise
                 sourceqspace = 'Undefined coordinate system';
         end
-        error(sprintf('target file: %s\nsource file: %s',targetqspace,sourceqspace),'No matching transformation between source and template.');
+        error(sprintf('%s\ntarget file: %s\nsource file: %s','No matching transformation between source and template:',targetqspace,sourceqspace));
     end
 
     if sq(1) == frm || (sq(1)>2 && frm>2) || sq(2)<1
