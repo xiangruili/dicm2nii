@@ -882,6 +882,8 @@ if bids
         'anat','PD';
         'anat','PDmap';
         'dwi' ,'dwi';
+        'func','bold';
+        'func','task-rest_bold';
         'fmap','phasediff';
         'fmap','phase1';
         'fmap','phase2';
@@ -897,8 +899,8 @@ if bids
     for i = 1:nRun
         match = cellfun(@(Mod) strcmp(Mod,T{i,1}),table2cell(ModalityTablePref(:,1)));
         if any(match)
-            T.Type(i) = ModalityTablePref.Type(match);
-            T.Modality(i) = ModalityTablePref.Modality(match);
+            T.Type(i) = ModalityTablePref.Type(find(match,1,'first'));
+            T.Modality(i) = ModalityTablePref.Modality(find(match,1,'first'));
         end
     end
 
@@ -918,7 +920,7 @@ if bids
     else
         hf = uifigure(figargs{:});
     end
-    uimenu(hf,'Text','help','Callback',@(src,evnt) showHelp(valueset))
+    uimenu(hf,'Label','help','Callback',@(src,evnt) showHelp(valueset))
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
