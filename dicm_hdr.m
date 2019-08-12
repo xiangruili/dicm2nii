@@ -606,7 +606,7 @@ end
 function ch = read_ProtocolDataBlock(ch)
 n = typecast(ch(1:4), 'int32') + 4; % nBytes, zeros may be padded to make 4x
 if ~all(ch(5:6) == [31 139]') || n>numel(ch), return; end % gz signature
-try
+try % give up in case of error
     c = nii_tool('LocalFunc', 'gunzip_mem', ch(5:n))';
     c = regexp(char(c), '(\w*)\s+"(.*?)"\n', 'tokens');
     c = [c{:}];
