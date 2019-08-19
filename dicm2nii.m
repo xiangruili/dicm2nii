@@ -1646,12 +1646,10 @@ if numel(t)<2, return; end
 t = t - min(t); % it may be relative to 1st slice
 
 t1 = sort(t);
-dur = sum(diff(t1)) / (nSL-1);
-dif = sum(diff(t))  / (nSL-1);
-if dur==0 || (t1(end)>TA), sc = 0; % no useful info, or bad timing MB
+if t1(1)==t1(2) || (t1(end)>TA), sc = 0; % no useful info, or bad timing MB
 elseif t1(1) == t1(2), sc = 0; t1 = unique(t1); % was 7 for MB but error in FS
-elseif abs(dif-dur)<1e-3, sc = 1; % ascending
-elseif abs(dif+dur)<1e-3, sc = 2; % descending
+elseif isequal(t, t1), sc = 1; % ascending
+elseif isequal(t, flip(t1)), sc = 2; % descending
 elseif t(1)<t(3) % ascending interleaved
     if t(1)<t(2), sc = 3; % odd slices first
     else, sc = 5; % Siemens even number of slices
