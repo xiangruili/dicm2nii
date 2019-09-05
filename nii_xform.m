@@ -168,7 +168,7 @@ end
 I = reshape(I(1:3,:)', [d 3]);
 
 V = nii.img; isbin = islogical(V);
-if any(size(V)<2) && ~strcmpi(intrp, 'nearest')
+if (size(V,1)<2 || size(V,2)<2) && ~strcmpi(intrp, 'nearest')
     intrp = 'nearest';
     warning('nii_xform:NotEnoughPoints', 'Not enough data. Switch to "nearest".');
 end
@@ -184,20 +184,27 @@ else
 end
 if ~isfloat(V), V = single(V); end
 if strcmpi(intrp, 'nearest'), I = round(I); end % needed for edge voxels
-if size(V,1)<2, V(2,:,:) = missVal; end
-if size(V,2)<2, V(:,2,:) = missVal; end
-if size(V,3)<2, V(:,:,2) = missVal; end
+if size(V,1)<2, V(2,:,:,:) = missVal; end
+if size(V,2)<2, V(:,2,:,:) = missVal; end
 
 try
     F = griddedInterpolant(V(:,:,:,1), intrp, 'none'); % since 2014?
     for i = 1:prod(d48)
         F.Values = V(:,:,:,i);
-        nii.img(:,:,:,i) = F(I(:,:,:,1), I(:,:,:,2), I(:,:,:,3));
+        if size(V,3)==1
+            nii.img(:,:,:,i) = F(I(:,:,:,1), I(:,:,:,2));
+        else
+            nii.img(:,:,:,i) = F(I(:,:,:,1), I(:,:,:,2), I(:,:,:,3));
+        end
     end
     if ~isnan(missVal), nii.img(isnan(nii.img)) = missVal; end
 catch
     for i = 1:prod(d48)
-        nii.img(:,:,:,i) = interp3(V(:,:,:,i), I(:,:,:,2), I(:,:,:,1), I(:,:,:,3), intrp, missVal);
+        if size(V,3)==1
+            nii.img(:,:,:,i) = interp2(V(:,:,:,i), I(:,:,:,2), I(:,:,:,1), intrp, missVal);
+        else
+            nii.img(:,:,:,i) = interp3(V(:,:,:,i), I(:,:,:,2), I(:,:,:,1), I(:,:,:,3), intrp, missVal);
+        end
     end
 end
 if isbin, nii.img = logical(nii.img); end
