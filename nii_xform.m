@@ -156,9 +156,9 @@ d = single(hdr.dim(2:4));
 I = ones([d 4], 'single');
 [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
 I = permute(I, [4 1 2 3]);
-I = reshape(I, [4 prod(d)]);  % template ijk
+I = reshape(I, [4 prod(d,'double')]);  % template ijk
 if exist('warp_img_fsl', 'var')
-    warp_img_fsl = reshape(warp_img_fsl, [prod(d) 3])';
+    warp_img_fsl = reshape(warp_img_fsl, [prod(d,'double') 3])';
     if det(R0(1:3,1:3))<0, warp_img_fsl(1,:) = -warp_img_fsl(1,:); end % correct?
     warp_img_fsl(4,:) = 0;
     I = R \ (R0 * I + warp_img_fsl) + 1; % ijk+1 (fraction) in source
