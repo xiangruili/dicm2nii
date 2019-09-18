@@ -168,10 +168,6 @@ end
 I = reshape(I(1:3,:)', [d 3]);
 
 V = nii.img; isbin = islogical(V);
-if (size(V,1)<2 || size(V,2)<2 || size(V,3)<2) && ~strcmpi(intrp, 'nearest')
-    intrp = 'nearest';
-    warning('nii_xform:NotEnoughPoints', 'Not enough data. Switch to "nearest".');
-end
 d48 = size(V); % in case of RGB
 d48(numel(d48)+1:4) = 1; d48(1:3) = [];
 if isbin
@@ -184,9 +180,9 @@ else
 end
 if ~isfloat(V), V = single(V); end
 if strcmpi(intrp, 'nearest'), I = round(I); end % needed for edge voxels
-if size(V,1)<2, V(2,:,:,:) = missVal; end
-if size(V,2)<2, V(:,2,:,:) = missVal; end
-if size(V,3)<2, V(:,:,2,:) = missVal; end
+if size(V,1)<2, V = repmat(V,[3 1 1 1]); I(:,:,:,1) = I(:,:,:,1)+1; end
+if size(V,2)<2, V = repmat(V,[1 3 1 1]); I(:,:,:,2) = I(:,:,:,2)+1;end
+if size(V,3)<2, V = repmat(V,[1 1 3 1]); I(:,:,:,3) = I(:,:,:,3)+1;end
 
 try
     F = griddedInterpolant(V(:,:,:,1), intrp, 'none'); % since 2014?
