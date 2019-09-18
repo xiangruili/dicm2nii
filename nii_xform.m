@@ -180,9 +180,13 @@ else
 end
 if ~isfloat(V), V = single(V); end
 if strcmpi(intrp, 'nearest'), I = round(I); end % needed for edge voxels
-if size(V,1)<2, V = repmat(V,[3 1 1 1]); I(:,:,:,1) = I(:,:,:,1)+1; end
-if size(V,2)<2, V = repmat(V,[1 3 1 1]); I(:,:,:,2) = I(:,:,:,2)+1;end
-if size(V,3)<2, V = repmat(V,[1 1 3 1]); I(:,:,:,3) = I(:,:,:,3)+1;end
+if size(V,1)<2
+    V = repmat(V,[3 1 1 1]); % replicate to help interp
+    I(:,:,:,1) = I(:,:,:,1)+1; % use middle slice
+    I(:,:,:,1) = I(:,:,:,1) + double(I(:,:,:,1)<1.5 | I(:,:,:,1)>2.5)*1e3; % needed for edge voxels
+end
+if size(V,2)<2, V = repmat(V,[1 3 1 1]); I(:,:,:,2) = I(:,:,:,2)+1; I(:,:,:,2) = I(:,:,:,2) + double(I(:,:,:,2)<1.5 | I(:,:,:,2)>2.5)*1e3; end
+if size(V,3)<2, V = repmat(V,[1 1 3 1]); I(:,:,:,3) = I(:,:,:,3)+1; I(:,:,:,3) = I(:,:,:,3) + double(I(:,:,:,3)<1.5 | I(:,:,:,3)>2.5)*1e3; end
 
 try
     F = griddedInterpolant(V(:,:,:,1), intrp, 'none'); % since 2014?
