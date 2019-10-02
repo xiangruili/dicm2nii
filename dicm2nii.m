@@ -3178,6 +3178,7 @@ switch selection
 end
 
 function previewDicom(ax,s)
+try
 nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
 if isempty(nSL)
     nSL = length(s);
@@ -3190,9 +3191,14 @@ if verLessThan('matlab','9.4')
     ax.YTickLabel = [];
     ax.XTickLabel = [];
 else
-    imagesc(ax,dicm_img(s{round(nSL/2)}));
+    img = dicm_img(s{min(end,round(nSL/2))});
+    img = img(:,:,:,round(end/2));
+    imagesc(ax,img);
 end
-ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
+ax.DataAspectRatio = [s{min(end,round(nSL/2))}.PixelSpacing' 1];
+catch err
+    warning(['CANNOT PREVIEW RUN: ' err.message])
+end
 
 function showHelp(valueset)
 %%
