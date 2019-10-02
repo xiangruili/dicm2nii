@@ -11,7 +11,13 @@ function write_tsv(id,tsvfile,varargin)
 
 if iscell(tsvfile), tsvfile = tsvfile{1}; end
 if exist(tsvfile,'file') % read already existing tsvfile
-    T = readtable(tsvfile,'FileType','text','Delimiter','\t','Format',repmat('%s',[1,length(varargin)/2+1]));
+    % Number of columns
+    fid = fopen(tsvfile);
+    tline = fgetl(fid);
+    fclose(fid)
+    Nvar = sum(~cellfun(@isempty,strsplit(tline,'\t')));
+    % read tsv file
+    T = readtable(tsvfile,'FileType','text','Delimiter','\t','Format',repmat('%s',[1,Nvar]));
 end
 varargin(1:2:end) = cellfun(@genvarname,varargin(1:2:end),'uni',0);
 if exist(tsvfile,'file') && ~isempty(T) % append to already existing tsvfile

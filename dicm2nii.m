@@ -882,7 +882,7 @@ if bids
         'anat','PD';
         'anat','PDmap';
         'dwi' ,'dwi';
-        'func','bold';
+        'func','task-motor_bold';
         'func','task-rest_bold';
         'fmap','phasediff';
         'fmap','phase1';
@@ -1033,11 +1033,29 @@ for i = 1:nRun
         fnames{i} = strrep(fnames{i},'__','_');
                 
         % _session.tsv
-        tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-        if verLessThan('matlab','9.4')
-            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
-        else
-            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+        try
+            tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+            if verLessThan('matlab','9.4')
+                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
+            else
+                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+            end
+        catch 
+            warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+        end
+        
+        % participants.tsv
+        if i==1 % same participant for all Run
+            try
+                tsvfile = fullfile(niiFolder, 'participants.tsv');
+                participant_id = SubjectTable{1,1};
+                Sex                    = tryGetField(h{i}{1}, 'PatientSex');
+                Age                    = tryGetField(h{i}{1}, 'PatientAge');
+                Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
+                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight)
+            catch
+                warning('Could not save participants.tsv');
+            end
         end
     end
     
@@ -1257,6 +1275,18 @@ end
 [h, nii.hdr] = sliceTiming(h, nii.hdr);
 nii.hdr.xyzt_units = xyz_unit + nii.hdr.xyzt_units; % normally: mm (2) + sec (8)
 s = h{1};
+
+% set TaskName if present in filename (using bids labels convention)
+if isfield(s,'NiftiName')
+    [~,fname] = fileparts(s.NiftiName);
+    
+    % parse filename
+    labels = regexp(fname,'(?<task>_task-[a-zA-Z0-9]+)?','names'); % task-<label>
+    
+    if ~isempty(labels)
+        s.TaskName = strrep(labels.task,'_task-','');
+    end
+end
 
 % Store motion parameters for MoCo series
 if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && nVol>1
@@ -1495,7 +1525,7 @@ h{1} = s;
 
 flds = { % store for nii.ext and json
   'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
-  'AcquisitionDateTime' 'bval' 'bvec' 'VolumeTiming' ...
+  'AcquisitionDateTime' 'TaskName' 'bval' 'bvec' 'VolumeTiming' ...
   'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'EchoTimes' ...
   'SecondEchoTime' 'InversionTime' 'CardiacTriggerDelayTimes' ...
