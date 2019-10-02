@@ -5,9 +5,10 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 
 % The mandatory 1st input is the dicom file name. 
 % 
-% The optional 2nd input is a dicom dictionary returned by dicm_dict. It may
+% The optional 2nd input can be a dicom dictionary returned by dicm_dict. It may
 % have only part of the full dictionary, which can speed up header read
-% considerably. See rename_dicm for example.
+% considerably. See rename_dicm for example. The 2nd input can also be a char of
+% dicom tag name, or cellstr with multiple names.
 % 
 % The optional 3rd intput is useful for multi-frame dicom. When there are many
 % frames, it may be slow to read all frames in PerFrameFunctionalGroupsSequence.
@@ -111,9 +112,15 @@ if nargin<2 || isempty(dict)
     if isempty(dict_full), dict_full = dicm_dict; end
     p.fullHdr = true;
     p.dict = dict_full; 
-else
-    p.fullHdr = false; % p updated in main func
+elseif isstruct(dict)
+    p.fullHdr = false; % p updated only in main func
     p.dict = dict;
+elseif ischar(dict) || iscellstr(dict) || ...
+        (exist('isstring', 'builtin') && isstring(dict)) % field names
+    p.fullHdr = false;
+    p.dict = dicm_dict('', dict);
+else
+    error('Invalid input #2: dicom dict or tag name expected');
 end
 
 if nargin==3 && isstruct(fname) % wrapper
@@ -293,14 +300,14 @@ while ~toSearch
     iPre = i; % back it up for PixelData
     [dat, name, info, i, tg] = read_item(b8, i, p);
     if ~isempty(info), break; end
-    if ~p.fullHdr && tg>p.dict.tag(end), break; end % done for partial hdr
-    if isempty(dat) || isnumeric(name), continue; end
+    if isempty(dat) || isempty(name), continue; end
     s.(name) = dat;
     if strcmp(name, 'Manufacturer')
         [p, dict] = updateVendor(p, dat);
     elseif tg>=2621697 && ~isfield(p, 'nFrames') % BitsAllocated
         p = get_nFrames(s, p, b8); % only make code here cleaner
     end
+    if ~p.fullHdr && tg>=p.dict.tag(end), break; end % done for partial hdr
 end
 
 if p.iPixelData < fSize+1
@@ -336,9 +343,10 @@ end
 end % main func
 
 %% subfunction: read dicom item. Called by dicm_hdr and read_sq
-function [dat, name, info, i, tag] = read_item(b8, i, p)
-dat = []; name = nan; info = ''; vr = 'CS'; % vr may be used if implicit
+function [dat, name, info, i, tag] = read_item(b8, i0, p)
+dat = []; name = ''; info = ''; vr = 'CS'; % vr may be used if implicit
 
+i = i0;
 group = b8(i+(0:1)); i=i+2;
 swap = p.be && ~isequal(group, [2 0]); % good news: no 0x0200 group
 group = ch2int16(group, swap);
@@ -379,7 +387,7 @@ end
 % compressed PixelData, n can be 0xffffffff
 if ~hasVR && n==4294967295, vr = 'SQ'; end % best guess
 if n+i>p.iPixelData && ~strcmp(vr, 'SQ'), i = i+n; return; end % PixelData or err
-% fprintf('(%04x %04x) %s %6.0f %s\n', group, elmnt, vr, n, name);
+% fprintf('%8i (%04x,%04x) %s %10i %s\n', i0-1, group, elmnt, vr, n, name);
 
 if strcmp(vr, 'SQ')
     nEnd = min(i+n, p.iPixelData); % n is likely 0xffff ffff
@@ -466,7 +474,7 @@ while i<nEnd % loop through multi Item under the SQ
         [dat, name, info, i, tag] = read_item(b8, i, p);
         if tag == 4294893581, break; end % FFFE E00D ItemDelimitationItem
         if isempty(tag1), tag1 = tag; end % first detected tag for PerFrameSQ
-        if isempty(dat) || isnumeric(name), continue; end % 0-length or skipped
+        if isempty(dat) || isempty(name), continue; end % 0-length or skipped
         rst.(Item_n).(name) = dat;
     end
 end
@@ -574,7 +582,7 @@ try % in case of error, we return the original csa
         vr = char(b(i+(1:2))); i=i+8; % vr(4), syngodt(4)
         n = ch2int32(b(i+(1:4)), 0); i=i+8;
         if n<1, continue; end % skip name decoding, faster
-        nam = regexp(char(b(i-84+(1:64))), '\w+', 'match', 'once');
+        ii = find(b(i-84+(1:64))==0, 1); nam = char(b(i-84+(1:ii-1)));
         isNum = isempty(strfind(chDat, vr));
         % fprintf('%s %3g %s\n', vr, n, nam);
 
@@ -878,7 +886,6 @@ s.EchoTimes = par_val('echo_time', iVol);
 s.EchoTime = s.EchoTimes(1);
 s.FlipAngle = par_val('image_flip_angle');
 s.CardiacTriggerDelayTimes = par_val('trigger_time', iVol);
-% s.TimeOfAcquisition = par_val('dyn_scan_begin_time', 1:s.NumberOfFrames);
 
 posMid = par_attr(ch, 'Off Centre midslice'); % (ap,fh,rl) [mm]
 posMid = posMid([3 1 2]); % better precision than those in the table
