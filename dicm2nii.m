@@ -1048,11 +1048,11 @@ for i = 1:nRun
         if i==1 % same participant for all Run
             try
                 tsvfile = fullfile(niiFolder, 'participants.tsv');
-                subject_id = SubjectTable{1,1};
+                participant_id = SubjectTable{1,1};
                 Sex                    = tryGetField(h{i}{1}, 'PatientSex');
                 Age                    = tryGetField(h{i}{1}, 'PatientAge');
                 Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
-                write_tsv(subject_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight)
+                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight)
             catch
                 warning('Could not save participants.tsv');
             end
