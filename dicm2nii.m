@@ -412,7 +412,7 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     fmt = '.nii';
 end
 if bids && verLessThanOctave
-    fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n')
+    fprintf('BIDS conversion is easier with MATLAB R2018a or later.\n')
 end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
@@ -551,14 +551,11 @@ for k = 1:nFile
 
     if isfield(s, flds{4}) && (pf.use_seriesUID || ~isfield(s, 'SeriesNumber'))
         sUID = s.SeriesInstanceUID;
-    else
+    else % make up UID
         if isfield(s, 'SeriesNumber'), sN = s.SeriesNumber; 
-        else, sN = fix(toc*1e6);
+        else, sN = fix(toc*1e6); % unique sN for each dicm file
         end
-        sUID = num2str(sN); % make up UID
-        if isfield(s, 'SeriesDescription')
-            sUID = [s.SeriesDescription sUID];
-        end
+        sUID = sprintf('%s%g', tryGetField(s, 'SeriesDescription', ''), sN);
     end
     
     m = find(strcmp(sUID, seriesUIDs));
@@ -742,31 +739,14 @@ for i = 1:nRun
 end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); 
 subjs = subjs(keep); vendor = vendor(keep);
-acqs  = acqs(keep);
+subj = unique(subjs);
+acq = unique(acqs(keep));
 
-%% sort h by PatientName, then StudyID, then SeriesNumber
+% sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
-[subjs, ind] = sort(subjs);
-subj = unique(subjs); 
-acq = unique(acqs);
-h = h(ind); sNs = sNs(ind); studyIDs = studyIDs(ind); % by subjs now
-nStudy = ones(1, nRun); % one for each series
-for i = 1:numel(subj)
-    iSub = find(strcmp(subj{i}, subjs));
-    study = studyIDs(iSub);
-    [study, iStudy] = sort(study); % by study for each subject
-    a = h(iSub);   h(iSub)   = a(iStudy);
-    a = sNs(iSub); sNs(iSub) = a(iStudy);
-    studyIDs(iSub) = study; % done for h/sNs/studyIDs by studyIDs for a subj
-    uID = unique(study);
-    nStudy(iSub) = numel(uID);
-    for k = 1:numel(uID) % now sort h/sNs by sNs for each studyID
-        iStudy = strcmp(uID{k}, study);
-        ind = iSub(iStudy); 
-        [sNs(ind), iSN] = sort(sNs(ind));
-        a = h(ind); h(ind) = a(iSN);
-    end
-end
+[~, ind] = sortrows([subjs' studyIDs' num2cell(sNs')]);
+h = h(ind); subjs = subjs(ind); studyIDs = studyIDs(ind); sNs = sNs(ind);
+multiStudy = cellfun(@(c)numel(unique(studyIDs(strcmp(subjs,c))))>1, subjs);
 
 %% Generate unique result file names
 % Unique names are in format of SeriesDescription_s007. Special cases are: 
@@ -782,24 +762,24 @@ end
 rNames = cell(1, nRun);
 multiSubj = numel(subj)>1;
 j_s = nan(nRun, 1); % index-1 for _s003. needed if 4+ length SeriesNumbers
-maxLen = namelengthmax - 3;
+
 for i = 1:nRun
     s = h{i}{1};
     sN = sNs(i);
-    a = strtrim(ProtocolName(s));
+    a = ProtocolName(s);
     if isPhase(s), a = [a '_phase']; end % phase image
     if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\'), a = [a '_MoCo']; end
     if multiSubj, a = [a '_' subjs{i}]; end
-    if nStudy(i)>1, a = [a '_Study' studyIDs{i}]; end
+    if multiStudy(i), a = [a '_Study' studyIDs{i}]; end
     if ~isstrprop(a(1), 'alpha'), a = ['x' a]; end % genvarname behavior
-    a(~isstrprop(a, 'alphanum')) = '_'; % make str valid for field name
-    a = regexprep(a, '_{2,}', '_'); % remove repeated underscore
+    % a = regexprep(a, '(?<=\S)\s+([a-z])', '${upper($1)}'); % camel case
+    a = regexprep(regexprep(a, '[^a-zA-Z0-9_]', '_'), '_{2,}', '_');
     if sN>100 && strncmp(s.Manufacturer, 'Philips', 7)
         sN = tryGetField(s, 'AcquisitionNumber', floor(sN/100));
     end
     j_s(i) = numel(a);
-    rNames{i} = sprintf('%s_s%03.0f', a, sN);
-    d = numel(rNames{i}) - maxLen;
+    rNames{i} = sprintf('%s_s%03i', a, sN);
+    d = numel(rNames{i}) - 255; % file max len = 255
     if d>0, rNames{i}(j_s(i)+(-d+1:0)) = ''; j_s(i) = j_s(i)-d; end % keep _s007
 end
 
@@ -1055,7 +1035,7 @@ for i = 1:nRun
     end
     
     nFile = numel(h{i});
-    h{i}{1}.NiftiName = fnames{i}; % for convenience of error info
+    h{i}{1}.NiftiName = fnames{i};
     s = h{i}{1};
     if nFile>1 && ~isfield(s, 'LastFile')
         h{i}{1}.LastFile = h{i}{nFile}; % store partial last header into 1st
@@ -1146,6 +1126,12 @@ for i = 1:nRun
 end
 
 if ~bids
+    try % since 2014a 
+        fnames = matlab.lang.makeValidName(fnames);
+        fnames = matlab.lang.makeUniqueStrings(fnames, {}, namelengthmax);
+    catch
+        fnames = genvarname(fnames);
+    end
     h = cell2struct(h, fnames, 2); % convert into struct
     fname = [niiFolder 'dcmHeaders.mat'];
     if exist(fname, 'file') % if file exists, we update fields only
@@ -1179,6 +1165,7 @@ if isempty(name) || (strncmp(s.Manufacturer, 'SIEMENS', 7) && any(regexp(name, '
     name = tryGetField(s, 'ProtocolName');
 end
 if isempty(name), [~, name] = fileparts(s.Filename); end
+name = strtrim(name);
 
 %% Subfunction: return true if keyword is in s.ImageType
 function tf = isType(s, keyword)
@@ -1439,13 +1426,6 @@ if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
         hz = csa_header(s, 'BandwidthPerPixelPhaseEncode');
         dwell = 1000 ./ hz / dim(iPhase); % in ms
     end
-    if isempty(dwell) % true for syngo MR 2004A
-        % ppf = [1 2 4 8 16] represent [4 5 6 7 8] 8ths PartialFourier
-        % ppf = asc_header(s, 'sKSpace.ucPhasePartialFourier');
-        lns = asc_header(s, 'sKSpace.lPhaseEncodingLines');
-        dur = csa_header(s, 'SliceMeasurementDuration');
-        dwell = dur ./ lns; % ./ (log2(ppf)+4) * 8;
-    end
     if isempty(dwell) % next is not accurate, so as last resort
         dur = csa_header(s, 'RealDwellTime') * 1e-6; % ns to ms
         dwell = dur * asc_header(s, 'sKSpace.lBaseResolution');
@@ -1619,20 +1599,18 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
 end
 
 % Siemens multiframe: read TimeAfterStart from last file
-if isempty(t) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+if isempty(t) && tryGetField(s, 'NumberOfFrames', 1)>1 &&  ...
+        ~isempty(csa_header(s, 'TimeAfterStart'))
     % Use TimeAfterStart, not FrameAcquisitionDatetime. See
     % https://github.com/rordenlab/dcm2niix/issues/240#issuecomment-433036901
-    try 
-        s.PerFrameFunctionalGroupsSequence.Item_1.CSAImageHeaderInfo.Item_1.TimeAfterStart;
-        % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-        % s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
-        % t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
-        % t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
-        s2 = struct('TimeAfterStart', nan(1, nSL));
-        s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
-        t = s2.TimeAfterStart; % in secs
-        t = (t - min(t)) * 1000;
-    end
+    % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
+    % s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+    % t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
+    % t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+    s2 = struct('TimeAfterStart', nan(1, nSL));
+    s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+    t = s2.TimeAfterStart; % in secs
+    t = (t - min(t)) * 1000;
 end
 
 % Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
@@ -1865,6 +1843,7 @@ val = [];
 fld = 'CSAImageHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 if isfield(s, key), val = s.(key); return; end % general tag: 2nd choice
+try val = s.PerFrameFunctionalGroupsSequence.Item_1.(fld).Item_1.(key); return; end
 fld = 'CSASeriesHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 
@@ -1930,7 +1909,6 @@ if haveIPP, ipp = s.ImagePositionPatient; else, ipp = -(dim'.* pixdim)/2; end
 % Next is almost dicom xform matrix, except mosaic trans and unsure slice_dir
 R = [R * diag(pixdim) ipp];
 
-% rest are former: R = verify_slice_dir(R, s, dim, iSL)
 if dim(3)<2, return; end % don't care direction for single slice
 
 if s.Columns>dim(1) && ~strncmpi(s.Manufacturer, 'UIH', 3) % Siemens mosaic
@@ -1983,6 +1961,9 @@ end
 function val = asc_header(s, key)
 val = []; 
 csa = 'CSASeriesHeaderInfo';
+if ~isfield(s, csa) % in case of multiframe
+    try s.(csa) = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1; end
+end
 if ~isfield(s, csa), return; end
 if isfield(s.(csa), 'MrPhoenixProtocol')
     str = s.(csa).MrPhoenixProtocol;
@@ -2410,13 +2391,13 @@ if ~isfield(s, 'EchoTime')
 end
 
 % for Siemens: the redundant copy makes non-Siemens code faster
-if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
-    s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
-end
-fld = 'CSAImageHeaderInfo';
-if isfield(s.(pffgs).Item_1, fld)
-    s.(fld) = s.(pffgs).(sprintf('Item_%g', iF)).(fld).Item_1;
-end
+% if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
+%     s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
+% end
+% fld = 'CSAImageHeaderInfo';
+% if isfield(s.(pffgs).Item_1, fld)
+%     s.(fld) = s.(pffgs).(sprintf('Item_%g', iF)).(fld).Item_1;
+% end
 
 % check ImageOrientationPatient consistency for 1st and last frame only
 if nFrame<2, return; end
@@ -3136,9 +3117,9 @@ end
 
 %% 
 function v = normc(M)
-den = sqrt(sum(M .* M));
-den(den==0) = 1;
-v = bsxfun(@rdivide, M, den);
+vn = vecnorm(M);
+vn(vn==0) = 1;
+v = bsxfun(@rdivide, M, vn);
 %%
 
 function BtnModalityTable(h,TT,TS)
