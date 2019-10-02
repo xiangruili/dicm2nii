@@ -411,7 +411,7 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     bids = true;
     fmt = '.nii';
 end
-if bids && verLessThan('matlab','9.4')
+if bids && verLessThanOctave
     fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n')
 end
 
@@ -911,7 +911,7 @@ if bids
     figargs = {'bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],...
                'Color', clr,...
                'CloseRequestFcn',@my_closereq};
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         hf = figure(figargs{1});
         set(hf,figargs{2:end});
         % add help
@@ -924,7 +924,7 @@ if bids
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         SCN = S.Properties.VariableNames;
         S   = table2cell(S); 
         S{3}= datestr(S{3},'yyyy-mm-dd');
@@ -935,7 +935,7 @@ if bids
     TT = uitable(hf,'Data',T);
     TSpos = [20 hf.Position(4)-110 hf.Position(3)-160 90];
     TTpos = [20 20 hf.Position(3)-160 hf.Position(4)-120];
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         setpixelposition(TS,TSpos);
         set(TS,'Units','Normalized')
         setpixelposition(TT,TTpos);
@@ -945,7 +945,7 @@ if bids
         TT.Position = TTpos;
     end
     TS.ColumnEditable = [true true true true];
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         TS.ColumnName = SCN;
         TT.ColumnName = TCN;
     end
@@ -956,7 +956,7 @@ if bids
     % button
    	Bpos = [hf.Position(3)-120 20 100 30];
     BCB  = @(btn,event) BtnModalityTable(hf,TT, TS);
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         B = uicontrol(hf,'Style','pushbutton','String','OK');
         set(B,'Callback',BCB);
         setpixelposition(B,Bpos)
@@ -1035,8 +1035,8 @@ for i = 1:nRun
         % _session.tsv
         try
             tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-            if verLessThan('matlab','9.4')
                 write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
+            if verLessThanOctave
             else
                 write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
             end
@@ -2046,7 +2046,7 @@ switch cmd
         end
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
         if rstFmt == 4
-            if verLessThan('matlab','9.4')
+            if verLessThanOctave
                 fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n');
             end
             if get(hs.gzip,  'Value')
@@ -3147,7 +3147,7 @@ v = bsxfun(@rdivide, M, den);
 %%
 
 function BtnModalityTable(h,TT,TS)
-if verLessThan('matlab','9.4')
+if verLessThanOctave
     dat = TT.Data;
 else
     dat = cellfun(@char,table2cell(TT.Data),'uni',0);
@@ -3163,7 +3163,7 @@ delete(h)
 function my_closereq(src,~)
 % Close request function 
 % to display a question dialog box
-if verLessThan('matlab','9.4')
+if verLessThanOctave
     selection = questdlg('Cancel Dicom conversion?','Close dicm2nii','OK','Cancel','Cancel');
 else
     selection = uiconfirm(src,'Cancel Dicom conversion?',...
@@ -3231,3 +3231,7 @@ h = msgbox(msg,'Help on BIDS converter');
 set(findall(h,'Type','Text'),'FontName','FixedWidth');
 Pos = get(h,'Position'); Pos(3) = 450;
 set(h,'Position',Pos)
+
+function val = verLessThanOctave
+isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
+val = isOctave || verLessThan('matlab','9.4');
