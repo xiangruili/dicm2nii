@@ -974,19 +974,10 @@ if bids
     % preview panel
     axesArgs = {hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],...
                    'Colormap',gray(64)};
-    if verLessThan('matlab','9.4')
-        ax = imagesc(dicm_img(h{1}{1}));
-        ax = ax.Parent;
-        setpixelposition(ax,axesArgs{3})
-        colormap(ax,axesArgs{5})
-    else
-        ax = uiaxes(axesArgs{:});
-    end
-    previewDicom(ax,h{1});
-    axis(ax,'off');
+    ax = previewDicom([],h{1},axesArgs);
     ax.YTickLabel = [];
     ax.XTickLabel = [];
-    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)});
+    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)},axesArgs);
     
     waitfor(hf);
     if getappdata(0,'Canceldicm2nii')
@@ -3181,25 +3172,36 @@ switch selection
         return
 end
 
-function previewDicom(ax,s)
+function ax = previewDicom(ax,s,axesArgs)
+
 try
-nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
-if isempty(nSL)
-    nSL = length(s);
-end
-if verLessThan('matlab','9.4')
-    axis(ax);
-    imagesc(dicm_img(s{round(nSL/2)}));
-    axis(ax,'off');
-    colormap(ax,'gray')
-    ax.YTickLabel = [];
-    ax.XTickLabel = [];
-else
+    nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
+    if isempty(nSL)
+        nSL = length(s);
+    end
     img = dicm_img(s{min(end,round(nSL/2))});
     img = img(:,:,:,round(end/2));
-    imagesc(ax,img);
-end
-ax.DataAspectRatio = [s{min(end,round(nSL/2))}.PixelSpacing' 1];
+
+    if verLessThanOctave
+        if ~isempty(ax)
+            axis(ax);
+        end
+        axnew = imagesc(img);
+        if isempty(ax)
+            ax = axnew.Parent;
+            setpixelposition(ax,axesArgs{3})
+        end
+        colormap(ax,axesArgs{5})
+        ax.YTickLabel = [];
+        ax.XTickLabel = [];
+    else
+        if isempty(ax)
+            ax = uiaxes(axesArgs{:});
+        end
+        imagesc(ax,img);
+    end
+    axis(ax,'off');
+    ax.DataAspectRatio = [s{min(end,round(nSL/2))}.PixelSpacing' 1];
 catch err
     warning(['CANNOT PREVIEW RUN: ' err.message])
 end
@@ -3238,4 +3240,4 @@ set(h,'Position',Pos)
 
 function val = verLessThanOctave
 isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
-val = isOctave || verLessThan('matlab','9.4');
+val = isOctave || verLessThan('matlab','9.4');
