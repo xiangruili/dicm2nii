@@ -864,8 +864,13 @@ if bids
         Subject = {'01'};
     end
     Session                = {'01'};
-    AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
-    AcquisitionDate.Format = 'yyyy-MM-dd';
+    if verLessThanOctave
+        AcquisitionDate        = acq{1};
+        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
+    else
+        AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
+        AcquisitionDate.Format = 'yyyy-MM-dd';
+    end
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
     
@@ -927,7 +932,6 @@ if bids
     if verLessThanOctave
         SCN = S.Properties.VariableNames;
         S   = table2cell(S); 
-        S{3}= datestr(S{3},'yyyy-mm-dd');
         TCN = T.Properties.VariableNames;
         T   = cellfun(@char,table2cell(T),'uni',0);
     end
@@ -1035,8 +1039,8 @@ for i = 1:nRun
         % _session.tsv
         try
             tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
             if verLessThanOctave
+                write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
             else
                 write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
             end
