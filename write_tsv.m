@@ -14,7 +14,7 @@ if exist(tsvfile,'file') % read already existing tsvfile
     % Number of columns
     fid = fopen(tsvfile);
     tline = fgetl(fid);
-    fclose(fid)
+    fclose(fid);
     Nvar = sum(~cellfun(@isempty,strsplit(tline,'\t')));
     % read tsv file
     T = readtable(tsvfile,'FileType','text','Delimiter','\t','Format',repmat('%s',[1,Nvar]));
