@@ -882,7 +882,7 @@ if bids
         'anat','PD';
         'anat','PDmap';
         'dwi' ,'dwi';
-        'func','bold';
+        'func','task-motor_bold';
         'func','task-rest_bold';
         'fmap','phasediff';
         'fmap','phase1';
@@ -1258,6 +1258,18 @@ end
 nii.hdr.xyzt_units = xyz_unit + nii.hdr.xyzt_units; % normally: mm (2) + sec (8)
 s = h{1};
 
+% set TaskName if present in filename (using bids labels convention)
+if isfield(s,'NiftiName')
+    [~,fname] = fileparts(s.NiftiName);
+    
+    % parse filename
+    labels = regexp(fname,'(?<task>_task-[a-zA-Z0-9]+)?','names'); % task-<label>
+    
+    if ~isempty(labels)
+        s.TaskName = strrep(labels.task,'_task-','');
+    end
+end
+
 % Store motion parameters for MoCo series
 if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && nVol>1
     inc = numel(h) / nVol;
@@ -1495,7 +1507,7 @@ h{1} = s;
 
 flds = { % store for nii.ext and json
   'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
-  'AcquisitionDateTime' 'bval' 'bvec' 'VolumeTiming' ...
+  'AcquisitionDateTime' 'TaskName' 'bval' 'bvec' 'VolumeTiming' ...
   'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'EchoTimes' ...
   'SecondEchoTime' 'InversionTime' 'CardiacTriggerDelayTimes' ...
