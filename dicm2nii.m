@@ -411,8 +411,8 @@ if ischar(fmt) && strcmpi(fmt,'BIDSNII')
     bids = true;
     fmt = '.nii';
 end
-if bids && verLessThan('matlab','9.4')
-    fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n')
+if bids && verLessThanOctave
+    fprintf('BIDS conversion is easier with MATLAB R2018a or later.\n')
 end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
@@ -551,14 +551,11 @@ for k = 1:nFile
 
     if isfield(s, flds{4}) && (pf.use_seriesUID || ~isfield(s, 'SeriesNumber'))
         sUID = s.SeriesInstanceUID;
-    else
+    else % make up UID
         if isfield(s, 'SeriesNumber'), sN = s.SeriesNumber; 
-        else, sN = fix(toc*1e6);
+        else, sN = fix(toc*1e6); % unique sN for each dicm file
         end
-        sUID = num2str(sN); % make up UID
-        if isfield(s, 'SeriesDescription')
-            sUID = [s.SeriesDescription sUID];
-        end
+        sUID = sprintf('%s%g', tryGetField(s, 'SeriesDescription', ''), sN);
     end
     
     m = find(strcmp(sUID, seriesUIDs));
@@ -742,31 +739,14 @@ for i = 1:nRun
 end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); 
 subjs = subjs(keep); vendor = vendor(keep);
-acqs  = acqs(keep);
+subj = unique(subjs);
+acq = unique(acqs(keep));
 
-%% sort h by PatientName, then StudyID, then SeriesNumber
+% sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
-[subjs, ind] = sort(subjs);
-subj = unique(subjs); 
-acq = unique(acqs);
-h = h(ind); sNs = sNs(ind); studyIDs = studyIDs(ind); % by subjs now
-nStudy = ones(1, nRun); % one for each series
-for i = 1:numel(subj)
-    iSub = find(strcmp(subj{i}, subjs));
-    study = studyIDs(iSub);
-    [study, iStudy] = sort(study); % by study for each subject
-    a = h(iSub);   h(iSub)   = a(iStudy);
-    a = sNs(iSub); sNs(iSub) = a(iStudy);
-    studyIDs(iSub) = study; % done for h/sNs/studyIDs by studyIDs for a subj
-    uID = unique(study);
-    nStudy(iSub) = numel(uID);
-    for k = 1:numel(uID) % now sort h/sNs by sNs for each studyID
-        iStudy = strcmp(uID{k}, study);
-        ind = iSub(iStudy); 
-        [sNs(ind), iSN] = sort(sNs(ind));
-        a = h(ind); h(ind) = a(iSN);
-    end
-end
+[~, ind] = sortrows([subjs' studyIDs' num2cell(sNs')]);
+h = h(ind); subjs = subjs(ind); studyIDs = studyIDs(ind); sNs = sNs(ind);
+multiStudy = cellfun(@(c)numel(unique(studyIDs(strcmp(subjs,c))))>1, subjs);
 
 %% Generate unique result file names
 % Unique names are in format of SeriesDescription_s007. Special cases are: 
@@ -782,24 +762,24 @@ end
 rNames = cell(1, nRun);
 multiSubj = numel(subj)>1;
 j_s = nan(nRun, 1); % index-1 for _s003. needed if 4+ length SeriesNumbers
-maxLen = namelengthmax - 3;
+
 for i = 1:nRun
     s = h{i}{1};
     sN = sNs(i);
-    a = strtrim(ProtocolName(s));
+    a = ProtocolName(s);
     if isPhase(s), a = [a '_phase']; end % phase image
     if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\'), a = [a '_MoCo']; end
     if multiSubj, a = [a '_' subjs{i}]; end
-    if nStudy(i)>1, a = [a '_Study' studyIDs{i}]; end
+    if multiStudy(i), a = [a '_Study' studyIDs{i}]; end
     if ~isstrprop(a(1), 'alpha'), a = ['x' a]; end % genvarname behavior
-    a(~isstrprop(a, 'alphanum')) = '_'; % make str valid for field name
-    a = regexprep(a, '_{2,}', '_'); % remove repeated underscore
+    % a = regexprep(a, '(?<=\S)\s+([a-z])', '${upper($1)}'); % camel case
+    a = regexprep(regexprep(a, '[^a-zA-Z0-9_]', '_'), '_{2,}', '_');
     if sN>100 && strncmp(s.Manufacturer, 'Philips', 7)
         sN = tryGetField(s, 'AcquisitionNumber', floor(sN/100));
     end
     j_s(i) = numel(a);
-    rNames{i} = sprintf('%s_s%03.0f', a, sN);
-    d = numel(rNames{i}) - maxLen;
+    rNames{i} = sprintf('%s_s%03i', a, sN);
+    d = numel(rNames{i}) - 255; % file max len = 255
     if d>0, rNames{i}(j_s(i)+(-d+1:0)) = ''; j_s(i) = j_s(i)-d; end % keep _s007
 end
 
@@ -864,8 +844,13 @@ if bids
         Subject = {'01'};
     end
     Session                = {'01'};
-    AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
-    AcquisitionDate.Format = 'yyyy-MM-dd';
+    if verLessThanOctave
+        AcquisitionDate        = acq{1};
+        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
+    else
+        AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
+        AcquisitionDate.Format = 'yyyy-MM-dd';
+    end
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
     
@@ -882,7 +867,7 @@ if bids
         'anat','PD';
         'anat','PDmap';
         'dwi' ,'dwi';
-        'func','bold';
+        'func','task-motor_bold';
         'func','task-rest_bold';
         'fmap','phasediff';
         'fmap','phase1';
@@ -911,7 +896,7 @@ if bids
     figargs = {'bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 420 300],...
                'Color', clr,...
                'CloseRequestFcn',@my_closereq};
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         hf = figure(figargs{1});
         set(hf,figargs{2:end});
         % add help
@@ -924,10 +909,9 @@ if bids
     set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
 
     % tables
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         SCN = S.Properties.VariableNames;
         S   = table2cell(S); 
-        S{3}= datestr(S{3},'yyyy-mm-dd');
         TCN = T.Properties.VariableNames;
         T   = cellfun(@char,table2cell(T),'uni',0);
     end
@@ -935,7 +919,7 @@ if bids
     TT = uitable(hf,'Data',T);
     TSpos = [20 hf.Position(4)-110 hf.Position(3)-160 90];
     TTpos = [20 20 hf.Position(3)-160 hf.Position(4)-120];
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         setpixelposition(TS,TSpos);
         set(TS,'Units','Normalized')
         setpixelposition(TT,TTpos);
@@ -945,7 +929,7 @@ if bids
         TT.Position = TTpos;
     end
     TS.ColumnEditable = [true true true true];
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         TS.ColumnName = SCN;
         TT.ColumnName = TCN;
     end
@@ -956,7 +940,7 @@ if bids
     % button
    	Bpos = [hf.Position(3)-120 20 100 30];
     BCB  = @(btn,event) BtnModalityTable(hf,TT, TS);
-    if verLessThan('matlab','9.4')
+    if verLessThanOctave
         B = uicontrol(hf,'Style','pushbutton','String','OK');
         set(B,'Callback',BCB);
         setpixelposition(B,Bpos)
@@ -970,19 +954,10 @@ if bids
     % preview panel
     axesArgs = {hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],...
                    'Colormap',gray(64)};
-    if verLessThan('matlab','9.4')
-        ax = imagesc(dicm_img(h{1}{1}));
-        ax = ax.Parent;
-        setpixelposition(ax,axesArgs{3})
-        colormap(ax,axesArgs{5})
-    else
-        ax = uiaxes(axesArgs{:});
-    end
-    previewDicom(ax,h{1});
-    axis(ax,'off');
+    ax = previewDicom([],h{1},axesArgs);
     ax.YTickLabel = [];
     ax.XTickLabel = [];
-    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)});
+    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)},axesArgs);
     
     waitfor(hf);
     if getappdata(0,'Canceldicm2nii')
@@ -1033,16 +1008,34 @@ for i = 1:nRun
         fnames{i} = strrep(fnames{i},'__','_');
                 
         % _session.tsv
-        tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-        if verLessThan('matlab','9.4')
-            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
-        else
-            write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+        try
+            tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+            if verLessThanOctave
+                write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
+            else
+                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+            end
+        catch 
+            warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+        end
+        
+        % participants.tsv
+        if i==1 % same participant for all Run
+            try
+                tsvfile = fullfile(niiFolder, 'participants.tsv');
+                participant_id = SubjectTable{1,1};
+                Sex                    = tryGetField(h{i}{1}, 'PatientSex');
+                Age                    = tryGetField(h{i}{1}, 'PatientAge');
+                Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
+                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight)
+            catch
+                warning('Could not save participants.tsv');
+            end
         end
     end
     
     nFile = numel(h{i});
-    h{i}{1}.NiftiName = fnames{i}; % for convenience of error info
+    h{i}{1}.NiftiName = fnames{i};
     s = h{i}{1};
     if nFile>1 && ~isfield(s, 'LastFile')
         h{i}{1}.LastFile = h{i}{nFile}; % store partial last header into 1st
@@ -1133,6 +1126,12 @@ for i = 1:nRun
 end
 
 if ~bids
+    try % since 2014a 
+        fnames = matlab.lang.makeValidName(fnames);
+        fnames = matlab.lang.makeUniqueStrings(fnames, {}, namelengthmax);
+    catch
+        fnames = genvarname(fnames);
+    end
     h = cell2struct(h, fnames, 2); % convert into struct
     fname = [niiFolder 'dcmHeaders.mat'];
     if exist(fname, 'file') % if file exists, we update fields only
@@ -1166,6 +1165,7 @@ if isempty(name) || (strncmp(s.Manufacturer, 'SIEMENS', 7) && any(regexp(name, '
     name = tryGetField(s, 'ProtocolName');
 end
 if isempty(name), [~, name] = fileparts(s.Filename); end
+name = strtrim(name);
 
 %% Subfunction: return true if keyword is in s.ImageType
 function tf = isType(s, keyword)
@@ -1257,6 +1257,18 @@ end
 [h, nii.hdr] = sliceTiming(h, nii.hdr);
 nii.hdr.xyzt_units = xyz_unit + nii.hdr.xyzt_units; % normally: mm (2) + sec (8)
 s = h{1};
+
+% set TaskName if present in filename (using bids labels convention)
+if isfield(s,'NiftiName')
+    [~,fname] = fileparts(s.NiftiName);
+    
+    % parse filename
+    labels = regexp(fname,'(?<task>_task-[a-zA-Z0-9]+)?','names'); % task-<label>
+    
+    if ~isempty(labels)
+        s.TaskName = strrep(labels.task,'_task-','');
+    end
+end
 
 % Store motion parameters for MoCo series
 if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && nVol>1
@@ -1414,13 +1426,6 @@ if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
         hz = csa_header(s, 'BandwidthPerPixelPhaseEncode');
         dwell = 1000 ./ hz / dim(iPhase); % in ms
     end
-    if isempty(dwell) % true for syngo MR 2004A
-        % ppf = [1 2 4 8 16] represent [4 5 6 7 8] 8ths PartialFourier
-        % ppf = asc_header(s, 'sKSpace.ucPhasePartialFourier');
-        lns = asc_header(s, 'sKSpace.lPhaseEncodingLines');
-        dur = csa_header(s, 'SliceMeasurementDuration');
-        dwell = dur ./ lns; % ./ (log2(ppf)+4) * 8;
-    end
     if isempty(dwell) % next is not accurate, so as last resort
         dur = csa_header(s, 'RealDwellTime') * 1e-6; % ns to ms
         dwell = dur * asc_header(s, 'sKSpace.lBaseResolution');
@@ -1495,7 +1500,7 @@ h{1} = s;
 
 flds = { % store for nii.ext and json
   'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
-  'AcquisitionDateTime' 'bval' 'bvec' 'VolumeTiming' ...
+  'AcquisitionDateTime' 'TaskName' 'bval' 'bvec' 'VolumeTiming' ...
   'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'EchoTimes' ...
   'SecondEchoTime' 'InversionTime' 'CardiacTriggerDelayTimes' ...
@@ -1594,20 +1599,18 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
 end
 
 % Siemens multiframe: read TimeAfterStart from last file
-if isempty(t) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+if isempty(t) && tryGetField(s, 'NumberOfFrames', 1)>1 &&  ...
+        ~isempty(csa_header(s, 'TimeAfterStart'))
     % Use TimeAfterStart, not FrameAcquisitionDatetime. See
     % https://github.com/rordenlab/dcm2niix/issues/240#issuecomment-433036901
-    try 
-        s.PerFrameFunctionalGroupsSequence.Item_1.CSAImageHeaderInfo.Item_1.TimeAfterStart;
-        % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-        % s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
-        % t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
-        % t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
-        s2 = struct('TimeAfterStart', nan(1, nSL));
-        s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
-        t = s2.TimeAfterStart; % in secs
-        t = (t - min(t)) * 1000;
-    end
+    % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
+    % s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+    % t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
+    % t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+    s2 = struct('TimeAfterStart', nan(1, nSL));
+    s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+    t = s2.TimeAfterStart; % in secs
+    t = (t - min(t)) * 1000;
 end
 
 % Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
@@ -1840,6 +1843,7 @@ val = [];
 fld = 'CSAImageHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 if isfield(s, key), val = s.(key); return; end % general tag: 2nd choice
+try val = s.PerFrameFunctionalGroupsSequence.Item_1.(fld).Item_1.(key); return; end
 fld = 'CSASeriesHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 
@@ -1905,7 +1909,6 @@ if haveIPP, ipp = s.ImagePositionPatient; else, ipp = -(dim'.* pixdim)/2; end
 % Next is almost dicom xform matrix, except mosaic trans and unsure slice_dir
 R = [R * diag(pixdim) ipp];
 
-% rest are former: R = verify_slice_dir(R, s, dim, iSL)
 if dim(3)<2, return; end % don't care direction for single slice
 
 if s.Columns>dim(1) && ~strncmpi(s.Manufacturer, 'UIH', 3) % Siemens mosaic
@@ -1958,6 +1961,9 @@ end
 function val = asc_header(s, key)
 val = []; 
 csa = 'CSASeriesHeaderInfo';
+if ~isfield(s, csa) % in case of multiframe
+    try s.(csa) = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1; end
+end
 if ~isfield(s, csa), return; end
 if isfield(s.(csa), 'MrPhoenixProtocol')
     str = s.(csa).MrPhoenixProtocol;
@@ -2016,7 +2022,7 @@ switch cmd
         end
         rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
         if rstFmt == 4
-            if verLessThan('matlab','9.4')
+            if verLessThanOctave
                 fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n');
             end
             if get(hs.gzip,  'Value')
@@ -2385,13 +2391,13 @@ if ~isfield(s, 'EchoTime')
 end
 
 % for Siemens: the redundant copy makes non-Siemens code faster
-if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
-    s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
-end
-fld = 'CSAImageHeaderInfo';
-if isfield(s.(pffgs).Item_1, fld)
-    s.(fld) = s.(pffgs).(sprintf('Item_%g', iF)).(fld).Item_1;
-end
+% if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
+%     s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
+% end
+% fld = 'CSAImageHeaderInfo';
+% if isfield(s.(pffgs).Item_1, fld)
+%     s.(fld) = s.(pffgs).(sprintf('Item_%g', iF)).(fld).Item_1;
+% end
 
 % check ImageOrientationPatient consistency for 1st and last frame only
 if nFrame<2, return; end
@@ -3111,13 +3117,13 @@ end
 
 %% 
 function v = normc(M)
-den = sqrt(sum(M .* M));
-den(den==0) = 1;
-v = bsxfun(@rdivide, M, den);
+vn = vecnorm(M);
+vn(vn==0) = 1;
+v = bsxfun(@rdivide, M, vn);
 %%
 
 function BtnModalityTable(h,TT,TS)
-if verLessThan('matlab','9.4')
+if verLessThanOctave
     dat = TT.Data;
 else
     dat = cellfun(@char,table2cell(TT.Data),'uni',0);
@@ -3133,7 +3139,7 @@ delete(h)
 function my_closereq(src,~)
 % Close request function 
 % to display a question dialog box
-if verLessThan('matlab','9.4')
+if verLessThanOctave
     selection = questdlg('Cancel Dicom conversion?','Close dicm2nii','OK','Cancel','Cancel');
 else
     selection = uiconfirm(src,'Cancel Dicom conversion?',...
@@ -3147,22 +3153,39 @@ switch selection
         return
 end
 
-function previewDicom(ax,s)
-nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
-if isempty(nSL)
-    nSL = length(s);
-end
-if verLessThan('matlab','9.4')
-    axis(ax);
-    imagesc(dicm_img(s{round(nSL/2)}));
+function ax = previewDicom(ax,s,axesArgs)
+
+try
+    nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
+    if isempty(nSL)
+        nSL = length(s);
+    end
+    img = dicm_img(s{min(end,round(nSL/2))});
+    img = img(:,:,:,round(end/2));
+
+    if verLessThanOctave
+        if ~isempty(ax)
+            axis(ax);
+        end
+        axnew = imagesc(img);
+        if isempty(ax)
+            ax = axnew.Parent;
+            setpixelposition(ax,axesArgs{3})
+        end
+        colormap(ax,axesArgs{5})
+        ax.YTickLabel = [];
+        ax.XTickLabel = [];
+    else
+        if isempty(ax)
+            ax = uiaxes(axesArgs{:});
+        end
+        imagesc(ax,img);
+    end
     axis(ax,'off');
-    colormap(ax,'gray')
-    ax.YTickLabel = [];
-    ax.XTickLabel = [];
-else
-    imagesc(ax,dicm_img(s{round(nSL/2)}));
+    ax.DataAspectRatio = [s{min(end,round(nSL/2))}.PixelSpacing' 1];
+catch err
+    warning(['CANNOT PREVIEW RUN: ' err.message])
 end
-ax.DataAspectRatio = [s{round(nSL/2)}.PixelSpacing' 1];
 
 function showHelp(valueset)
 %%
@@ -3195,3 +3218,7 @@ h = msgbox(msg,'Help on BIDS converter');
 set(findall(h,'Type','Text'),'FontName','FixedWidth');
 Pos = get(h,'Position'); Pos(3) = 450;
 set(h,'Position',Pos)
+
+function val = verLessThanOctave
+isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
+val = isOctave || verLessThan('matlab','9.4');
