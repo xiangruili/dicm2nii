@@ -1191,10 +1191,8 @@ switch cmd
             a = inputdlg('Volume indice to save (2:4 for example)', ...
                 'Save Volume', 1, {num2str(t)});
             if isempty(a), return; end
-            try
-                t = eval(['[' a{1} '];']);
-                break;
-            end
+            t = str2num(a{1});
+            if ~isempty(t), break; end
         end
         pName = fileparts(nam);
         [fname, pName] = uiputfile([pName '/*.nii;*.nii.gz'], ...
