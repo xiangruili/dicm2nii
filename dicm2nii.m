@@ -546,7 +546,7 @@ for k = 1:nFile
         if ~isempty(errStr{k}) % && isempty(strfind(errInfo, errStr{k}))
             errInfo = sprintf('%s\n%s\n', errInfo, errStr{k});
         end
-        continue; % skip the file
+        continue; % ingore the file
     end
 
     if isfield(s, flds{4}) && (pf.use_seriesUID || ~isfield(s, 'SeriesNumber'))
@@ -560,7 +560,7 @@ for k = 1:nFile
     
     m = find(strcmp(sUID, seriesUIDs));
     if isempty(m)
-        m = numel(seriesUIDs)+1;
+        m = numel(seriesUIDs) + 1;
         seriesUIDs{m} = sUID;
         ETs{m} = [];
     end
