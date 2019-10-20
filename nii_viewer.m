@@ -375,6 +375,7 @@ h.setToolTipText(['<html>Select image to show/modify its display ' ...
 jScroll = com.mathworks.mwswing.MJScrollPane(h);
 width = h.getPreferredScrollableViewportSize.getWidth;
 width = max(60, min(width+20, pos(3)-408)); % 20 pixels for vertical scrollbar
+warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
 [~, hs.scroll] = javacomponent(jScroll, [2 4 width 60], hs.panel);
 hCB = handle(h.getCheckBoxListSelectionModel, 'CallbackProperties');
 hCB.ValueChangedCallback = cb('toggle'); % check/uncheck
@@ -608,6 +609,7 @@ guidata(fh, hs); % store handles and data
 
 %% java_dnd based on dndcontrol at matlabcentral/fileexchange/53511
 try % panel has JavaFrame in later matlab
+    warning('off', 'MATLAB:ui:javaframe:PropertyToBeRemoved');
     jFrame = handle(hs.frame.JavaFrame.getGUIDEView, 'CallbackProperties');
 catch
     warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
@@ -1171,7 +1173,7 @@ switch cmd
         nam = strtok(hs.files.getModel.get(jf-1), '(');
         fh1 = figure(mod(fh.Number,10)+jf);
         set(fh1, 'NumberTitle', 'off', 'Name', nam);
-        [y, x] = hist(img, edges);
+        [y, x] = hist(img, edges); %#ok
         bar(x, y/sum(y)/(x(2)-x(1)), 'hist'); % probability density
         xlabel('Voxel values'); ylabel('Probability density');
         title('Histogram between min and max values');
@@ -2982,7 +2984,7 @@ if d>4, d = round(d/2)*2; end
 %% Return nii struct from nii struct, nii fname or other convertible files
 function nii = get_nii(fname)
 if isstruct(fname), nii = fname; return;
-elseif iscellstr(fname), nam = fname{1};
+elseif iscellstr(fname), nam = fname{1}; %#ok
 else, nam = fname;
 end
 try 
