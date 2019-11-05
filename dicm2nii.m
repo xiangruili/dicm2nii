@@ -1026,8 +1026,10 @@ for i = 1:nRun
                 participant_id = SubjectTable{1,1};
                 Sex                    = tryGetField(h{i}{1}, 'PatientSex');
                 Age                    = tryGetField(h{i}{1}, 'PatientAge');
+                if ischar(Age), Age = strrep(Age,'Y',''); Age = str2num(Age); end
+                Size                   = tryGetField(h{i}{1}, 'PatientSize');
                 Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
-                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight)
+                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight,'Size',Size)
             catch
                 warning('Could not save participants.tsv');
             end
