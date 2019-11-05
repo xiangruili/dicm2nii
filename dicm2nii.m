@@ -1026,8 +1026,10 @@ for i = 1:nRun
                 participant_id = SubjectTable{1,1};
                 Sex                    = tryGetField(h{i}{1}, 'PatientSex');
                 Age                    = tryGetField(h{i}{1}, 'PatientAge');
+                if ischar(Age), Age = strrep(Age,'Y',''); Age = str2num(Age); end
+                Size                   = tryGetField(h{i}{1}, 'PatientSize');
                 Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
-                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight)
+                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight,'Size',Size)
             catch
                 warning('Could not save participants.tsv');
             end
@@ -1091,7 +1093,7 @@ for i = 1:nRun
     
     h{i}{1}.ConversionSoftware = converter;
     nii = nii_tool('init', img); % create nii struct based on img
-    [nii, h{i}] = set_nii_hdr(nii, h{i}, pf); % set most nii hdr
+    [nii, h{i}] = set_nii_hdr(nii, h{i}, pf, bids); % set most nii hdr
 
     % Save bval and bvec files after bvec perm/sign adjusted in set_nii_hdr
     fname = fullfile(niiFolder,fnames{i}); % name without ext
@@ -1204,7 +1206,7 @@ else, val = [];
 end
 
 %% Subfunction: Set most nii header and re-orient img
-function [nii, h] = set_nii_hdr(nii, h, pf)
+function [nii, h] = set_nii_hdr(nii, h, pf, bids)
 dim = nii.hdr.dim(2:4); nVol = nii.hdr.dim(5);
 fld = 'NumberOfTemporalPositions';
 if ~isfield(h{1}, fld) && nVol>1, h{1}.(fld) = nVol; end
@@ -1511,6 +1513,13 @@ flds = { % store for nii.ext and json
   'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
   'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector'};
 if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
+if bids
+    flds(strcmp(flds, 'PatientName')) = [];
+    flds(strcmp(flds, 'PatientSex')) = [];
+    flds(strcmp(flds, 'PatientAge')) = [];
+    flds(strcmp(flds, 'PatientSize')) = [];
+    flds(strcmp(flds, 'PatientWeight')) = [];
+end
 for i = 1:numel(flds)
     if ~isfield(s, flds{i}), continue; end
     nii.json.(flds{i}) = s.(flds{i});
@@ -1828,11 +1837,11 @@ function save_dti_para(s, fname)
 if ~isfield(s, 'bvec') || all(s.bvec(:)==0), return; end
 if isfield(s, 'bval')
     fid = fopen([fname '.bval'], 'w');
-    fprintf(fid, '%.5g\t', s.bval); % one row
+    fprintf(fid, '%.5g ', s.bval); % one row
     fclose(fid);
 end
 
-str = repmat('%9.6f\t', 1, size(s.bvec,1));
+str = repmat('%.6f ', 1, size(s.bvec,1));
 fid = fopen([fname '.bvec'], 'w');
 fprintf(fid, [str '\n'], s.bvec); % 3 rows by # direction cols
 fclose(fid);
@@ -2867,8 +2876,8 @@ for i = 1:numel(flds)
         fprintf(fid, '\t],\n');
     elseif isnumeric(val) % matrix
         fprintf(fid, '[\n');
-        fmt = repmat('%.8g ', 1, size(val, 2));
-        fprintf(fid, ['\t\t[' fmt(1:end-1) '],\n'], val');
+        fmt = repmat('%.8g, ', 1, size(val, 2));
+        fprintf(fid, ['\t\t[' fmt(1:end-2) '],\n'], val');
         fseek(fid, -2, 'cof');
         fprintf(fid, '\n\t],\n');
     else % in case of struct etc, skip
