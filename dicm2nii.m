@@ -546,7 +546,7 @@ for k = 1:nFile
         if ~isempty(errStr{k}) % && isempty(strfind(errInfo, errStr{k}))
             errInfo = sprintf('%s\n%s\n', errInfo, errStr{k});
         end
-        continue; % skip the file
+        continue; % ingore the file
     end
 
     if isfield(s, flds{4}) && (pf.use_seriesUID || ~isfield(s, 'SeriesNumber'))
@@ -560,7 +560,7 @@ for k = 1:nFile
     
     m = find(strcmp(sUID, seriesUIDs));
     if isempty(m)
-        m = numel(seriesUIDs)+1;
+        m = numel(seriesUIDs) + 1;
         seriesUIDs{m} = sUID;
         ETs{m} = [];
     end
@@ -2185,6 +2185,7 @@ uicontrol('Style', 'Pushbutton', 'Position', [6 235 112 24], ...
     'TooltipString', str, 'Callback', cb('srcDir'));
 
 jSrc = javaObjectEDT('javax.swing.JTextField');
+warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
 hs.src = javacomponent(jSrc, [118 234 294 24], fh);
 hs.src.FocusLostCallback = cb('set_src');
 hs.src.Text = getpf('src', pwd);
