@@ -2866,8 +2866,8 @@ for i = 1:numel(flds)
         fprintf(fid, '\t],\n');
     elseif isnumeric(val) % matrix
         fprintf(fid, '[\n');
-        fmt = repmat('%.8g ', 1, size(val, 2));
-        fprintf(fid, ['\t\t[' fmt(1:end-1) '],\n'], val');
+        fmt = repmat('%.8g, ', 1, size(val, 2));
+        fprintf(fid, ['\t\t[' fmt(1:end-2) '],\n'], val');
         fseek(fid, -2, 'cof');
         fprintf(fid, '\n\t],\n');
     else % in case of struct etc, skip
