@@ -8,8 +8,8 @@ function varargout = nii_viewer(fname, varargin)
 % If no input is provided, the viewer will load included MNI_2mm brain as
 % background NIfTI. Although the preferred format is NIfTI, NII_VIEWER accepts
 % any files that can be converted into NIfTI by dicm2nii, including NIfTI,
-% dicom, PAR/REC, etc. In case of CIfTI file, it will show the volume view, as
-% well as surface view if GIfTI is available.
+% dicom, PAR/REC, etc. In case of CIfTI file, it will show both the volume and 
+% surface view if GIfTI is available.
 % 
 % Here are some features and usage.
 % 
@@ -20,7 +20,7 @@ function varargout = nii_viewer(fname, varargin)
 % accurate. The benefit is that no interpolation is needed for the background
 % image, and there is no need to switch coordinate system when images with
 % different systems are overlaid. The display is always in correct scale at
-% three axes even with non-isotropic voxels. The displayed IJK always correspond
+% three vies even with non-isotropic voxels. The displayed IJK always correspond
 % to left -> right, posterior -> anterior and inferior -> superior directions,
 % while the NIfTI data may not be saved in this order or along these directions.
 % The I-index is increasing from left to right even when the display is flipped
@@ -95,10 +95,10 @@ function varargout = nii_viewer(fname, varargin)
 % does not consider voxel size.
 % 
 % Background image and overlays are listed at the top-left of the panel. All
-% parameters of the bottom row of the panel are for the selected image. This
-% feature is indicated by a frame grouping these parameters. Each NIfTI file has
-% its own set of parameters (display min and max value, LUT, alpha, whether to
-% smooth, interpolation method, and volume number) to control its display.
+% parameters of the bottom row of the panel are for the highlighted image. This
+% feature is indicated by the blue background of the parameters. Each NIfTI file
+% has its own set of parameters (display min and max value, LUT, alpha, whether
+% to smooth, interpolation method, and volume number) to control its display.
 % Moving the mouse onto a parameter will show the meaning of the parameter.
 % 
 % The lastly added overlay is on the top of display and top of the file list.
@@ -126,8 +126,8 @@ function varargout = nii_viewer(fname, varargin)
 % 
 % For multi-volume data, one can change the Volume Number (the parameter at
 % rightmost of the panel) to check the head motion. Click in the number dialer
-% and or press < or > key, to simulate movie play. It is better to open the 4D
-% data as background, since it may be slower to map it to the background image.
+% or press < or > key, to simulate movie play. It is better to open the 4D data
+% as background, since it may be slower to map it to the background image.
 % 
 % Popular LUT options are implemented. Custom LUT can be added by Overlay ->
 % Load LUT for selected overlay. The custom LUT file can be in text format (each
@@ -139,12 +139,12 @@ function varargout = nii_viewer(fname, varargin)
 % t-map, positive T above 3 will be coded as red-yellow, and T below -3 will be
 % coded as blue-green. This means the absolute display range values are used.
 % 
-% One of the special LUT is "lines" in red text. This is for normalized vector
-% display, e.g. for diffusion vector. The viewer will refuse the LUT selection
-% if the data is not normalized vector. Under this LUT, all other parameters for
-% the display are ignored. The color of the "lines" is the max color of previous
-% LUT. For example, if one likes to show blue vector lines, choose LUT "blue"
-% first, then change it to "lines".
+% One of the special LUT is "lines". This is for normalized vector display,
+% e.g. for diffusion vector. The viewer will refuse the LUT selection if
+% the data is not normalized vector. Under this LUT, all other parameters
+% for the display are ignored. The color of the "lines" is the max color of
+% previous LUT. For example, if one likes to show blue vector lines, choose
+% LUT "blue" first, then change it to "lines".
 % 
 % In case of complex image, most LUTs will display only the magnitude of the
 % data, except the following three phase LUTs, where the magnitude is used as
@@ -328,6 +328,7 @@ else
         fn = 'ni' * 256.^(1:2)'; % start with a big number for figure
     elseif numel(a) == 1
         fn = get(a, 'Number') + 1; % this needs handle() to work
+        if isempty(fn), fn = 'ni' * 256.^(1:2)'; end
     else
         fn = max(cell2mat(get(a, 'Number'))) + 1;
     end
@@ -415,7 +416,7 @@ end
 
 % Controls for each file
 uipanel('Parent', ph, 'Units', 'pixels', 'Position', [1 2 412 34], ...
-    'BorderType', 'etchedin', 'BorderWidth', 2);
+    'BorderType', 'none', 'BorderWidth', 0, 'BackgroundColor', [0 0.5 0.8]);
 hs.lb = java_spinner([7 8 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
 hs.ub = java_spinner([59 8 56 22], [p.ub -inf inf p.ub_step], ph, ...
@@ -671,9 +672,6 @@ switch cmd
         p = get_para(hs);
         val = get(h, 'Value');
         
-        if val == 11 && val~=p.lut
-            hs.lut.UserData = p.lut; % remember old lut
-        end
         if strcmp(cmd, 'smooth')
             if val==1 && numel(p.nii.img(:,:,:,1))<2
                 set(h, 'Value', 0); return;
@@ -681,6 +679,7 @@ switch cmd
         elseif strcmp(cmd, 'lut')
             err = false;
             if val == 11 % error check for vector lines
+                if p.lut~=11, hs.lut.UserData = p.lut; end % remember old lut
                 err = true;
                 if size(p.nii.img,4)~=3
                     errordlg('Not valid vector data: dim4 is not 3');
@@ -696,7 +695,7 @@ switch cmd
                 if err, warndlg('Seleced image is not complex data.'); end
             elseif val == 29 % RGB
                 err = size(p.nii.img,4)~=3;
-                if err, errordlg('RGB LUT requres 3-volume data.'); end
+                if err, errordlg('RGB LUT requries 3-volume data.'); end
             elseif val == numel(hs.lutStr)
                 err = true;
                 errordlg('Custom LUT is used be NIfTI itself');
@@ -1259,7 +1258,7 @@ switch cmd
         if ~isempty(evt) && evt.getValueIsAdjusting, return; end
         p = get_para(hs);
         
-        nam = {'lb' 'ub' 'alpha' 'volume' 'lut' 'smooth' 'interp' };
+        nam = {'lb' 'ub' 'alpha' 'volume' 'lut' 'smooth' 'interp'};
         cb = cell(4,1);
         for j = 1:4 % avoid firing spinner callback
             cb{j} = hs.(nam{j}).StateChangedCallback;
