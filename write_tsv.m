@@ -20,6 +20,7 @@ if exist(tsvfile,'file') % read already existing tsvfile
     T = readtable(tsvfile,'FileType','text','Delimiter','\t','Format',repmat('%s',[1,Nvar]));
 end
 varargin(1:2:end) = cellfun(@genvarname,varargin(1:2:end),'uni',0);
+varargin(cellfun(@isempty,varargin)) = {'N/A'};
 if exist(tsvfile,'file') && ~isempty(T) % append to already existing tsvfile
     ind = find(strcmp(table2cell(T(:,1)),id),1);
     if isempty(ind)
@@ -28,6 +29,7 @@ if exist(tsvfile,'file') && ~isempty(T) % append to already existing tsvfile
     end
     
     for ii=1:2:length(varargin)
+        if isempty(varargin{ii+1}), varargin{ii+1} = 'N/A'; end
         if ismember(varargin{ii},T.Properties.VariableNames)
             
         else
