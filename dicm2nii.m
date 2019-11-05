@@ -1828,11 +1828,11 @@ function save_dti_para(s, fname)
 if ~isfield(s, 'bvec') || all(s.bvec(:)==0), return; end
 if isfield(s, 'bval')
     fid = fopen([fname '.bval'], 'w');
-    fprintf(fid, '%.5g\t', s.bval); % one row
+    fprintf(fid, '%.5g ', s.bval); % one row
     fclose(fid);
 end
 
-str = repmat('%9.6f\t', 1, size(s.bvec,1));
+str = repmat('%.6f ', 1, size(s.bvec,1));
 fid = fopen([fname '.bvec'], 'w');
 fprintf(fid, [str '\n'], s.bvec); % 3 rows by # direction cols
 fclose(fid);
