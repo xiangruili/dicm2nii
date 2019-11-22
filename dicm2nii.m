@@ -982,7 +982,7 @@ if bids
             ModalityTablePref.Type(match) = ModalityTableSavePref{imod,2};
             ModalityTablePref.Modality(match) = ModalityTableSavePref{imod,3};
         else % append new pref
-            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(end,:)];
+            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(imod,:)];
         end
     end
     setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref);
