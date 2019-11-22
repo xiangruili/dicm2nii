@@ -828,8 +828,13 @@ if bids
         return;
     end
     if numel(acq)>1
-        fprintf('Multiple acquitisition detected!!!!! Skipping...\nPlease convert sessions one by one with BIDS options\n')
-        fprintf('%s\n',acq{:})
+        fprintf('Multiple acquitisition detected!!!!! \n')
+        for iacq = 1:length(acq)
+            fprintf('Converting sessions one by one...  %s\n',acq{iacq})
+            iacqlist = strcmp(acqs(keep),acq{iacq});
+            FileNames = cellfun(@(y) cellfun(@(x) x.Filename,y,'uni',0),h(iacqlist),'uni',0);
+            dicm2nii([FileNames{:}],niiFolder,'bids')
+        end
         return;
     end
 
