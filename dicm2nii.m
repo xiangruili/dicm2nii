@@ -821,10 +821,17 @@ end
 
 %% Parse BIDS
 if bids
+    % Manage Multiple SUBJECT or SESSION
     if multiSubj
         fprintf(['Multiple subjects detected!!!!! Skipping...\n' ...
             'Please convert subjects one by one with BIDS options\n'])
         fprintf('%s\n',subj{:})
+        for isub = 1:length(subj)
+            fprintf('Converting subject one by one...  %s\n',subj{isub})
+            isublist = strcmp(subjs,subj{isub});
+            FileNames = cellfun(@(y) cellfun(@(x) x.Filename,y,'uni',0),h(isublist),'uni',0);
+            dicm2nii([FileNames{:}],niiFolder,'bids')
+        end
         return;
     end
     if numel(acq)>1
