@@ -856,12 +856,12 @@ if bids
         Subject = {'01'};
     end
     Session                = {'01'};
-    if verLessThanOctave
-        AcquisitionDate        = acq{1};
-        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
-    else
+    try 
         AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
         AcquisitionDate.Format = 'yyyy-MM-dd';
+    catch % octave
+        AcquisitionDate        = acq{1};
+        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
     end
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
