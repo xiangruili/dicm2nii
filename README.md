@@ -1,5 +1,5 @@
 
-# DICOM to NIfTI conversion, DICOM and NIfTI tools, NIfTI visualization (version 2019.11.05)
+# DICOM to NIfTI conversion, DICOM and NIfTI tools, NIfTI visualization (version 2019.11.26)
 
 # dicm2nii
 Convert DICOM into NIfTI. It can also convert PAR/XML/REC, HEAD/BRIK, MGZ and BrainVoyager files into NIfTI.
