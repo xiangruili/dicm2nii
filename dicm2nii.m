@@ -437,7 +437,7 @@ if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
 end
 
 %% Deal with niiFolder
-if ~isdir(niiFolder), mkdir(niiFolder); end
+if ~isdir(niiFolder), mkdir(niiFolder); end %#ok<*ISDIR>
 niiFolder = [GetFullPath(niiFolder) filesep];
 converter = ['dicm2nii.m ' getVersion];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
@@ -449,7 +449,7 @@ end
 tic;
 if isnumeric(src)
     error('Invalid dicom source.');    
-elseif iscellstr(src) % multiple files/folders
+elseif iscellstr(src) %#ok<*ISCLSTR> % multiple files/folders
     fnames = {};
     for i = 1:numel(src)
         if isdir(src{i})
@@ -1038,7 +1038,7 @@ for i = 1:nRun
                 participant_id = SubjectTable{1,1};
                 Sex                    = tryGetField(h{i}{1}, 'PatientSex');
                 Age                    = tryGetField(h{i}{1}, 'PatientAge');
-                if ischar(Age), Age = strrep(Age,'Y',''); Age = str2num(Age); end
+                if ischar(Age), Age = sscanf(Age, '%f'); end
                 Size                   = tryGetField(h{i}{1}, 'PatientSize');
                 Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
                 write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight,'Size',Size)
@@ -2705,7 +2705,7 @@ for i = 1:numel(flds)
         str = sprintf('[%s]', str(1:end-1)); % drop last space
     elseif isnumeric(val) % matrix, like DTI bvec
         fmt = repmat('%.8g ', 1, size(val, 2));
-        str = sprintf([fmt char(10)], val');
+        str = sprintf([fmt char(10)], val'); %#ok
         str = sprintf('[%s]', str(1:end-2)); % drop last space and char(10)
     else % in case of struct etc, skip
         continue;
@@ -3139,7 +3139,7 @@ end
 
 %% 
 function v = normc(M)
-vn = vecnorm(M);
+vn = sqrt(sum(M .^ 2)); % vn = vecnorm(M);
 vn(vn==0) = 1;
 v = bsxfun(@rdivide, M, vn);
 %%
