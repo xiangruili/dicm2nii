@@ -4,9 +4,9 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % DICM2NII(dcmSource, niiFolder, outFormat)
 % 
 % The input arguments are all optional:
-%  1. source file or folder. It can be a zip or tgz file, a folder containing
-%     dicom files, or other convertible files. It can also contain wildcards
-%     like 'run1_*' for all files start with 'run1_'.
+%  1. source file or folder can be a zip or tgz file, a folder containing dicom
+%     files, or other convertible files. It can also contain wildcards like 
+%     'run1_*' for all files start with 'run1_'.
 %  2. folder to save result files.
 %  3. output file format:
 %      0 or '.nii'           for single nii uncompressed.
@@ -24,7 +24,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 %  DICM2NII('D:/myProj/zip/subj1.zip', 'D:/myProj/subj1/data'); % zip file
 %  DICM2NII('D:/myProj/subj1/dicom/', 'D:/myProj/subj1/data'); % folder
 % 
-% Less useful examples:
+% Less common examples:
 %  DICM2NII('D:/myProj/dicom/', 'D:/myProj/subj2/data', 'nii'); % no gz compress
 %  DICM2NII('D:/myProj/dicom/run2*', 'D:/myProj/subj/data'); % convert run2 only
 %  DICM2NII('D:/dicom/', 'D:/data', '3D.nii'); % SPM style files
@@ -92,15 +92,15 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % ext.edata_decoded contains all above mentioned information, and more. The
 % included nii_viewer can show the extension by Window->Show NIfTI ext.
 % 
-% Several preference can be set from dicm2nii GUI. The preference change will
-% take effect until it is changed next time. 
+% Several preference can be set from dicm2nii GUI. The preference change stays
+% in effect until it is changed next time. 
 % 
 % One of preference is to save a .json file for each converted NIfTI. For more
 % information about the purpose of json file, check
 %  http://bids.neuroimaging.io/ 
 % 
 % By default, the converter will use parallel pool for dicom header reading if
-% there are +2000 files. User can turn this off from GUI.
+% there are 2000+ files. User can turn this off from GUI.
 % 
 % By default, the PatientName is stored in NIfTI hdr and ext. This can be turned
 % off from GUI.
@@ -112,6 +112,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % or re-oriented, these information may not be correct anymore.
 % 
 % Please report any bug to xiangrui.li@gmail.com or at
+% https://github.com/xiangruili/dicm2nii/issues
 % http://www.mathworks.com/matlabcentral/fileexchange/42997
 % 
 % To cite the work and for more detail about the conversion, check the paper at
@@ -126,265 +127,28 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 
 % History (yymmdd):
 % 130512 Publish to CCBBI users (Xiangrui Li).
-% 130513 Convert img from uint16 to int16 if range allows;
-%        Support output file format of img/hdr/mat.
-% 130515 Change creation order to acquisition order (more natural).
-%        If MoCo series is included, append _MoCo in file names.
-% 130516 Use SpacingBetweenSlices, if exists, for SliceThickness. 
-% 130518 Use NumberOfImagesInMosaic in CSA header (work for some old data).
-% 130604 Add scl_inter/scl_slope and special naming for fieldmap.
-% 130614 Work out the way to get EffectiveEchoSpacing for B0 unwarp.
-% 130616 Add needed dicom field check, so it won't err later.
-% 130618 Reorient if non-mosaic or slice_dim is still 3 and no slice flip.
-% 130619 Simplify DERIVED series detection. No '_mag' in fieldmap name.
-% 130629 Improve the method to get phase direction;
-%        Permute img dim1&2 (no -90 rotation) & simplify xform accordingly.
-% 130711 Make MoCoOption smarter: create nii if only 1 of 2 series exists.
-% 130712 Remove 5th input (allHeader). Save memory by using partial header.
-% 130712 Bug fix: dim_info with reorient. No problem since no EPI reorient.
-% 130715 Use 2 slices for xform. No slice flip needed except revNum mosaic.
-% 130716 Take care of lower/upper cases for output file names;
-%        Apply scl_slope and inter to img if range allows and no rounding;
-%        Save motion parameters, if any, into dcmHeader.mat.
-% 130722 Ugly fix for isMos, so it works for '2004A 4VA25A' phase data;
-%        Store dTE instead of TE if two TE are used, such as fieldmap.
-% 130724 Add two more ways for dwell time, useful for '2004A 4VA25A' dicom.
-% 130801 Can't use DERIVED since MoCoSeries may be labeled as DERIVED.
-% 130807 Check PixelSpacing consistency for a series;
-%        Prepare to publish to Matlab Central.
-% 130809 Add 5th input for subjName, so one can choose a subject.
-% 130813 Store ImageComments, if exists and is meaningful, into aux_file.
-% 130818 Expand source to dicom file(s) and wildcards like run1*.dcm.
-%        Update fields in dcmHeader.mat, rather than overwriting the file.
-%        Include save_nii etc in the code for easy distribution.
-% 130821 Bug fix for cellstr input as dicom source.
-%        Change file name from dcm2nii.m to reduce confusion from MRICron.
-%        GUI implemented into the single file.
 % 130823 Remove dependency on Image Processing Toolbox.
-% 130826 Bug fix for '*' src input. Minor improvement for dicm_hdr.
-% 130827 Try and suggest to use pigz for compression (thanks Chris R.).
-% 130905 Avoid the missing-field error for DTI data with 2 excitations.
-%        Protect GUI from command line plotting.
-% 130912 Use lDelayTimeInTR for slice_dur, possibly useful for old data.
-% 130916 Store B_matrix for DTI image, if exists.
 % 130919 Work for GE and Philips dicom at Chris R website.
-% 130922 Remove dependence on normc from nnet toolbox (thank Zhiwei);
 % 130923 Work for Philips PAR/REC pair files.
-% 130926 Take care of non-mosaic DTI for Siemens (img/bval/bvec);
-% 130930 Use verify_slice_dir subfun to get slice_dir even for a single file.
-% 131001 dicm_hdr can deal with VR of SQ. This slows down it a little.
-% 131002 Avoid fullfile for cellstr input (not supported in old matlab).
-% 131006 Tweak dicm_hdr for multiframe dicom (some bug fixes);
-%        First working version for multiframe (tested with Philips dicom).
-% 131009 Put dicm_hdr, dicm_img, dicm_dict outside this file;
-%        dicm_hdr can read implicit VR, and is faster with single fread;
-%        Fix problem in gzipOS when folder name contains space.
-% 131020 Make TR & ProtocolName non-mandatory; Set cal_min & cal_max.
 % 131021 Implement conversion for AFNI HEAD/BRIK.
-% 131024 Bug fix for dealing with current folder as src folder.
-% 131029 Bug fix: Siemens, 2D, non-mosaic, rev-num slices were flipped.
-% 131105 DTI parameters: field names more consistent across vendors; 
-%        Read DTI flds in save_dti_para for GE/Philips (make others faster); 
-%        Convert Philips bvec from deg into vector (need to be verified).
-% 131114 Treak for multiframe dicm_hdr: MUCH faster by using only 1,2,n frames;
-%        Bug fix for Philips multiframe DTI parameters;
-%        Split multiframe Philips B0 map into mag and phase nii.
-% 131117 Make the order of phase/mag image in Philips B0 map irrelevant.
 % 131219 Write warning message to a file in data folder (Gui's suggestion).
-% 140120 Bug fix in save_dti_para due to missing Manufacturer (Thank Paul).
-% 140121 Allow missing instance at beginning of a series.
-% 140123 save_nii: bug fix for gzip.m detection, take care of ~ as home dir.
-% 140206 bug fix: MoCo detetion bug introduced by removing empty cell earlier.
-% 140223 add missing-file check for Philips data by slice locations.
-% 140312 use slice timing to set slice_code for both GE and Siemens.
-%        Interleaved order was wrong for GE data with even number of slices. 
-% 140317 Use MosaicRefAcqTimes from last vol for multiband (thank Chris).
-%        Don't re-orient fieldmap, so make FSL happy in case of non_axial. 
-%        Ugly fix for wrong dicom item VR 'OB': Avoid using main header 
-%        in csa_header(), convert DTI parameters to correct type. 
-% 140319 Store SliceTiming field in dcmHeaders.mat for FSL custom slice timing.
-%        Re-orient even if flipping slices for 2D MRAcquisitionType.
-% 140324 Not set cal_min, cal_max anymore.
-% 140327 Return unconverted subject names in 2nd output.
-% 140401 Always flip image so phase dir is correct.
-% 140409 Store nii extension (not enabled due to nifti ext issue).
-% 140501 Fix for GE: use LocationsInAcquisition to replace ImagesInAcquisition;
-%            isDTI=DiffusionDirection>0; Gradient already in image reference.
-% 140505 Always re-orient DTI. bvec fix for GE DTI (thx Chris).
-% 140506 Remove last DTI vol if it is computed ADC (as dcm2niix);
-%        Use SeriesDescription to replace ProtocolName for file name;
-%        Improved dim_info and phase direction.
-% 140512 Decode GE ProtocolDataBlock for phase direction;
-%        strtrim SeriesDescription for nii file name.
-% 140513 change stored phase direction to image reference for FSL unwarp;
-%        Simplify code for dim_info.
-% 140516 Switch back to ProtocolName for SIEMENS to take care of MOCO series;
-%        Detect Philips XYTZ (for multi files) during dicom check; 
-%        Work for GE interleaved slices even if InstanceNumber is in time order;
-%        Do ImagePositionPatient check for all vendors;
-%        Simplify code for save_dti_para.
-% 140517 Store img with first dim flipped, to take care of DTI bvec problems. 
-% 140522 Use SliceNormalVector for mosaic slice_dir, so no worry for revNumb;
-%        Bug fix for interleaved descending slice_code.
-% 140525 xform sliceCenter to SliceLocation in verify_slice_dir. 
-% 140526 Take care of non-unique ixyz. 
-% 140608 Bug fix for GE interleaved slices;
-%        Take care all ixyz, put verify_slice_dir into xform_mat.
-% 140610 Compute readout time for DTI, rather than dwell time.
 % 140621 Support tgz file as data source.
-% 140716 Bug fix due to empty src for GUI subject option.
-% 140808 Simplify mosaic detection, and remove isMosaic.
-% 140816 Simplify DTI detection.
-% 140911 Minor fix for Siemens ProtocolName for error message.
-% 141016 Remember GUI settings from last conversion;
-%        Make multi-subject error message friendly.
-% 141023 Get LocationsInAcquisition for GE multiframe dicom.
-% 141024 Use unique ImagePositionPatient to determine LocationsInAcquisition.
-% 141028 Use matlabpool if available and worthy.
-% 141125 Store NumberOfTemporalPositions in dicom header.
-% 141128 Minor tweaks for Octave 3.8.1 command line (GUI not working).
-% 141216 Use ImagePositionPatient to derive SliceThickness if possible.
-% 141217 Override LocationsInAcquisition with computed nSL (thx Luigi);
-%        Check RescaleIntercept and RescaleSlope consistency.
-% 141218 Allow 1e-4 diff for ImagePositionPatient of same slice location.
-% 141223 multiFrameFields: return earlier if only single frame (thx Sander);
-%        No re-orient for single slice (otherwise problem for mricron to read).
-% 141224 mos2vol: use nSL loop (faster unless many slices).
-% 141229 Save nii ext (ecode=40) if FSL is detected & it is not 5.0.5/5.0.6.
-% 141230 nojvm: no matlabpool; no dicm_hdr progress due to '\b' issue for WIN.
-% 150109 dicm_img(s, 0) to follow the update for dicm_img.
 % 150112 Use nii_tool.m, remove make_nii, save_nii etc from this file.
-% 150115 Allow SamplesPerPixel>1, but likely not very useful.
-% 150117 Store seq name in intent_name.
-% 150119 Add phase img detection for Philips.
-% 150120 No fieldmap file skip by EchoTime: keep all data by using EchoNumber.
-% 150209 Add more output format for SPM style: 3D output;
-%        GUI includes SPM 3D, separates GZ option. 
-% 150211 No missing file check for all vendors, relying on ImagePosition check;
-%        csa_header() relies on dicm_hdr decoding (avoid error on old data);
-%        Deal with dim3-RGB and dim4-frames due to dicm_img.m update.
-% 150222 Remove useless, mis-used TriggerTime for partial hdr; also B_matrix.
-% 150302 No hardcoded sign change for DTI bvec, except for GE;
-%        set_nii_hdr: do flip only once after permute;
-% 150303 Bug fix for phPos: result was right by lucky mistake;
-%        Progress shows nii dim, more informative than number of files.
-% 150305 Replace null with cross: null gives inconsistent signs;
-%        Use SPM method for xform: account for shear; no qform setting if shear.
-% 150306 GE: fully sort slices by loc to ease bvec sign (test data needed);
-%        bvec sign simplified by above sort & corrected R for Philips/Siemens.
-% 150309 GUI: added the little popup for 'about/license'.  
-% 150323 Siemens non-mosaic: timing from ucMode, AcquisitionTime(disabled).   
-% 150324 mandatory flds reduced to 5; get info by asc_header if possible;
-% 150325 Use SeriesInstanceUID to take care of multiple Study and PatientName; 
-%        Remove 5th input (subj); GUI updated; subjName in file name if needed;
-%        Deal with MoCo series by output file names;
-%        Convert GLM and DTI junk too; no Manufacturer check in advance.
-% 150405 Implement BrainVoyager dmr/fmr/vmr conversion; GUI updated accordingly. 
-% 150413 InstanceNumber is not mandatory (now total 4);
-%        Check missing files for non-DTI mosaic by InstanceNumber.
-% 150418 phaseDirection: bug fix for Philips, simplify for others.
-% 150423 fix matlabpool for later matlab versions; no auto-close anymore;
-%        GUI figure handle can't be uint32 for matlab 2015;
-%        Turn off saveExt40: FSL 5.0.8 may read vox_offset as 352.
-% 150430 xform_mat: GE, no LastScanLoc needed since sorted by ImagePosition. 
-% 150508 csa2pos: bug fix for revNum, iSL==1; treat dInPlaneRot specially.
+% 150209 Support output format for SPM style: 3D output;
+% 150405 Implement BrainVoyager dmr/fmr/vmr conversion: need BVQX_file. 
 % 150514 set_nii_ext: start to store txt edata (ecode=6).
-%        Avoid dict change in dicm_hdr due to vendor change (GE/Philips faster);
-% 150517 Octave compatibility fix in multiple files.
-% 150526 multiFrameFields: LocationsInAcquisition by ImagePosition if needed.
-% 150531 Check slice loc for all volumes to catch missing files (thx CarloR).
-% 150604 phaseDirection: typo fix for Philips 'RLAPFH'; Show converter version.
-% 150606 csa_header read both CSA image/series header.
-% 150609 No t_unit and SliceTiming for DTI.
-% 150613 mb_slicetiming: try to fix SOME broken multiband slice timing.
-% 150620 use 'bval' for nii.ext and dcmHeaders.mat, so keep original B_value.
-% 150910 bug fix for scl_slope/inter: missing double for max/min(nii.img(:)).
-% 150924 PAR: fix weird SliceNumber; fix mean-ADC removal if not last vol.
-% 150925 Bug fix for nSL=1 (vol-dim was at slice-dim);
-% 150926 multiFrameFields: add SliceNumber & simplify code; 
-%        save_dti_para: tidy format; try to avoid genvarname.
-% 150927 Repalce misused length with numel in all files. 
-% 150928 checkImagePosition: skip most irregular spacing.
-% 150929 Take care of SL order for regular dicom: GE no longer special case.
-% 150930 Remove slice_dir guess; Use NiftiName for error info.
-% 151115 GUI: remove srcType; Implement drag&drop for src and dst.
-% 151117 save_json proposed by ChrisG; won't flush nii_viewer para.
-% 151212 Bug fix for missing pref_file.
-% 151217 gui callback uses subfunc directly, also include fh as argument.
-% 151221 dim_info stores phaseDir at highest 2 bits (1 pos, 2 neg, 0 unknown).
-% 160110 Implement "Check update" based on findjobj; Preference method updated.
-% 160112 SeriesInstanceUID & SeriesNumber only need one (thx DavidR).
-% 160115 checkUpdate: fix problem to download & unzip to pwd.
 % 160127 dicm_hdr & dicm_img: support big endian dicom.
-% 160229 flip now makes det<0, instead negative 1st axis (cor slice affected).
-% 160304 undo some changes on 140808 so it works for syngo 2004 phase masaic.
-% 160309 nMosaic(): use CSAHeader to detect above unlabeled mosaic.
-% 160324 nMosaic(): unsecure fix for dicom without CSA header.
-% 160329 GUI: add link to the JNM paper about dicom to nifti conversion.
-% 160330 nMosaic(): take care of case of uc2DInterpolation.
-% 160404 Bug fix: put back nFile<2 continue for series check.
-% 160405 Remove 4th input arg MoCoOption: always convert all series.
-% 160405 nMosaic(): get nMos by finding zeros in img.
-% 160407 remove ang2vec: likely never used and may be wrong.
-% 160409 multi .m files: use sscanf/strfind/regexp, avoid str2double/strtok.
-% 160504 asc_header: ignore invalid CSASeriesHeaderInfo in B15 (thx LaureSA).
-% 160512 get_dti_para: fix bvec sign for GE cor/sag slices (thx paul for data).
-% 160514 csa2pos: make it safer so it won't err.
-% 160516 checkImagePosition: assign isTZ for missing files (thx TanH).
-% 160519 set nii.hdr.slice_duration for MB although it is useless.
-% 160601 Update ReadoutSeconds, and store it even if ~isDTI.
-% 160607 Avoid skipping series by ignoring empty-image dicom (thx QR).
-% 160610 Add pref save_patientName and use_parfor; simplify save_json flag.
-% 160807 Store InversionTime for nii ext and json.
-% 160826 Add pref use_seriesUID to take care of missed-up SeriesIntanceUID.
-% 160829 fix problem with large SeriesNumber; only 3 dicm fields are must. 
-% 160901 Put pref onto GUI. 
-% 160920 Convert series with varying Rescale slope/inter.
-% 160921 Quick bug fix introduced on 160920: slope/inter applied for 2nd+ files.
-% 161129 Bug fix for irregular slice order in Philips multiframe dicm.
-% 161216 xform_mat: only override SliceThickness if it is >1% off.
-% 161227 Convert a series by ignoring the only inconsistent file;
-% 	     checkImagePositions(): allow 10% error for gantry tilt (thx Qinwan).
-% 161229 xform CT img with gantry tilt; add some flds in ext for CT.
-% 170202 nMosaic(): bug fix for using LocationsInAcquisition.
-% 170211 implement no_save for nii_viewer: return first nii without saving;
-%        Bug fix: double(val) for fldsCk (needed for Rows and Columns).
-% 170225 nMosaic: minor fix.
-% 170320 check_ipp: slice tol = max(diff(sort(ipp)))/100. Thx navot.
-% 170322 split_philips_phase: bug fix for vol>2. Thx RobertW.
-% 170403 save_jason: add DelayTime for BIDS.
+% 160229 reorient now makes det<0, instead negative 1st axis (cor slice affected).
 % 170404 set MB slice_code to 0 to avoid FreeSurfer error. Thx JacobM.
-% 170417 checkUpdate(): use 'user_version' due to Matlab Central web change.
-% 170625 phaseDirection(): GE VIEWORDER update due to dicm_hdr() update.
-% 170720 Allow regularly missing InstanceNumbers, like CMRR ISSS.
-% 170810 Use GE SLICEORDER for SliceTiming if needed (thx PatrickS).
 % 170826 Use 'VolumeTiming' for missing volumes based on BIDS.
-% 170923 Correct readout (thx Chris R and MH); Always store readout in descrip;
-% 170924 Bug fix for long file name (avoid genvarname now).
-% 170927 Store TE in descrip even if multiple TEs.
 % 171211 Make it work for Siemens multiframe dicom (seems 3D only).
-% 180116 Bug fix for EchoTime1 for phase image (thx DylanW)
-% 180219 json: PhaseEncodingDirection use ijk, fix pf.save_PatientName (thx MichaelD)
-% 180312 json: ImageType uses BIDS format (thx ChrisR).
-% 180419 bug fix for long file name (thx NedaK).
-% 180430 store VolumeTiming from FrameReferenceTime (thx ChrisR).
-% 180519 get_dti_para: bug fix to remove Philips ADC vol (thx ChrisR).
-% 180520 Make copy for vida CSA, so asc_header/csa_header faster if non-Siemens.
 % 180523 set_nii_hdr: use MRScaleSlope for Philips, same as dcm2niiX default.
-% 180526 split_philips_phase: fix the long time slope/inter bug for phase image;
-%        move some code (eg SliceTiming related) out of main function.
-% 180527 fix vida SliceTiming unit, but now turn it off, and rely on ucMode.
 % 180530 store EchoTimes and CardiacTriggerDelayTimes;
 %        split_components: not only phase, json for each file (thx ChrisR).
-% 180601 use SortFrames for multiframe and PAR (thx JulienB & ChrisR); 
-% 180602 extract sort_frames() for multiFrameFields() and philips_par()
-% 180605 multiFrameFields: B=0 to first vol. 
 % 180614 Implement scale_16bit: free precision for tools using 16-bit datatype. 
-% 180619 use GetFullPath from Jan: (thx JulienB). 
-% 180721 accept mixture of files and folders as input; GUI uses jFileChooser(). 
 % 180914 support UIH dicm, both GRID (mosaic) and regular. 
-% 180922 fix for UIH masaic -1 col; GE phPos from dcm2niix. 
 % 190122 add BIDS support. tanguy.duval@inserm.fr
+%  Most later history relies on GitHub
 
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
@@ -605,8 +369,7 @@ fldsCk = {'ImageOrientationPatient' 'NumberOfFrames' 'Columns' 'Rows' ...
           'SpacingBetweenSlices' 'SliceThickness'}; % last for thickness
 for i = 1:nRun
     h{i} = [h{i}{:}]; % concatenate different EchoTime
-    ind = cellfun(@isempty, h{i});
-    h{i}(ind) = []; % remove all empty cell for all vendors
+    h{i}(cellfun(@isempty, h{i})) = []; % remove all empty cell
     
     s = h{i}{1};
     if ~isfield(s, 'LastFile') % avoid re-read for PAR/HEAD/BV file
@@ -632,7 +395,7 @@ for i = 1:nRun
     
     nFile = numel(h{i});
     if nFile>1 && tryGetField(s, 'NumberOfFrames', 1) > 1 % seen in vida
-        for k = 2:nFile % this can be slow
+        for k = 2:nFile % this can be slow: improve in the future
             h{i}{k} = dicm_hdr(h{i}{k}.Filename); % full header
             h{i}{k} = multiFrameFields(h{i}{k});
         end
@@ -656,10 +419,7 @@ for i = 1:nRun
             end
         end
         if ~keep(i), break; end % skip silently
-        ind = any(abs(bsxfun(@minus, val, val(:,1))) > 1e-4, 1);
-        if sum(ind)>1 % try 2nd, in case only 1st is inconsistent
-            ind = any(abs(bsxfun(@minus, val, val(:,2))) > 1e-4, 1);
-        end
+        ind = sum(abs(bsxfun(@minus, val, val(:,2))), 1) / sum(abs(val(:,2))) > 0.01;
         if ~any(ind), continue; end % good
         if any(strcmp(fldsCk{k}, {'RescaleIntercept' 'RescaleSlope'}))
             h{i}{1}.ApplyRescale = true;
@@ -845,8 +605,7 @@ if bids
     end
     Session                = {'01'};
     if verLessThanOctave
-        AcquisitionDate        = acq{1};
-        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
+        AcquisitionDate        = [acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)];
     else
         AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
         AcquisitionDate.Format = 'yyyy-MM-dd';
@@ -1087,19 +846,17 @@ for i = 1:nRun
         h{i}{1} = csa2pos(h{i}{1}, size(img,3));
     end
     
-    if isa(img, 'uint16') && max(img(:))<32768
-        img = int16(img); % use int16 if lossless
-    end
+    if isa(img, 'uint16') && max(img(:))<32768, img = int16(img); end % lossless    
     
     h{i}{1}.ConversionSoftware = converter;
     nii = nii_tool('init', img); % create nii struct based on img
     [nii, h{i}] = set_nii_hdr(nii, h{i}, pf, bids); % set most nii hdr
 
     % Save bval and bvec files after bvec perm/sign adjusted in set_nii_hdr
-    fname = fullfile(niiFolder,fnames{i}); % name without ext
+    fname = fullfile(niiFolder, fnames{i}); % name without ext
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
 
-    nii = split_components(nii, h{i}{1}); % split Philips vol components
+    nii = split_components(nii, h{i}{1}); % split vol components
     if no_save % only return the first nii
         nii(1).hdr.file_name = [fnames{i} '_no_save.nii'];
         nii(1).hdr.magic = 'n+1';
@@ -1157,8 +914,9 @@ if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
 %% Subfunction: return AcquisitionDate
 function acq = AcquisitionDateField(s)
 acq = tryGetField(s, 'AcquisitionDate');
-if isempty(acq), acq = tryGetField(s, 'SeriesDate', ''); end
-if isempty(acq), acq = tryGetField(s, 'StudyDate' , ''); end
+if isempty(acq), acq = tryGetField(s, 'AcquisitionDateTime'); end
+if isempty(acq), acq = tryGetField(s, 'SeriesDate'); end
+if isempty(acq), acq = tryGetField(s, 'StudyDate', ''); end
 
 %% Subfunction: return SeriesDescription
 function name = ProtocolName(s)
@@ -1261,28 +1019,20 @@ nii.hdr.xyzt_units = xyz_unit + nii.hdr.xyzt_units; % normally: mm (2) + sec (8)
 s = h{1};
 
 % set TaskName if present in filename (using bids labels convention)
-if isfield(s,'NiftiName')
-    [~,fname] = fileparts(s.NiftiName);
-    
-    % parse filename
-    labels = regexp(fname,'(?<task>_task-[a-zA-Z0-9]+)?','names'); % task-<label>
-    
-    if ~isempty(labels)
-        s.TaskName = strrep(labels.task,'_task-','');
-    end
+if bids % parse filename: _task-label
+    task = regexp(s.NiftiName, '(?<=_task_).*?(?=_)', 'match', 'once'); 
+    if ~isempty(task), s.TaskName = task; end
 end
 
 % Store motion parameters for MoCo series
 if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && nVol>1
     inc = numel(h) / nVol;
-    trans = zeros(nVol, 3);
-    rotat = zeros(nVol, 3);
+    s.RBMoCoTrans = zeros(nVol, 3);
+    s.RBMoCoRot   = zeros(nVol, 3);
     for j = 1:nVol
-        trans(j,:) = tryGetField(h{(j-1)*inc+1}, 'RBMoCoTrans', [0 0 0]);
-        rotat(j,:) = tryGetField(h{(j-1)*inc+1}, 'RBMoCoRot',   [0 0 0]);
+        s.RBMoCoTrans(j,:) = tryGetField(h{(j-1)*inc+1}, 'RBMoCoTrans', [0 0 0]);
+        s.RBMoCoRot(j,:)   = tryGetField(h{(j-1)*inc+1}, 'RBMoCoRot',   [0 0 0]);
     end
-    s.RBMoCoTrans = trans;
-    s.RBMoCoRot = rotat;
 end
 
 % Store FrameReferenceTime: seen in Philips PET
@@ -1401,19 +1151,17 @@ nii.hdr.intent_name = seq; % char[16], meaning of the data
 
 foo = tryGetField(s, 'AcquisitionDateTime');
 descrip = sprintf('time=%s;', foo(1:min(18,end))); 
-TE0 = asc_header(s, 'alTE[0]')/1000; % s.EchoTime stores only 1 TE
-if isempty(TE0), TE0 = tryGetField(s, 'EchoTime'); end % GE, philips
-TE1 = asc_header(s, 'alTE[1]')/1000;
-if ~isempty(TE1), s.SecondEchoTime = TE1; s.EchoTime = TE0; end
-dTE = abs(TE1 - TE0); % TE difference
-if isempty(dTE) && tryGetField(s, 'NumberOfEchoes', 1)>1
-    dTE = tryGetField(s, 'SecondEchoTime') - TE0; % need to update
-end
-if ~isempty(dTE)
-    descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
-    s.deltaTE = dTE;
-end
+TE0 = tryGetField(s, 'EchoTime');
 if ~isempty(TE0), descrip = sprintf('TE=%.4g;%s', TE0, descrip); end
+if strncmpi(tryGetField(s, 'SequenceName', ''), '*fm2d2r', 3) % Siemens fieldmap
+    TE0 = asc_header(s, 'alTE[0]')/1000; % s.EchoTime stores only 1 TE
+    TE1 = asc_header(s, 'alTE[1]')/1000;
+    dTE = abs(TE1 - TE0); % TE difference
+    if ~isempty(dTE)
+        descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
+        s.deltaTE = dTE;
+    end
+end
 
 % Get dwell time
 if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
@@ -1513,13 +1261,7 @@ flds = { % store for nii.ext and json
   'ScanningSequence' 'SequenceVariant' 'ScanOptions' 'SequenceName' ...
   'TableHeight' 'DistanceSourceToPatient' 'DistanceSourceToDetector'};
 if ~pf.save_patientName, flds(strcmp(flds, 'PatientName')) = []; end
-if bids
-    flds(strcmp(flds, 'PatientName')) = [];
-    flds(strcmp(flds, 'PatientSex')) = [];
-    flds(strcmp(flds, 'PatientAge')) = [];
-    flds(strcmp(flds, 'PatientSize')) = [];
-    flds(strcmp(flds, 'PatientWeight')) = [];
-end
+if bids, flds(~cellfun('isempty', regexp(flds, 'Patient.*'))) = []; end
 for i = 1:numel(flds)
     if ~isfield(s, flds{i}), continue; end
     nii.json.(flds{i}) = s.(flds{i});
@@ -2532,7 +2274,7 @@ fclose(fid);
 
 %% Get version yyyymmdd from README.md 
 function dStr = getVersion(str)
-dStr = '20190209';
+dStr = '20191130';
 if nargin<1 || isempty(str)
     pth = fileparts(mfilename('fullpath'));
     fname = fullfile(pth, 'README.md');
