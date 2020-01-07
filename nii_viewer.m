@@ -460,7 +460,7 @@ for i = 1:3
     y = [c(j(2))+[0 0 -1 1]*hs.gap(j(2)); c(j(2))*[1 1] 0 dim(j(2))+1];
     hs.cross(i,:) = line(x, y);
 
-    hs.xyz(i) = text(hs.ax(i), 0.02, 0.96, num2str(xyz(i)), ...
+    hs.xyz(i) = text(0.02, 0.96, num2str(xyz(i)), 'Parent', hs.ax(i), ...
         'Units', 'normalized', 'FontSize', 12);
 end
 set(hs.hsI, 'ButtonDownFcn', cb('mousedown'));
