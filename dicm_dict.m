@@ -152,6 +152,7 @@ C = {
     '0018' '1050' 'DS' 'SpatialResolution'
     '0018' '1060' 'DS' 'TriggerTime'
     '0018' '1063' 'DS' 'FrameTime'
+    '0018' '1080' 'CS' 'BeatRejectionFlag'
     '0018' '1088' 'IS' 'HeartRate'
     '0018' '1090' 'IS' 'CardiacNumberOfImages'
     '0018' '1094' 'IS' 'TriggerWindow'
@@ -263,6 +264,7 @@ C = {
     '0018' '9104' 'FD' 'SlabThickness'
     '0018' '9105' 'FD' 'SlabOrientation'
     '0018' '9106' 'FD' 'MidSlabPosition'
+    '0018' '9107' 'SQ' 'MRSpatialSaturationSequence'
     '0018' '9112' 'SQ' 'MRTimingAndRelatedParametersSequence'
     '0018' '9114' 'SQ' 'MREchoSequence'
     '0018' '9115' 'SQ' 'MRModifierSequence'
@@ -431,6 +433,7 @@ C = {
     '0040' '0275' 'SQ' 'RequestAttributesSequence'
     '0040' '0280' 'ST' 'CommentsOnPerformedProcedureStep'
     '0040' '0321' 'SQ' 'FilmConsumptionSequence'
+    '0040' '0555' 'SQ' 'AcquisitionContextSequence'
     '0040' '08EA' 'SQ' 'MeasurementUnitsCodeSequence'
     '0040' '1001' 'SH' 'RequestedProcedureID'
     '0040' '1400' 'LT' 'RequestedProcedureComments'
@@ -534,7 +537,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 % 	'0021' '1016' 'DS' 'Private_0021_1016' % 0 
 % 	'0021' '1017' 'DS' 'Private_0021_1017' % 0 
 	'0021' '1018' 'SH' 'RFSWDMostCriticalAspect' % Head ?
-	'0021' '1019' 'CS' 'MrPhoenixProtocol'
+	'0021' '1019' 'UT' 'MrPhoenixProtocol' % OB changed to UT to force char
 % 	'0021' '101B' 'DS' 'Private_0021_101b' % 1 
 	'0021' '101C' 'DS' 'Stim_max_online' % 17.0793 2.73105 1.00829 ?
 % 	'0021' '101D' 'IS' 'Private_0021_101d' % 0 
@@ -625,7 +628,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
     '0051' '100B' 'LO' 'AcquisitionMatrixText'
     '0051' '100C' 'LO' 'FieldOfView'
     '0051' '100D' 'SH' 'SlicePositionText'
-    '0051' '100E' 'LO' 'ImageOrientation'
+    '0051' '100E' 'LO' 'ImageOrientationText'
     '0051' '100F' 'LO' 'CoilString'
     '0051' '1011' 'LO' 'ImaPATModeText'
     '0051' '1012' 'SH' 'TablePositionText'
