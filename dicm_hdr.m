@@ -416,7 +416,7 @@ rst = []; info = ''; tag1 = []; j = 0; % j is SQ Item index
 
 while i<nEnd % loop through multi Item under the SQ
     tag = b8(i+([2 3 0 1])); i = i+4;
-    if p.be, tag = tag([2 1 3 4]); end
+    if p.be, tag = tag([2 1 4 3]); end
     tag = ch2int32(tag, 0);
     if tag ~= 4294893568, i = i+4; return; end % only do FFFE E000, Item
     n = ch2int32(b8(i+(0:3)), p.be); i = i+4; % n may be 0xffff ffff
@@ -736,7 +736,7 @@ fullName = fopen(fid); % name with full path
 
 str = fread(fid, inf, '*char')'; % read all as char
 fclose(fid);
-str = strrep(str, char([13 10]), char(10)); % remove char(13)
+str = strrep(str, char([13 10]), char(10)); %#ok remove char(13)
 ch = regexp(str, '.*?(?=IMAGE INFORMATION DEFINITION)', 'match', 'once');
 
 V = regexpi(ch, 'image export tool\s*(V[\d\.]+)', 'tokens', 'once');
