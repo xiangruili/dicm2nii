@@ -411,6 +411,7 @@ end
 %  while isItem (FFFE E000, Item) % Item_1, Item_2, ... 
 %   loop tags under the Item till FFFE E00D, ItemDelimitationItem
 %   return if FFFE E0DD SequenceDelimitationItem (not checked)
+%   both DelimitationItem seem optional (omitted if valid SQ length?)
 function [rst, info, i] = read_sq(b8, i, nEnd, p, isPerFrameSQ)
 rst = []; info = ''; tag1 = []; j = 0; % j is SQ Item index
 
@@ -511,7 +512,7 @@ end
 
 %% subfunction: read value, called by search method and read_item
 function [dat, info] = read_val(b, vr, swap)
-if strcmp(vr, 'DS') || strcmp(vr, 'IS')
+if any(strcmp(vr, {'DS' 'IS'}))
     dat = sscanf(char(b), '%f\\'); % like 1\2\3
 elseif ~isempty(strfind('AE AS CS DA DT LO LT PN SH ST TM UI UT', vr)) % char
     dat = deblank(char(b));
@@ -698,7 +699,7 @@ for i = 1:numel(flds)
     end
     
     isCH = ~isempty(strfind(chDat, vr)); % char data
-    isDS = strcmp(vr, 'DS') || strcmp(vr, 'IS');
+    isDS = any(strcmp(vr, {'DS' 'IS'}));
     if ~isCH && ~isDS % numeric data, UN or SQ
         fmt = vr2fmt(vr);
         if isempty(fmt), continue; end % skip SQ
