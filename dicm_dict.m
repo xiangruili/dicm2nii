@@ -24,10 +24,10 @@ function dict = dicm_dict(vendor, flds)
 % 180914 Add vendor UIH.
 
 if nargin<1, vendor = 'SIEMENS'; end
-dict.vendor = vendor;
 % Shortened items common across vendors from Matlab dicom-dict.txt
 %    group element vr  name
-C = {   
+C = {
+    '0002' '0000' 'UL' 'FileMetaInformationGroupLength'
     '0002' '0001' 'OB' 'FileMetaInformationVersion'
     '0002' '0002' 'UI' 'MediaStorageSOPClassUID'
     '0002' '0003' 'UI' 'MediaStorageSOPInstanceUID'
@@ -455,13 +455,6 @@ C = {
     '0050' '0018' 'DS' 'DeviceVolume'
     '0050' '0019' 'DS' 'InterMarkerDistance'
     '0050' '0020' 'LO' 'DeviceDescription'
-    '0088' '0140' 'UI' 'StorageMediaFileSetUID'
-    '0088' '0200' 'SQ' 'IconImageSequence'
-    '0400' '0550' 'SQ' 'ModifiedAttributesSequence'
-    '0400' '0561' 'SQ' 'OriginalAttributesSequence'
-    '0400' '0562' 'DT' 'AttributeModificationDatetime'
-    '0400' '0563' 'LO' 'ModifyingSystem'
-    '0400' '0565' 'CS' 'ReasonForTheAttributeModification'
     '0054' '0016' 'SQ' 'RadiopharmaceuticalInformationSequence'
     '0054' '0081' 'US' 'LocationsInAcquisition' % 'NumberOfSlices'
     '0054' '0101' 'US' 'NumberOfTemporalPositions' % 'NumberOfTimeSlices'
@@ -489,6 +482,13 @@ C = {
     '0070' '0100' 'CS' 'PresentationSizeMode'
     '0070' '0101' 'DS' 'PresentationPixelSpacing'
     '0070' '0102' 'IS' 'PresentationPixelAspectRatio'
+    '0088' '0140' 'UI' 'StorageMediaFileSetUID'
+    '0088' '0200' 'SQ' 'IconImageSequence'
+    '0400' '0550' 'SQ' 'ModifiedAttributesSequence'
+    '0400' '0561' 'SQ' 'OriginalAttributesSequence'
+    '0400' '0562' 'DT' 'AttributeModificationDatetime'
+    '0400' '0563' 'LO' 'ModifyingSystem'
+    '0400' '0565' 'CS' 'ReasonForTheAttributeModification'
     '2050' '0020' 'CS' 'PresentationLUTShape'
     '5200' '9229' 'SQ' 'SharedFunctionalGroupsSequence'
     '5200' '9230' 'SQ' 'PerFrameFunctionalGroupsSequence'
@@ -1279,6 +1279,7 @@ elseif strncmpi(vendor, 'UIH', 3)
 %     C = [C; {}];
 end
 
+dict.vendor = vendor;
 dict.group = uint16(hex2dec(C(:,1)));
 dict.element = uint16(hex2dec(C(:,2)));
 dict.tag = uint32(dict.group) * 65536 + uint32(dict.element);
