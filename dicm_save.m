@@ -1,10 +1,15 @@
 function dicm_save(img, fname, s)
-% msg = DICM_SAVE(img, dicomFileName, info_struct);
-% Save img into dicom file, using tags stored in struct. The dicom image type is
-% based on the data type of img.
+% DICM_SAVE(img, dicomFileName, info_struct);
+% 
+% Save img into dicom file, using tags stored in struct, as dicomwrite does.
+% The img can have up to 4 dimensions, with 3rd typically RGB and 4th frames.
 %
-% The current version overrides TransferSyntaxUID with '1.2.840.10008.1.2.1':
-% Little Endian, Explicit VR, no compression, and for tags in dicm_dict.m only. 
+% Comparing to dicomwrite: Advantage 1: DICM_SAVE supports img with any Matlab
+% numeric type, although dicom standard allows only 8 and 16-bit integer.
+% Advantage 2: DICM_SAVE saves popular private tags for common MRI img from
+% Siemens/GE/Philips. Limitation: DICM_SAVE uses only popular TransferSyntaxUID
+% of '1.2.840.10008.1.2.1', which means Little Endian, Explicit VR, no
+% compression, and only for tags in dicm_dict.m.
 %
 % See also DICM_DICT, DICM_HDR, DICM_IMG
 
@@ -14,93 +19,115 @@ persistent dict;
 narginchk(2, 3);
 if ~isnumeric(img), error('Provide img array as 1st input.'); end
 if ~ischar(fname) && ~isstring(fname), error('Need a string as file name.'); end
-
+    
 fid = fopen(fname, 'w', 'l');
 if fid<0, error('Failed to open file %s', fname); end
-closeFile = onCleanup(@() fclose(fid)); % auto close when done or error
+closeFile = onCleanup(@()fclose(fid)); % auto close when done or error
 if isempty(dict)
-    try vndor = s.Manufacturer; catch, vndor = ''; end
-    dict = dicm_dict(vndor); % no FileMetaInformationGroupLength
+    try dict = dicm_dict(s.Manufacturer); catch, dict = dicm_dict(''); end
+    i = strcmp(dict.name, 'PixelData') | ... % +1 PixelData tags, remove them
+        strcmp(dict.name, 'SmallestImagePixelValue') | ... % uint16 not enough
+        strcmp(dict.name, 'LargestImagePixelValue') | ...
+        (dict.group>2 & dict.element<1); % remove group length except grp 2
+    dict.group(i) = []; dict.element(i) = []; dict.tag(i) = [];
+    dict.vr(i) = []; dict.name(i) = [];
 end
 
+% Update file and PixelData related meta
+s.FileMetaInformationGroupLength = 210; % be updated later
 s.FileMetaInformationVersion = [0 1]';
 s.TransferSyntaxUID = '1.2.840.10008.1.2.1'; % add or overwrite
-if ~isfield(s, 'SOPInstanceUID'), s.SOPInstanceUID = dicm_uid(s); end
+s.SOPInstanceUID = dicm_uid(s);
 s.MediaStorageSOPInstanceUID = s.SOPInstanceUID;
-
 sz = size(img); sz(numel(sz)+1:4) = 1;
-if sz(4)>1, s.NumberOfFrames = sz(4); end
 s.Rows = sz(1);
 s.Columns = sz(2);
-typ = class(img);
-switch typ % only first 2 supported by dicom standard
+if sz(3)>1, s.SamplesPerPixel = sz(3); s.PlanarConfiguration = 1; end
+if sz(4)>1, s.NumberOfFrames = sz(4); end
+fmt = class(img);
+switch fmt
     case {'int8'  'uint8' }, vr = 'OB'; nBit = 8; 
     case {'int16' 'uint16'}, vr = 'OW'; nBit = 16;
     case {'int32' 'uint32'}, vr = 'OL'; nBit = 32;
     case {'int64' 'uint64'}, vr = 'OV'; nBit = 64;
     case 'single',           vr = 'OF'; nBit = 32;
     case 'double',           vr = 'OD'; nBit = 64;
-    otherwise, error('Unknown image type: %s', typ);
+    otherwise, error('Unknown image type: %s', fmt);
 end
-if strfind(typ, 'int'), s.PixelRepresentation = typ(1)~='u'; end %#ok
+if strfind(fmt, 'int'), s.PixelRepresentation = fmt(1)~='u'; end %#ok
 s.BitsAllocated = nBit;
 s.BitsStored = nBit;
 s.HighBit = nBit - 1;
-s.LargestImagePixelValue = max(img(:));
-s.SmallestImagePixelValue = min(img(:));
 
-fwrite(fid, zeros(1,16), 'int64'); % 128 byte
-fwrite(fid, 'DICM', 'char*1'); % signature
-fwrite(fid, [0 0 0], 'uint32'); % 12-byte for g2Len at 132
-g2End = write_meta(fid, s, dict);
-write_tag(fid, [32736 16], vr, permute(img, [2 1 3:ndims(img)])); % PixelData
-fseek(fid, 132, 'bof'); % very first tag
-write_tag(fid, [2 0], 'UL', g2End-144); % FileMetaInformationGroupLength
+fwrite(fid, 0, 'int8', 127); % waste
+fwrite(fid, 'DICM', 'char*1'); % signature at 128
+for i = 1:numel(dict.tag) % write group 2 (maybe group 0?): always LE, expl VR
+    if dict.group(i)>2, update_length(fid, i0); break; end % done for g2
+    if ~isfield(s, dict.name{i}), continue; end
+    write_tag(fid, s.(dict.name{i}), dict, i);
+    if dict.tag(i)==131072, i0 = ftell(fid); end % (0002,0000) g2len
+    s = rmfield(s, dict.name{i});
+end
+write_meta(fid, s, dict); % write meta without group 2
 
-%% Write most meta info in struct s
-function g2End = write_meta(fid, s, dict)
-g2End = 0; % only used by main func for once
+% PixelData written separately
+fwrite(fid, [32736 16], 'uint16');
+fwrite(fid, vr, 'char*1');
+fwrite(fid, nBit/8*numel(img), 'uint32', 2); % maybe odd length?
+fwrite(fid, permute(img, [2 1 3:numel(sz)]), fmt);
+
+%% Write meta info in struct s
+function write_meta(fid, s, dict)
 flds = fieldnames(s);
-flds(strcmp(flds, 'PixelData')) = [];
 N = numel(flds);
 ind = zeros(1, N);
 for i = 1:N
-    j = find(strcmp(flds{i}, dict.name));
-    if isempty(j), continue; end
-    if numel(j) > 1
-        pub = mod(dict.group(j), 2) == 0;
-        if any(pub), j = j(pub); end
-    end
-    ind(i) = j(1);
-end
-for i = sort(ind(ind>0)) % in the order of tags
-    if g2End<1 && dict.group(i)>2, g2End = ftell(fid); end
-    write_tag(fid, [dict.group(i) dict.element(i)], dict.vr{i}, s.(dict.name{i}), dict);
-end
-
-%% Write a tag
-function write_tag(fid, tag, vr, val, dict)
-fwrite(fid, tag, 'uint16');
-fwrite(fid, vr, 'char*1');
-if strcmp(vr, 'SQ')
-    fwrite(fid, [0 65535 65535], 'uint16'); % FFFF FFFF, lazy SQ length
-    if isstruct(val)
-        if isfield(val, 'Item_1'), val = struct2cell(val);
-        else, val = {val};
+    if regexp(flds{i}, '^(Private|Unknown)(_[0-9a-f]{4}){2}$', 'once')
+        j = find(hex2dec(flds{i}([9:12 14:17])) == dict.tag, 1);
+    else
+        j = find(strcmp(flds{i}, dict.name));
+        if numel(j) > 1 % if multiple, use early public tag if any
+            pub = mod(dict.group(j), 2) == 0;
+            if any(pub), j = j(pub); end
         end
     end
+    if isempty(j), continue; end
+    ind(i) = j(1);
+end
+[ind, i] = sort(ind); % in the order of tags
+flds = flds(i); % use flds since it may have Private|Unknown
+
+for i = find(ind>0,1):numel(ind)
+    write_tag(fid, s.(flds{i}), dict, ind(i));
+end
+
+%% Write i-th tag in dict
+function write_tag(fid, val, dict, iTag)
+vr = dict.vr{iTag};
+fwrite(fid, [dict.group(iTag) dict.element(iTag)], 'uint16');
+fwrite(fid, vr, 'char*1');
+if strcmp(vr, 'SQ')
+    fwrite(fid, 0, 'uint32', 2); % skip 2-byte, then SQ length
+    iSQ = ftell(fid); % start of SQ length
+    if isstruct(val) && isfield(val, 'Item_1'), val = struct2cell(val); end
+    if ~iscell(val), val = {val}; end % not safe
     for i = 1:numel(val)
         if ~isstruct(val{i}), continue; end
-        fwrite(fid, [65534 57344 65535 65535], 'uint16'); % FFFE E000 (Item) & len
+        fwrite(fid, [65534 57344 0 0], 'uint16'); % FFFE E000 (Item) & len
+        i0 = ftell(fid); % start of Item length
         write_meta(fid, val{i}, dict); % recuisive call
-        fwrite(fid, [65534 57357 0 0], 'uint16'); % FFFE E00D, ItemDelimitationItem
+        update_length(fid, i0);
+        % fwrite(fid, [65534 57357 0 0], 'uint16'); % FFFE E00D, ItemDelimitationItem
     end
-    fwrite(fid, [65534 57565 0 0], 'uint16'); % FFFE E0DD, SequenceDelimitationItem
+    % fwrite(fid, [65534 57565 0 0], 'uint16'); % FFFE E0DD, SequenceDelimitationItem
+    update_length(fid, iSQ);
     return;
 end
 
-if iscellstr(val), val = sprintf('%s\n', val{:}); end %#ok
-if strcmp(vr, 'DS') || strcmp(vr, 'IS')
+if isstruct(val) && strcmp(vr, 'PN'), val = strtrim(strjoin(struct2cell(val)));
+elseif iscellstr(val), val = sprintf('%s\n', val{:}); %#ok
+end
+if any(strcmp(vr, {'DS' 'IS'}))
     fmt = 'char*1';
     val = sprintf('%.16g\\', val); val(end) = '';
     n = numel(val);
@@ -140,9 +167,16 @@ switch vr
     otherwise, bpv = 1; fmt = 'uint8';
 end
 
+%% Update length in uint32: i0 is the end location of length
+function update_length(fid, i0)
+i1 = ftell(fid);
+fseek(fid, i0-4, 'bof');
+fwrite(fid, i1-i0, 'uint32'); % end of length loc to current loc
+fseek(fid, i1, 'bof');
+
 %% Generate 'unique' dicom ID
 function uid = dicm_uid(s)
-try pre = s.SOPInstanceUID(1:27);
-catch, pre = '1.3.12.2.1107.5.2.43.167002'; % CCBBI Prisma
+try pre = regexp(s.MediaStorageSOPInstanceUID, '.*\.', 'match', 'once');
+catch, pre = '1.3.6.1.4.1.9590.100.1.8876.'; % Matlab ipt UID.XL
 end
-uid = sprintf('%s.1.%s%07.0f', pre, datestr(now, 'yyyymmddHHMMSSfff'), rand*1e7);
+uid = sprintf('%s%s%08.0f', pre, datestr(now, 'yyyymmddHHMMSSfff'), rand*1e8);
