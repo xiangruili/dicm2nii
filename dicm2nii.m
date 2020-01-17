@@ -1287,9 +1287,11 @@ TR = tryGetField(s, 'RepetitionTime'); % in ms
 if isempty(TR), TR = tryGetField(s, 'TemporalResolution'); end
 if isempty(TR), return; end
 hdr.pixdim(5) = TR / 1000;
-if tryGetField(s, 'isDTI', 0), return; end
 hdr.xyzt_units = 8; % seconds
-if hdr.dim(5)<3, return; end % skip structual, fieldmap etc
+if hdr.dim(5)<3 || tryGetField(s, 'isDTI', 0) || ...
+        strncmp(tryGetField(s, 'MRAcquisitionType'), '3D', 2)
+    return; % skip 3D, DRI, fieldmap, short EPI etc
+end
 
 nSL = hdr.dim(4);
 delay = asc_header(s, 'lDelayTimeInTR')/1000; % in ms now
@@ -1677,7 +1679,7 @@ elseif isfield(s, 'LastFile') && isfield(s.LastFile, 'ImagePositionPatient')
 end
 
 % Rest of the code is almost unreachable
-if isfield(s, 'CSASeriesHeaderInfo') % Siemens both mosaic and regular
+if strncmp(s.Manufacturer, 'SIEMENS', 7) % both mosaic and regular
     ori = {'Sag' 'Cor' 'Tra'}; ori = ori{iSL};
     sNormal = asc_header(s, ['sSliceArray.asSlice[0].sNormal.d' ori]);
     if asc_header(s, ['sSliceArray.ucImageNumb' ori]), sNormal = -sNormal; end
