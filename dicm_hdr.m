@@ -112,7 +112,7 @@ if nargin<2 || isempty(dict)
     if isempty(dict_full), dict_full = dicm_dict; end
     p.fullHdr = true;
     p.dict = dict_full; 
-elseif isstruct(dict)
+elseif isstruct(dict) || (exist('istable', 'file') && istable(dict))
     p.fullHdr = false; % p updated only in main func
     p.dict = dict;
 elseif ischar(dict) || iscellstr(dict) || ...
@@ -221,7 +221,7 @@ toSearch = nTag<2 || (nTag<30 && ~any(strcmp(p.dict.vr, 'SQ')) && p.iPixelData<1
 if toSearch % search each tag if header is short and not many tags asked
     if ~isempty(tsUID), s.TransferSyntaxUID = tsUID; end % hope it is 1st tag
     bc = char(b8(1:min(end, p.iPixelData)));
-    if ~isempty(p.dict.vendor) && any(mod(p.dict.group, 2)) % private group
+    if ~isempty(p.dict.Properties.UserData.vendor) && any(mod(p.dict.group, 2)) % private group
         tg = char([8 0 112 0]); % Manufacturer
         if p.be, tg = tg([2 1 4 3]); end
         if p.expl, tg = [tg 'LO']; end
@@ -328,13 +328,14 @@ end
 
     %% nested function: update Manufacturer
     function [p, dict] = updateVendor(p, vendor)
-        if ~isempty(p.dict.vendor) && strncmpi(vendor, p.dict.vendor, 2)
+        if ~isempty(p.dict.Properties.UserData.vendor) && ...
+                strncmpi(vendor, p.dict.Properties.UserData.vendor, 2)
             dict = p.dict; % in case dicm_hdr asks 3rd output
             return;
         end
         dict_full = dicm_dict(vendor);
-        if ~p.fullHdr && isfield(p.dict, 'fields')
-            dict = dicm_dict(vendor, p.dict.fields);
+        if ~p.fullHdr && isfield(p.dict.Properties.UserData, 'fields')
+            dict = dicm_dict(vendor, p.dict.Properties.UserData.fields);
         else
             dict = dict_full;
         end
@@ -409,9 +410,9 @@ end
 %% Subfunction: decode SQ, called by read_item (recursively)
 % SQ structure:
 %  while isItem (FFFE E000, Item) % Item_1, Item_2, ... 
-%   loop tags under the Item till FFFE E00D, ItemDelimitationItem
+%   loop tags under the Item till FFFE E00D, ItemDelimitationItem, or end of Item
 %   return if FFFE E0DD SequenceDelimitationItem (not checked)
-%   both DelimitationItem seem optional (omitted if valid SQ length?)
+%   both DelimitationItem seem optional (omitted if valid Item length?)
 function [rst, info, i] = read_sq(b8, i, nEnd, p, isPerFrameSQ)
 rst = []; info = ''; tag1 = []; j = 0; % j is SQ Item index
 
@@ -891,9 +892,12 @@ s.CardiacTriggerDelayTimes = par_val('trigger_time', iVol);
 posMid = par_attr(ch, 'Off Centre midslice'); % (ap,fh,rl) [mm]
 posMid = posMid([3 1 2]); % better precision than those in the table
 rotAngle = par_attr(ch, 'Angulation midslice'); % (ap,fh,rl) deg
-a = rotAngle([3 1 2]) /180*pi; % always this order?
-R = makehgtform('xrotate', a(1), 'yrotate', a(2), 'zrotate', a(3));
-R = R(1:3, :);
+rotAngle = rotAngle([3 1 2]);
+ca = cosd(rotAngle); sa = sind(rotAngle);
+rx = [1 0 0; 0 ca(1) -sa(1); 0 sa(1) ca(1)]; % 3D rotation
+ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
+rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
+R = rx * ry * rz; % seems right for Philips
 
 iOri = par_val('slice orientation'); % 1/2/3 for TRA/SAG/COR
 iOri = mod(iOri+1, 3) + 1;
@@ -901,25 +905,11 @@ a = {'SAGITTAL' 'CORONAL' 'TRANSVERSAL'};
 s.SliceOrientation = a{iOri};
 if iOri == 1 
     R(:,[1 3]) = -R(:,[1 3]);
-    R = R(:, [2 3 1 4]);
+    R = R(:, [2 3 1]);
 elseif iOri == 2
     R(:,3) = -R(:,3);
-    R = R(:, [1 3 2 4]);
+    R = R(:, [1 3 2]);
 end
-
-a = par_attr(ch, 'Preparation direction', 0); % Anterior-Posterior
-if ~isempty(a)
-    a = a(regexp(a, '\<.')); % 'AP'
-    s.Stack.Item_1.MRStackPreparationDirection = a;
-    iPhase = strfind('LRAPFH', a(1));
-    iPhase = ceil(iPhase/2); % 1/2/3
-    if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
-    s.InPlanePhaseEncodingDirection = a;
-end
-
-s.ImageOrientationPatient = R(1:6)';
-R = R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices; 1]);
-R(:,4) = posMid; % 4th col is mid slice center position
 
 a = par_val('image offcentre', [1 nSL]);
 % Take axis with largest 'image offcentre' range as slice axis. This can be
@@ -929,6 +919,18 @@ if ind==iOri, ax_order = 1:3; else, ax_order = [3 1 2]; end
 s.SliceLocation = a(1, ax_order(iOri)); % center loc for 1st slice
 if sign(R(iOri,3)) ~= sign(posMid(iOri)-s.SliceLocation)
     R(:,3) = -R(:,3);
+end
+s.ImageOrientationPatient = R(1:6)';
+R = [R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices]) posMid];
+
+a = par_attr(ch, 'Preparation direction', 0); % Anterior-Posterior
+if ~isempty(a)
+    a = a(regexp(a, '\<.')); % 'AP'
+    s.Stack.Item_1.MRStackPreparationDirection = a;
+    iPhase = strfind('LRAPFH', a(1));
+    iPhase = ceil(iPhase/2); % 1/2/3
+    if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
+    s.InPlanePhaseEncodingDirection = a;
 end
 
 if par_attr(ch, 'Diffusion')>0 % DTI
