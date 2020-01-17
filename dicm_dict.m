@@ -17,15 +17,16 @@ function dict = dicm_dict(vendor, flds)
 % 141021 Store requested fields, so set dict when switching vendors.
 % 141024 Use LocationsInAcquisition as nSL for all vendors.
 % 141030 Make ScanningSequence & SequenceVariant consistent for vendors.
-% 150114 Add two more CSA header duplicate tags, and more command tags.
 % 160411 dict contains group and element.
 % 171211 Add Siemens grp 0021 and more.
 % 180514 Guess more Siemens grp 0021 tags, correct BandwidthPerPixelPhaseEncode.
 % 180914 Add vendor UIH.
+% 200117 Use table: vendor/fields go to Properties.UserData for struct.
 
 if nargin<1, vendor = 'SIEMENS'; end
 % Shortened items common across vendors from Matlab dicom-dict.txt
 %    group element vr  name
+% Since Matlab 2019b, we could do {0x0002 0x0010 'UI' 'TransferSyntaxUID'}
 C = {
     '0002' '0000' 'UL' 'FileMetaInformationGroupLength'
     '0002' '0001' 'OB' 'FileMetaInformationVersion'
@@ -1279,29 +1280,28 @@ elseif strncmpi(vendor, 'UIH', 3)
 %     C = [C; {}];
 end
 
-dict.vendor = vendor;
-dict.group = uint16(hex2dec(C(:,1)));
-dict.element = uint16(hex2dec(C(:,2)));
-dict.tag = uint32(dict.group) * 65536 + uint32(dict.element);
-dict.vr = C(:,3); % for implicit VR and some problematic explicit VR
-dict.name = C(:,4);
+partial = nargin>1 && ~isempty(flds); % use only provided fields
+if partial, C = C(ismember(C(:,4), flds), :); end
+grp = hex2dec(C(:,1));
+elt = hex2dec(C(:,2));
 
-if nargin>1 && ~isempty(flds) % use only provided fields
-    if ischar(flds), flds = cellstr(flds); end
-    ind = false(size(dict.tag,1), 1);
-    for i = 1:numel(flds)
-        ind = ind | strcmp(flds{i}, dict.name); % include duplicate
-    end
-    dict.fields = flds; % remember the requested fields
-    dict.tag  = dict.tag(ind);
-    dict.vr   = dict.vr(ind);
+try
+    dict = table(uint16(grp), uint16(elt), uint32(grp*2^16+elt), C(:,3), C(:,4));
+    dict.Properties.VariableNames = {'group' 'element' 'tag' 'vr' 'name'};
+    [~, ind] = unique(dict.tag); % sort by tag
+    dict = dict(ind,:);
+catch % Matalb 2013a-, Octave
+    dict.group = uint16(grp);
+    dict.element = uint16(elt);
+    dict.tag = uint32(grp * 65536 + elt);
+    dict.vr = C(:,3); % for implicit VR and some problematic explicit VR
+    dict.name = C(:,4);
+    [dict.tag, ind] = unique(dict.tag); % sort by tag
+    dict.vr = dict.vr(ind);
     dict.name = dict.name(ind);
     dict.group = dict.group(ind);
     dict.element = dict.element(ind);
 end
 
-[dict.tag, ind] = unique(dict.tag); % sort by tag
-dict.vr = dict.vr(ind);
-dict.name = dict.name(ind);
-dict.group = dict.group(ind);
-dict.element = dict.element(ind);
+dict.Properties.UserData.vendor = vendor;
+if partial, dict.Properties.UserData.fields = flds; end % remember fields
