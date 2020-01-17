@@ -8,30 +8,68 @@ function dicm_save(img, fname, s)
 % numeric type, although dicom standard allows only 8 and 16-bit integer.
 % Advantage 2: DICM_SAVE saves popular private tags for common MRI img from
 % Siemens/GE/Philips. Limitation: DICM_SAVE uses only popular TransferSyntaxUID
-% of '1.2.840.10008.1.2.1', which means Little Endian, Explicit VR, no
-% compression, and only for tags in dicm_dict.m.
+% of '1.2.840.10008.1.2.1', which means Little Endian, Explicit VR, and no
+% compression.
 %
 % See also DICM_DICT, DICM_HDR, DICM_IMG
 
 % 200109 (yymmdd) Write it ( xiangrui.li at gmail.com)
 
 persistent dict;
-narginchk(2, 3);
-if ~isnumeric(img), error('Provide img array as 1st input.'); end
-if ~ischar(fname) && ~isstring(fname), error('Need a string as file name.'); end
-    
-fid = fopen(fname, 'w', 'l');
-if fid<0, error('Failed to open file %s', fname); end
-closeFile = onCleanup(@()fclose(fid)); % auto close when done or error
 if isempty(dict)
     try dict = dicm_dict(s.Manufacturer); catch, dict = dicm_dict(''); end
+    try %#ok try to use Matlab full dictionary if avaiable
+        C = fileread('dicom-dict.txt');
+        C = regexp(C, '\n\(([0-9A-F]{4}),([0-9A-F]{4})\)\t(\w{2})\t(\w+)\t', 'tokens');
+        C = reshape([C{:}], 4, [])';
+        grp = hex2dec(C(:,1));
+        elt = hex2dec(C(:,2));
+        if isstruct(dict)
+            dict.group = [dict.group; grp];
+            dict.element = [dict.element; elt];
+            dict.tag = [dict.tag; grp*2^16+elt];
+            dict.vr = [dict.vr; C(:,3)];
+            dict.name = [dict.name; C(:,4)];
+            [dict.tag, i] = unique(dict.tag); % dicm_dict take precedence
+            dict.group = dict.group(i); dict.element = dict.element(i);
+            dict.vr = dict.vr(i); dict.name = dict.name(i);
+        else
+            dict = [dict; num2cell([grp elt grp*2^16+elt]) C(:,3:4)];
+            [~, i] = unique(dict.tag); % dicm_dict take precedence
+            dict = dict(i,:);
+        end
+    end
     i = strcmp(dict.name, 'PixelData') | ... % +1 PixelData tags, remove them
         strcmp(dict.name, 'SmallestImagePixelValue') | ... % uint16 not enough
         strcmp(dict.name, 'LargestImagePixelValue') | ...
-        (dict.group>2 & dict.element<1); % remove group length except grp 2
-    dict.group(i) = []; dict.element(i) = []; dict.tag(i) = [];
-    dict.vr(i) = []; dict.name(i) = [];
+        (dict.group~=2 & dict.element==0) | ... % remove GroupLength except grp 2
+        dict.tag>2145386512; % after PixelData
+    if isstruct(dict)
+        dict.group(i) = []; dict.element(i) = []; dict.tag(i) = [];
+        dict.vr(i) = []; dict.name(i) = [];
+    else
+        dict(i,:) = [];
+    end
 end
+
+narginchk(2, 3);
+if ~isnumeric(img), error('Provide img array as 1st input.'); end
+if ~ischar(fname) && ~isstring(fname), error('Need a string as file name.'); end
+
+fmt = class(img);
+switch fmt
+    case {'int8'  'uint8' }, vr = 'OB'; nBit = 8; 
+    case {'int16' 'uint16'}, vr = 'OW'; nBit = 16;
+    case {'int32' 'uint32'}, vr = 'OL'; nBit = 32;
+    case {'int64' 'uint64'}, vr = 'OV'; nBit = 64;
+    case 'single',           vr = 'OF'; nBit = 32;
+    case 'double',           vr = 'OD'; nBit = 64;
+    otherwise, error('Unknown image type: %s', fmt);
+end
+
+fid = fopen(fname, 'w', 'l');
+if fid<0, error('Failed to open file %s', fname); end
+closeFile = onCleanup(@()fclose(fid)); % auto close when done or error
 
 % Update file and PixelData related meta
 s.FileMetaInformationGroupLength = 210; % be updated later
@@ -44,21 +82,12 @@ s.Rows = sz(1);
 s.Columns = sz(2);
 if sz(3)>1, s.SamplesPerPixel = sz(3); s.PlanarConfiguration = 1; end
 if sz(4)>1, s.NumberOfFrames = sz(4); end
-fmt = class(img);
-switch fmt
-    case {'int8'  'uint8' }, vr = 'OB'; nBit = 8; 
-    case {'int16' 'uint16'}, vr = 'OW'; nBit = 16;
-    case {'int32' 'uint32'}, vr = 'OL'; nBit = 32;
-    case {'int64' 'uint64'}, vr = 'OV'; nBit = 64;
-    case 'single',           vr = 'OF'; nBit = 32;
-    case 'double',           vr = 'OD'; nBit = 64;
-    otherwise, error('Unknown image type: %s', fmt);
-end
 if strfind(fmt, 'int'), s.PixelRepresentation = fmt(1)~='u'; end %#ok
 s.BitsAllocated = nBit;
 s.BitsStored = nBit;
 s.HighBit = nBit - 1;
 
+% Write file
 fwrite(fid, 0, 'int8', 127); % waste
 fwrite(fid, 'DICM', 'char*1'); % signature at 128
 for i = 1:numel(dict.tag) % write group 2 (maybe group 0?): always LE, expl VR
@@ -68,9 +97,9 @@ for i = 1:numel(dict.tag) % write group 2 (maybe group 0?): always LE, expl VR
     if dict.tag(i)==131072, i0 = ftell(fid); end % (0002,0000) g2len
     s = rmfield(s, dict.name{i});
 end
-write_meta(fid, s, dict); % write meta without group 2
+write_meta(fid, s, dict); % write meta without group 2-
 
-% PixelData written separately
+% Write PixelData separately
 fwrite(fid, [32736 16], 'uint16');
 fwrite(fid, vr, 'char*1');
 fwrite(fid, nBit/8*numel(img), 'uint32', 2); % maybe odd length?
@@ -80,7 +109,7 @@ fwrite(fid, permute(img, [2 1 3:numel(sz)]), fmt);
 function write_meta(fid, s, dict)
 flds = fieldnames(s);
 N = numel(flds);
-ind = zeros(1, N);
+ind = zeros(N, 1);
 for i = 1:N
     if regexp(flds{i}, '^(Private|Unknown)(_[0-9a-f]{4}){2}$', 'once')
         j = find(hex2dec(flds{i}([9:12 14:17])) == dict.tag, 1);
@@ -97,7 +126,7 @@ end
 [ind, i] = sort(ind); % in the order of tags
 flds = flds(i); % use flds since it may have Private|Unknown
 
-for i = find(ind>0,1):numel(ind)
+for i = find(ind>0,1) : N
     write_tag(fid, s.(flds{i}), dict, ind(i));
 end
 
