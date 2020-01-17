@@ -1466,20 +1466,23 @@ if isDTI
 end
 s.TurboFactor = xml_val(ch, 'TURBO Factor');
 
-a = [xml_attr(ch1, 'Angulation RL', 1)
-     xml_attr(ch1, 'Angulation AP', 1)
-     xml_attr(ch1, 'Angulation FH', 1)] /180*pi; % deg to radians
-R = makehgtform('xrotate', a(1), 'yrotate', a(2), 'zrotate', a(3));
-R = R(1:3, :);
+rotAngle = [xml_attr(ch1, 'Angulation RL', 1) 
+            xml_attr(ch1, 'Angulation AP', 1)
+            xml_attr(ch1, 'Angulation FH', 1)];
+ca = cosd(rotAngle); sa = sind(rotAngle);
+rx = [1 0 0; 0 ca(1) -sa(1); 0 sa(1) ca(1)]; % 3D rotation
+ry = [ca(2) 0 sa(2); 0 1 0; -sa(2) 0 ca(2)];
+rz = [ca(3) -sa(3) 0; sa(3) ca(3) 0; 0 0 1];
+R = rx * ry * rz; % seems right for Philips
 
 s.SliceOrientation = upper(xml_val(ch, 'Slice Orientation', 0));
 iOri = find(strncmp({'SAG' 'COR' 'TRA'}, s.SliceOrientation, 3));
 if iOri == 1 
     R(:,[1 3]) = -R(:,[1 3]);
-    R = R(:, [2 3 1 4]);
+    R = R(:, [2 3 1]);
 elseif iOri == 2
     R(:,3) = -R(:,3);
-    R = R(:, [1 3 2 4]);
+    R = R(:, [1 3 2]);
 end
 
 s.PixelSpacing = xml_val(ch, 'Pixel Spacing')';
@@ -1493,7 +1496,7 @@ if iPhase == (iOri==1)+1, a = 'ROW'; else, a = 'COL'; end
 s.InPlanePhaseEncodingDirection = a;
 
 s.ImageOrientationPatient = R(1:6)';
-R = R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices; 1]);
+R = R * diag([s.PixelSpacing([2 1]); s.SpacingBetweenSlices]);
 R(:,4) = [xml_attr(ch1, 'Off Center RL', 1)
           xml_attr(ch1, 'Off Center AP', 1)
           xml_attr(ch1, 'Off Center FH', 1)]; % vol center for now  
