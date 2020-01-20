@@ -13,7 +13,7 @@ function dicm_save(img, fname, s)
 %
 % See also DICM_DICT, DICM_HDR, DICM_IMG
 
-% 200109 (yymmdd) Write it ( xiangrui.li at gmail.com)
+% 200109 (yymmdd) Write it (xiangrui.li at gmail.com)
 
 persistent dict;
 if isempty(dict)
@@ -75,8 +75,9 @@ closeFile = onCleanup(@()fclose(fid)); % auto close when done or error
 s.FileMetaInformationGroupLength = 210; % be updated later
 s.FileMetaInformationVersion = [0 1]';
 s.TransferSyntaxUID = '1.2.840.10008.1.2.1'; % add or overwrite
-s.SOPInstanceUID = dicm_uid(s);
+s.SOPInstanceUID = dicm_uid(s); % use new one even provided
 s.MediaStorageSOPInstanceUID = s.SOPInstanceUID;
+s.ImplementationClassUID = s.SOPInstanceUID(1:27);
 sz = size(img); sz(numel(sz)+1:4) = 1;
 s.Rows = sz(1);
 s.Columns = sz(2);
@@ -120,13 +121,12 @@ for i = 1:N
             if any(pub), j = j(pub); end
         end
     end
-    if isempty(j), continue; end
-    ind(i) = j(1);
+    if ~isempty(j), ind(i) = j(1); end
 end
 [ind, i] = sort(ind); % in the order of tags
 flds = flds(i); % use flds since it may have Private|Unknown
 
-for i = find(ind>0,1) : N
+for i = find(ind,1) : N
     write_tag(fid, s.(flds{i}), dict, ind(i));
 end
 
@@ -141,7 +141,7 @@ if strcmp(vr, 'SQ')
     if isstruct(val) && isfield(val, 'Item_1'), val = struct2cell(val); end
     if ~iscell(val), val = {val}; end % not safe
     for i = 1:numel(val)
-        if ~isstruct(val{i}), continue; end
+        if ~isstruct(val{i}), continue; end % skip
         fwrite(fid, [65534 57344 0 0], 'uint16'); % FFFE E000 (Item) & len
         i0 = ftell(fid); % start of Item length
         write_meta(fid, val{i}, dict); % recuisive call
@@ -200,7 +200,7 @@ end
 function update_length(fid, i0)
 i1 = ftell(fid);
 fseek(fid, i0-4, 'bof');
-fwrite(fid, i1-i0, 'uint32'); % end of length loc to current loc
+fwrite(fid, i1-i0, 'uint32');
 fseek(fid, i1, 'bof');
 
 %% Generate 'unique' dicom ID
