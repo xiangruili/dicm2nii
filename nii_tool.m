@@ -1215,6 +1215,6 @@ try
     if err, error('java.lang.ProcessBuilder error'); end
 catch % fallback to system() if java fails like for Octave
     cmd = regexprep(cmd, '.+? .+', '"$0"'); % double quotes if with middle space
-    [err, out] = system(sprintf('%s ', cmd{:}));
+    [err, out] = system(sprintf('%s ', cmd{:}, '2>&1'));
 end
 %%
