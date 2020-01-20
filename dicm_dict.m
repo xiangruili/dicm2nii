@@ -1285,23 +1285,18 @@ if partial, C = C(ismember(C(:,4), flds), :); end
 grp = hex2dec(C(:,1));
 elt = hex2dec(C(:,2));
 
-try
-    dict = table(uint16(grp), uint16(elt), uint32(grp*2^16+elt), C(:,3), C(:,4));
-    dict.Properties.VariableNames = {'group' 'element' 'tag' 'vr' 'name'};
-    [~, ind] = unique(dict.tag); % sort by tag
-    dict = dict(ind,:);
-catch % Matalb 2013a-, Octave
-    dict.group = uint16(grp);
-    dict.element = uint16(elt);
-    dict.tag = uint32(grp * 65536 + elt);
-    dict.vr = C(:,3); % for implicit VR and some problematic explicit VR
-    dict.name = C(:,4);
+% try % table indexing seems slower: use struct for now
+%     dict = table(uint16(grp), uint16(elt), uint32(grp*2^16+elt), C(:,3), C(:,4));
+%     dict.Properties.VariableNames = {'group' 'element' 'tag' 'vr' 'name'};
+%     [~, ind] = unique(dict.tag); % sort by tag
+%     dict = dict(ind,:);
+% catch % Matalb 2013a-, Octave
+    dict = struct('group', uint16(grp), 'element', uint16(elt), ...
+        'tag', uint32(grp*65536+elt), 'vr', {C(:,3)}, 'name', {C(:,4)});
     [dict.tag, ind] = unique(dict.tag); % sort by tag
-    dict.vr = dict.vr(ind);
-    dict.name = dict.name(ind);
-    dict.group = dict.group(ind);
-    dict.element = dict.element(ind);
-end
+    dict.group = dict.group(ind); dict.element = dict.element(ind);
+    dict.vr = dict.vr(ind); dict.name = dict.name(ind);
+% end
 
 dict.Properties.UserData.vendor = vendor;
 if partial, dict.Properties.UserData.fields = flds; end % remember fields
