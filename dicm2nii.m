@@ -201,8 +201,8 @@ if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
 end
 
 %% Deal with niiFolder
-if ~isdir(niiFolder), mkdir(niiFolder); end %#ok<*ISDIR>
-niiFolder = [GetFullPath(niiFolder) filesep];
+if ~isfolder(niiFolder), mkdir(niiFolder); end
+niiFolder = [fullName(niiFolder) filesep];
 converter = ['dicm2nii.m ' getVersion];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
     more off;
@@ -216,25 +216,25 @@ if isnumeric(src)
 elseif iscellstr(src) %#ok<*ISCLSTR> % multiple files/folders
     fnames = {};
     for i = 1:numel(src)
-        if isdir(src{i})
+        if isfolder(src{i})
             fnames = [fnames filesInDir(src{i})];
         else
             a = dir(src{i});
             if isempty(a), continue; end
-            dcmFolder = fileparts(GetFullPath(src{i}));
+            dcmFolder = fileparts(fullName(src{i}));
             fnames = [fnames fullfile(dcmFolder, a.name)];
         end
     end
-elseif isdir(src) % folder
+elseif isfolder(src) % folder
     fnames = filesInDir(src);
 elseif ~exist(src, 'file') % like input: run1*.dcm
     fnames = dir(src);
     if isempty(fnames), error('%s does not exist.', src); end
     fnames([fnames.isdir]) = [];
-    dcmFolder = filepars(GetFullPath(src));
+    dcmFolder = fileparts(fullName(src));
     fnames = strcat(dcmFolder, filesep, {fnames.name});    
 elseif ischar(src) % 1 dicom or zip/tgz file
-    dcmFolder = fileparts(GetFullPath(src));
+    dcmFolder = fileparts(fullName(src));
     unzip_cmd = compress_func(src);
     if isempty(unzip_cmd)
         fnames = dir(src);
@@ -242,7 +242,7 @@ elseif ischar(src) % 1 dicom or zip/tgz file
     else % unzip if compressed file is the source
         [~, fname, ext1] = fileparts(src);
         dcmFolder = sprintf('%stmpDcm%s/', niiFolder, fname);
-        if ~isdir(dcmFolder)
+        if ~isfolder(dcmFolder)
             mkdir(dcmFolder);
             delTmpDir = onCleanup(@() rmdir(dcmFolder, 's'));
         end
@@ -1804,16 +1804,16 @@ switch cmd
         setpref('dicm2nii_gui_para', fieldnames(pf), struct2cell(pf));
     case 'dstDialog'
         folder = hs.dst.Text; % current folder
-        if ~isdir(folder), folder = hs.src.Text; end
-        if ~isdir(folder), folder = fileparts(folder); end
-        if ~isdir(folder), folder = pwd; end
+        if ~isfolder(folder), folder = hs.src.Text; end
+        if ~isfolder(folder), folder = fileparts(folder); end
+        if ~isfolder(folder), folder = pwd; end
         dst = uigetdir(folder, 'Select a folder for result files');
         if isnumeric(dst), return; end
         hs.dst.Text = dst;
     case 'srcDir'
         folder = hs.src.Text; % initial folder
-        if ~isdir(folder), folder = fileparts(folder); end
-        if ~isdir(folder), folder = pwd; end
+        if ~isfolder(folder), folder = fileparts(folder); end
+        if ~isfolder(folder), folder = pwd; end
         src = jFileChooser(folder, 'Select folders/files to convert');
         if isnumeric(src), return; end
         set(hs.fig, 'UserData', src);
@@ -1895,7 +1895,7 @@ switch cmd
         try
             if strcmp(evt.DropType, 'file')
                 nam = evt.Data{1};
-                if ~isdir(nam), nam = fileparts(nam); end
+                if ~isfolder(nam), nam = fileparts(nam); end
                 hs.dst.Text = nam;
             else
                 hs.dst.Text = strtrim(evt.Data);
@@ -2818,15 +2818,6 @@ end
 ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
 ind = ind(:)';
 
-%% this can be removed for matlab 2013b+
-function y = flip(varargin)
-if exist('flip', 'builtin')
-    y = builtin('flip', varargin{:});
-else
-    if nargin<2, varargin{2} = find(size(varargin{1})>1, 1); end
-    y = flipdim(varargin{:}); %#ok
-end
-
 %% return all file names in a folder, including in sub-folders
 function files = filesInDir(folder)
 dirs = genpath(folder);
@@ -2976,3 +2967,55 @@ set(h,'Position',Pos)
 function val = verLessThanOctave
 isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
 val = isOctave || verLessThan('matlab','9.4');
+
+%% Return full name for file/path, no matter it exists or not (200120)
+% \ is treated as / for unix. This is may be bad, since \ is legal char for unix
+function rst = fullName(nam)
+if ispc
+    rst = strrep(nam, '/', '\');
+    if isempty(regexp(rst, '^([a-zA-Z]:|\\\\)', 'once')) % not \\ or C:
+        rst = [pwd '\' rst];
+    end
+    rst = [rst(1) regexprep(rst(2:end), '\\{2,}', '\\')]; % repeated sep
+    if regexp(rst, '\\\.$'), rst(end+(-1:0)) = ''; end
+    rst = strrep(rst, '\.\', '\'); % useless current dir
+    while 1 % \.. one level up
+        i = strfind(rst, '\..');
+        if isempty(i), break; end
+        i0 = strfind(rst(1:i(1)-1), '\'); % the dir before \..
+        if isempty(i0), error(['Invalid name: ' nam]); end
+        rst(i0(end):i(1)+2) = '';
+    end
+    if numel(rst)==2 && rst(2)==':', rst(3) = '\'; end
+else
+    rst = strrep(nam, '\', '/');
+    if strncmp(rst, '~', 1), rst = [getenv('HOME') rst(2:end)]; % ~: Home
+    elseif ~strncmp(rst, '/', 1), rst = [pwd '/' rst];
+    end
+    rst = regexprep(rst, '/{2,}', '/');
+    if regexp(rst, '/\.$'), rst(end+(-1:0)) = ''; end
+    rst = strrep(rst, '/./', '/');
+    while 1
+        i = strfind(rst, '/..');
+        if isempty(i), break; end
+        i0 = strfind(rst(1:i(1)-1), '/');
+        if isempty(i0), error(['Invalid name: ' nam]); end
+        rst(i0(end):i(1)+2) = '';
+    end
+    if isempty(rst), rst = '/'; end
+end
+
+%% this can be removed for matlab 2013b+
+function y = flip(varargin)
+try
+    y = builtin('flip', varargin{:});
+catch
+    if nargin<2, varargin{2} = find(size(varargin{1})>1, 1); end
+    y = flipdim(varargin{:}); %#ok
+end
+
+%% this can be removed for matlab 2013b+
+function tf = isfolder(folderName)
+try tf = builtin('isfolder', folderName);
+catch, tf = isdir(folderName); %#ok
+end
