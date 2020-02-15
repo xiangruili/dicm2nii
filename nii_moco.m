@@ -69,7 +69,7 @@ d = d(1:3);
 Rm = nii_viewer('LocalFunc', 'nii_xform_mat', nii.hdr, 1); % moving img R
 
 sz = nii.hdr.pixdim(2:4);
-if all(abs(diff(sz)/sz(1)))<0.05 && sz(1)>2 && sz(1)<4 % 6~12mm
+if all(abs(diff(sz)/sz(1))<0.05) && sz(1)>2 && sz(1)<4 % 6~12mm
     sz = 3; % iso-voxel, 2~4mm res, simple fast smooth
 else
     sz = 9 ./ sz; % 9 mm seems good
