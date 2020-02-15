@@ -77,7 +77,8 @@ s.FileMetaInformationVersion = [0 1]';
 s.TransferSyntaxUID = '1.2.840.10008.1.2.1'; % add or overwrite
 s.SOPInstanceUID = dicm_uid(s); % use new one even provided
 s.MediaStorageSOPInstanceUID = s.SOPInstanceUID;
-s.ImplementationClassUID = s.SOPInstanceUID(1:27);
+s.ImplementationClassUID = s.SOPInstanceUID(1:27); % pacsone needs 3 UID
+% s.ImplementationVersionName = 'dicm_save.m 200130';
 sz = size(img); sz(numel(sz)+1:4) = 1;
 s.Rows = sz(1);
 s.Columns = sz(2);
@@ -116,12 +117,14 @@ for i = 1:N
         j = find(hex2dec(flds{i}([9:12 14:17])) == dict.tag, 1);
     else
         j = find(strcmp(flds{i}, dict.name));
-        if numel(j) > 1 % if multiple, use early public tag if any
-            pub = mod(dict.group(j), 2) == 0;
-            if any(pub), j = j(pub); end
+        if numel(j) > 1 % multiple tag for the fld
+            if isstruct(s.(flds{i})) % take vr=SQ if struct
+                ii = strcmp(dict.vr(j), 'SQ');
+                if any(ii), j = j(ii); end
+            end
         end
     end
-    if ~isempty(j), ind(i) = j(1); end
+    if ~isempty(j), ind(i) = j(1); end % otherwise take early one
 end
 [ind, i] = sort(ind); % in the order of tags
 flds = flds(i); % use flds since it may have Private|Unknown
@@ -158,7 +161,10 @@ elseif iscellstr(val), val = sprintf('%s\n', val{:}); %#ok
 end
 if any(strcmp(vr, {'DS' 'IS'}))
     fmt = 'char*1';
-    val = sprintf('%.16g\\', val); val(end) = '';
+    if strcmp(vr, 'IS'), val = sprintf('%.0f\\', val);
+    else, val = sprintf('%.16g\\', val);
+    end
+    val(end) = '';
     n = numel(val);
 else
     [fmt, bpv] = vr2fmt(vr);
