@@ -415,8 +415,9 @@ for i = 1:3
 end
 
 % Controls for each file
+h = hs.files.SelectionBackground; fClr = [h.getRed h.getGreen h.getBlue]/255;
 uipanel(ph, 'Units', 'pixels', 'Position', [1 4 412 33], ...
-    'BorderType', 'line', 'BorderWidth', 3, 'HighlightColor', [0 0.5 0.8]);
+    'BorderType', 'line', 'BorderWidth', 3, 'HighlightColor', fClr);
 hs.lb = java_spinner([7 10 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
 hs.ub = java_spinner([59 10 56 22], [p.ub -inf inf p.ub_step], ph, ...
