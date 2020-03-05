@@ -858,7 +858,7 @@ for i = 1:nRun
 
     nii = split_components(nii, h{i}{1}); % split vol components
     if no_save % only return the first nii
-        nii(1).hdr.file_name = [fnames{i} '_no_save.nii'];
+        nii(1).hdr.file_name = [fnames{i} '.nii'];
         nii(1).hdr.magic = 'n+1';
         varargout{1} = nii_tool('update', nii(1));
         if nRun>1, fprintf(2, 'Only one series is converted.\n'); end
@@ -966,8 +966,8 @@ end
 %% Subfunction: Set most nii header and re-orient img
 function [nii, h] = set_nii_hdr(nii, h, pf, bids)
 dim = nii.hdr.dim(2:4); nVol = nii.hdr.dim(5);
-fld = 'NumberOfTemporalPositions';
-if ~isfield(h{1}, fld) && nVol>1, h{1}.(fld) = nVol; end
+% fld = 'NumberOfTemporalPositions';
+% if ~isfield(h{1}, fld) && nVol>1, h{1}.(fld) = nVol; end
 
 % Transformation matrix: most important feature for nii
 [ixyz, R, pixdim, xyz_unit] = xform_mat(h{1}, dim); % R: dicom xform matrix
@@ -2144,6 +2144,19 @@ if ~isfield(s, 'EchoTime')
     end
 end
 
+% https://github.com/rordenlab/dcm2niix/issues/369
+if strncmpi(s.Manufacturer, 'Philips', 7)
+  try
+    iLast = sprintf('Item_%g', s.NumberOfFrames);
+    a = s.(pffgs).(iLast).PrivatePerFrameSq.Item_1.MRImageDynamicScanBeginTime;
+    if a>0
+        fprintf('%.6g\t\t', s.RepetitionTime)
+        s.RepetitionTime = a / (s.NumberOfDynamicScans-1) * 1000; % overwrite TR
+        fprintf('%.6g\n', s.RepetitionTime)
+    end
+  end
+end
+
 % for Siemens: the redundant copy makes non-Siemens code faster
 % if isfield(s.(sfgs).Item_1, 'CSASeriesHeaderInfo')
 %     s.CSASeriesHeaderInfo = s.(sfgs).Item_1.CSASeriesHeaderInfo.Item_1;
@@ -2865,8 +2878,8 @@ function v = normc(M)
 vn = sqrt(sum(M .^ 2)); % vn = vecnorm(M);
 vn(vn==0) = 1;
 v = bsxfun(@rdivide, M, vn);
-%%
 
+%%
 function BtnModalityTable(h,TT,TS)
 if verLessThanOctave
     dat = TT.Data;
@@ -2932,8 +2945,8 @@ catch err
     warning(['CANNOT PREVIEW RUN: ' err.message])
 end
 
-function showHelp(valueset)
 %%
+function showHelp(valueset)
 msg = {'BIDS Converter module for dicm2nii',...
     'tanguy.duval@inserm.fr',...
     'http://bids.neuroimaging.io',...
@@ -2964,6 +2977,7 @@ set(findall(h,'Type','Text'),'FontName','FixedWidth');
 Pos = get(h,'Position'); Pos(3) = 450;
 set(h,'Position',Pos)
 
+%%
 function val = verLessThanOctave
 isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
 val = isOctave || verLessThan('matlab','9.4');
