@@ -321,9 +321,7 @@ else
         setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
     end
     
-    set(0, 'ShowHiddenHandles', 'on');
-    a = handle(findobj('Type', 'figure', 'Tag', 'nii_viewer'));
-    set(0, 'ShowHiddenHandles', 'off');
+    a = handle(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer'));
     if isempty(a)
         fn = 'ni' * 256.^(1:2)'; % start with a big number for figure
     elseif numel(a) == 1
@@ -633,9 +631,9 @@ set_cdata(hs);
 set_xyz(hs);
 
 if nargin>1
-    if ischar(varargin{1})
+    if ischar(varargin{1}) || isstruct(varargin{1})
         addOverlay(varargin{1}, fh);
-    elseif iscellstr(varargin{1})
+    elseif iscell(varargin{1})
         for i=1:numel(varargin{1}), addOverlay(varargin{1}{i}, fh); end
     end
 end
@@ -1856,7 +1854,7 @@ im = img(ind);
 mu = mean(im);
 sd = std(im);
 rg = mu + [-2 2]*sd;
-if rg(1)<=0 && mu-sd>0, rg(1) = sd/5; end
+if rg(1)<=0, rg(1) = sd/5; end
 if rg(1)<mi || isnan(rg(1)), rg(1) = mi; end
 if rg(2)>ma || isnan(rg(2)), rg(2) = ma; end
 if rg(1)==rg(2), rg(1) = mi; if rg(1)==rg(2), rg(1) = 0; end; end
