@@ -119,7 +119,6 @@ hs.fig.Name(end) = 78 - hs.fig.Name(end); % indication of timer call
 if isempty(f), return; end
 set(hs.menu, 'Enable', 'off'); set([hs.table hs.slider], 'Enable', 'inactive');
 
-mos2vol = dicm2nii('', 'mos2vol', 'func_handle');
 asc_header = dicm2nii('', 'asc_header', 'func_handle');
 dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
 rob = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
@@ -142,20 +141,23 @@ hs.series.String = seriesInfo(s);
 try 
     nSL = s.CSAImageHeaderInfo.NumberOfImagesInMosaic; % EPI | DTI mosaic
 catch % T1, T2, fieldmap etc: show info/img only
-    nSL = asc_header(s, 'sSliceArray.lSize');
-    if nSL==1, nSL = asc_header(s, 'sKSpace.lImagesPerSlab'); end
-    iSL = ceil(nSL/2); % try middle slice instead of 1st
+    nSL = asc_header(s, 'sSliceArray.lSize'); % 2D
+    if nSL==1, nSL = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
+    iSL = ceil(nSL/2); % try middle slice for better view
     nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, iSL);
     if ~exist(nam, 'file')
         iSL = 1; nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, iSL);
     end
-    nIN = nSL; % next line fix for fieldmap is far from ideal
-    if s.SequenceName == "*fm2d2r" && contains(s.ImageType, '\M\'), nIN=nSL*2; end
-    img = dicm_img(nam, 0);
-    img0 = double(img(img>100)); 
-    s.CLim = mean(img0) + std(img0)*3;
-    set_img(hs.img, img, s.CLim);
+    nIN = nSL;
+    if contains(s.ImageType, 'DERIVED') || (contains(s.ImageType, '\M\') && ...
+            isfield(s, 'SequenceName') && contains(s.SequenceName, 'fm2d'))
+        pause(1); nIN = numel(dir([nam(1:end-9) '*.dcm']));
+    end
+    if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
+        nIN = nIN * asc_header(s, 'sSliceArray.lConc');
+    end
     init_series(hs, s, nIN);
+    set_img(hs.img, dicm_img(nam));
     hs.slider.Value = iSL;
     hs.instnc.String = num2str(iSL);
     return;
@@ -166,11 +168,11 @@ if endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
 if isempty(nIN), nIN = asc_header(s, 'sDiffusion.lDiffDirections') + 1; end
 if isempty(nIN), nIN = 1; end
 isDTI = contains(s.ImageType, '\DIFFUSION');
-mos = dicm_img(s, 0); s.PixelData = mos; % img without xpose
-img = mos2vol(mos, nSL, 0);
-p = refVol(img, s);
+mos = dicm_img(s); s.PixelData = mos;
+img = mos2vol(mos, nSL);
+p = refVol(img, [s.PixelSpacing' s.SpacingBetweenSlices]);
 
-ijk = round(p.R0 \ p.I + 1); % edge voxels
+ijk = round(p.R0 \ p.mm + 1); % informative voxels
 ind = sub2ind(size(img), ijk(1,:), ijk(2,:), ijk(3,:));
 img0 = double(mos);
 mn = mean(img0(ind));
@@ -194,9 +196,9 @@ for i = 2:nIN
         pause(0.2); 
     end
     s = dicm_hdr_wait(nam, dict); iN = s.InstanceNumber;
-    mos = dicm_img(s, 0);
-    img = mos2vol(mos, nSL, 0);
-    hs.img.CData = mos'; hs.instnc.String = num2str(iN);
+    mos = dicm_img(s);
+    img = mos2vol(mos, nSL);
+    hs.img.CData = mos; hs.instnc.String = num2str(iN);
     hs.slider.Value = iN; % show progress
     if isDTI, hs.table.Data{1,3} = i; hs.dv.YData(iN) = 0; continue; end
     p.F.Values = smooth_mc(img, p.sz);
@@ -217,6 +219,20 @@ for i = 2:nIN
     if iN>=nIN, break; end % ISSS alike
 end
 
+%% Reshape mosaic into volume, remove padded zeros
+function vol = mos2vol(mos, nSL)
+nMos = ceil(sqrt(nSL)); % nMos x nMos tiles for Siemens
+[nr, nc, nv] = size(mos); % number of row, col and vol in mosaic
+nr = nr / nMos; nc = nc / nMos; % number of row and col in slice
+vol = zeros([nr nc nSL nv], class(mos));
+for i = 1:nSL
+    % r =    mod(i-1, nMos) * nr + (1:nr); % 2nd slice is tile(2,1)
+    % c = floor((i-1)/nMos) * nc + (1:nc);
+    r = floor((i-1)/nMos) * nr + (1:nr); % 2nd slice is tile(1,2)
+    c =    mod(i-1, nMos) * nc + (1:nc);
+    vol(:, :, i, :) = mos(r, c, :);
+end
+
 %% Initialize GUI for a new series
 function init_series(hs, s, nIN)
 hs.dv.YData = zeros(nIN,1); hs.fd.YData = zeros(nIN,1);
@@ -225,16 +241,20 @@ set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
 if nIN==1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
 end
-hs.ax.XLim(2) = nIN+0.5; 
+hs.ax.XLim(2) = nIN + 0.5; 
 hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
 
 %% Set img and img axis
 function set_img(hImg, img, CLim)
+if nargin<3 || isempty(CLim) || isnan(CLim)
+    img0 = double(img(img>100));
+    CLim = mean(img0) + std(img0)*2;
+end
 d = size(img) + 0.5;
-set(hImg.Parent, 'CLim', [0 CLim], 'XLim', [0.5 d(1)], 'YLim', [0.5 d(2)]);
-hImg.CData = img';
+set(hImg.Parent, 'CLim', [0 CLim], 'XLim', [0.5 d(2)], 'YLim', [0.5 d(1)]);
+hImg.CData = img;
 
 %% get some series information
 function c = seriesInfo(s)
@@ -270,19 +290,19 @@ iR = size(C,1) - i + 1;
 hs.fd.YData = hs.fig.UserData.FD{iR};
 hs.dv.YData = hs.fig.UserData.DV{iR};
 for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', C{i,j+3}/C{i,3}*100); end
-nIN = numel(hs.dv.YData);
 
 hs.instnc.String = '1';
 hs.series.String = C{i,1}; % in case hdr not saved
-try s = hs.fig.UserData.hdr{iR}; catch, set_img(hs.img, inf(2), 1e4); return; end
+try s = hs.fig.UserData.hdr{iR}; catch, set_img(hs.img, inf(2), 1); return; end
+nIN = sum(~isnan(hs.dv.YData));
 set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
 if nIN == 1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
 end
-hs.ax.XLim(2) = nIN+0.5;
+hs.ax.XLim(2) = numel(hs.dv.YData) + 0.5;
 hs.series.String = seriesInfo(s);
-try CLim = s.CLim; catch, CLim = 1e4; end
-set_img(hs.img, dicm_img(s, 0), CLim);
+try CLim = s.CLim; catch, CLim = []; end
+set_img(hs.img, dicm_img(s), CLim);
 
 %% Load subj data to review
 function loadSubj(h, ~)
@@ -320,10 +340,10 @@ try delete(['./log/' subj '*.mat']); catch, end
 hs.table.Data = {}; % quick visual sign
 
 %% Get reference vol info. From nii_moco.m
-function p = refVol(img, s)
+function p = refVol(img, pixdim)
 d = size(img);
-pixdim = [s.PixelSpacing' s.SpacingBetweenSlices];
 p.R0 = diag([pixdim 1]); % no need for real xform_mat here
+p.R0(1:3, 4) = -pixdim .* (d/2); % make center voxel [0 0 0]
 
 sz = pixdim;
 if all(abs(diff(sz)/sz(1))<0.05) && sz(1)>2 && sz(1)<4 % 6~12mm
@@ -360,7 +380,7 @@ a = sum(dG.^2); % 6 derivatives has similar range
 ind = a > std(a(~isnan(a)))/10; % arbituray threshold. Also exclude NaN
 p.dG = dG(:, ind);
 p.V0 = V0(ind);
-p.I = I(:, ind);
+p.mm = I(:, ind);
 F.GridVectors = {0:d(1)-1, 0:d(2)-1, 0:d(3)-1};
 p.F = F;
 p.sz = sz;
@@ -370,7 +390,7 @@ function [m6, rst] = moco_estim(p, R)
 mss0 = inf;
 rst = R;
 for iter = 1:64
-    J = R * p.I; % R_rst*J -> R0*ijk
+    J = R * p.mm; % R_rst*J -> R0*ijk
     V = p.F(J(1,:), J(2,:), J(3,:));
     ind = ~isnan(V); % NaN means out of range
     V = V(ind);
@@ -387,10 +407,10 @@ for iter = 1:64
     mss0 = mss;
 end
 
-% Compute p.trans and p.rot, then p.FD
+% Compute trans and rot
 R = p.R0 * rst; % inv(R_rst / Rref)
 trans = -R(1:3, 4)';
-R = R ./ sqrt(sum(R.^2)); % to be safe
+R = R ./ sqrt(sum(R.*R)); % to be safe
 rot = -[atan2(R(2,3), R(3,3)) asin(R(1,3)) atan2(R(1,2), R(1,1))];
 m6 = [trans rot];
 
@@ -494,7 +514,8 @@ function overlay(h, ~)
 hs = guidata(h);
 hdrs = hs.fig.UserData.hdr;
 if isempty(hdrs), return; end
-ind = cellfun(@(c)contains(c.SequenceName,'tfl3d'), hdrs);
+is3D = @(c)c.MRAcquisitionType=="3D" && ~contains(c.ImageType, 'DERIVED');
+ind = cellfun(is3D, hdrs);
 if ~any(ind), ind = cellfun(@(c)c.MRAcquisitionType=="3D", hdrs); end
 if ~any(ind), view_3D(h); return; end % no T1, just show in nii_viewer
 ind = find(ind, 1, 'last');
@@ -510,11 +531,11 @@ nii_viewer(T1w, epi);
 function sliderCB(h, ~)
 hs = guidata(h);
 if isempty(h.UserData), return; end
-dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
+dict = dicm_dict('', {'SamplesPerPixel' 'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
 h.Value = round(h.Value);
 s = dicm_hdr(sprintf('%s%06.f.dcm', h.UserData, h.Value), dict);
 if isempty(s), return; end
-hs.img.CData = double(dicm_img(s));
+hs.img.CData = dicm_img(s);
 hs.instnc.String = num2str(s.InstanceNumber);
 
 %% Save result, start timer with appropriate delay, even after error.
