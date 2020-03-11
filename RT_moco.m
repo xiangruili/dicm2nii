@@ -17,8 +17,6 @@ function RT_moco()
 %  1. Tested only for Siemens Prisma at CCBBI at OSU. 
 %  2. It requires later matlab (2017a is the earliest version tested).
 %  3. It is ideal for portrait display monitor setup.
-% 
-% Dependence: https://github.com/xiangruili/dicm2nii
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
@@ -42,10 +40,11 @@ hs.fig = fh;
 h = uimenu(fh, 'Label', '&Patient');
 hs.menu(1) = uimenu(h, 'Label', 'Load Patient', 'Callback', @loadSubj);
 hs.menu(2) = uimenu(h, 'Label', 'Redo Patient', 'Callback', @redoSubj);
+hs.menu(3) = uimenu(h, 'Label', 'Close Patient', 'Callback', @closeSubj);
 
 h = uimenu(fh, 'Label', '&Series');
-uimenu(h, 'Label', 'View in 3D', 'Callback', @view_3D);
-uimenu(h, 'Label', 'Overlay onto Anatomy', 'Callback', @overlay);
+uimenu(h, 'Label', 'View Selected Series in 3D', 'Callback', @view_3D);
+uimenu(h, 'Label', 'Overlay Selected Series onto Anatomy', 'Callback', @overlay);
 hs.derived = uimenu(h, 'Label', 'Skip DERIVED Series', 'Checked', 'on', ...
     'Callback', @toggleChecked, 'Separator', 'on');
 hs.SBRef = uimenu(h, 'Label', 'Skip *_SBRef Series', 'Callback', @toggleChecked, 'Checked', 'on');
@@ -57,7 +56,7 @@ uimenu(h, 'Label', 'Show FD plot', 'Callback', @toggleFD, 'Separator', 'on');
 h = uimenu(h, 'Label', '&FD Threshold');
 for i = [0.1:0.1:0.5 0.8 1 2], uimenu(h, 'Label', num2str(i), 'Callback', @FD_yLim); end
 
-dy = 0.1 * (0:3);
+dy = 0.12 * (0:3);
 hs.ax = axes(fh, 'Units', 'normalized', 'Position', [0.05 0.46 0.9 0.18], ...
     'NextPlot', 'add', 'XLim', [0.5 300.5], 'UserData', dy, ...
     'TickDir', 'out', 'TickLength', 0.002*[1 1], 'ColorOrder', [0 0 1; 1 0 1]);
@@ -106,13 +105,13 @@ hs.instnc = text(ax, 'Units', 'normalized', 'Position', [0.99 0.01], 'Color', 'y
     'FontSize', 14, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom');
 
 hs.timer = timer('StartDelay', 0.2, 'ObjectVisibility', 'off', ...
-    'StopFcn', @stopFunc, 'TimerFcn', @timerFunc, 'UserData', fh);
+    'StopFcn', @saveResult, 'TimerFcn', @doSeries, 'UserData', fh);
 fh.HandleVisibility = 'callback'; % fh.Resize = 'off'; 
 guidata(fh, hs);
 start(hs.timer);
 
-%% Do a series if avail, then call stopFunc to save result
-function timerFunc(obj, ~)
+%% TimerFunc: do a series if avail, then call stopFunc to save result
+function doSeries(obj, ~)
 hs = guidata(obj.UserData);
 hs.fig.Name(end) = 78 - hs.fig.Name(end); % indication of timer call
 [f, iRun] = next_series(hs);
@@ -151,7 +150,7 @@ catch % T1, T2, fieldmap etc: show info/img only
     nIN = nSL;
     if contains(s.ImageType, 'DERIVED') || (contains(s.ImageType, '\M\') && ...
             isfield(s, 'SequenceName') && contains(s.SequenceName, 'fm2d'))
-        pause(1); nIN = numel(dir([nam(1:end-9) '*.dcm']));
+        pause(1.1); nIN = numel(dir([nam(1:end-9) '*.dcm']));
     end
     if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
         nIN = nIN * asc_header(s, 'sSliceArray.lConc');
@@ -176,7 +175,7 @@ ijk = round(p.R0 \ p.mm + 1); % informative voxels
 ind = sub2ind(size(img), ijk(1,:), ijk(2,:), ijk(3,:));
 img0 = double(mos);
 mn = mean(img0(ind));
-s.CLim = mn * 4; if isDTI, s.CLim = mn * 2; end
+s.CLim = mn + std(img0(ind)*3); if isDTI, s.CLim = s.CLim / 2; end
 set_img(hs.img, mos, s.CLim);
 init_series(hs, s, nIN);
 viewer = findall(0, 'Type', 'figure', 'Tag', 'nii_viewer');
@@ -222,15 +221,15 @@ end
 %% Reshape mosaic into volume, remove padded zeros
 function vol = mos2vol(mos, nSL)
 nMos = ceil(sqrt(nSL)); % nMos x nMos tiles for Siemens
-[nr, nc, nv] = size(mos); % number of row, col and vol in mosaic
+[nr, nc] = size(mos); % number of row & col in mosaic
 nr = nr / nMos; nc = nc / nMos; % number of row and col in slice
-vol = zeros([nr nc nSL nv], class(mos));
+vol = zeros([nr nc nSL], class(mos));
 for i = 1:nSL
     % r =    mod(i-1, nMos) * nr + (1:nr); % 2nd slice is tile(2,1)
     % c = floor((i-1)/nMos) * nc + (1:nc);
     r = floor((i-1)/nMos) * nr + (1:nr); % 2nd slice is tile(1,2)
     c =    mod(i-1, nMos) * nc + (1:nc);
-    vol(:, :, i, :) = mos(r, c, :);
+    vol(:, :, i) = mos(r, c);
 end
 
 %% Initialize GUI for a new series
@@ -250,6 +249,7 @@ figure(hs.fig); drawnow; % bring GUI front if needed
 function set_img(hImg, img, CLim)
 if nargin<3 || isempty(CLim) || isnan(CLim)
     img0 = double(img(img>100));
+    if isempty(img0), img0 = 1; end
     CLim = mean(img0) + std(img0)*2;
 end
 d = size(img) + 0.5;
@@ -291,18 +291,23 @@ hs.fd.YData = hs.fig.UserData.FD{iR};
 hs.dv.YData = hs.fig.UserData.DV{iR};
 for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', C{i,j+3}/C{i,3}*100); end
 
-hs.instnc.String = '1';
+hs.instnc.String = '';
 hs.series.String = C{i,1}; % in case hdr not saved
 try s = hs.fig.UserData.hdr{iR}; catch, set_img(hs.img, inf(2), 1); return; end
+
 nIN = sum(~isnan(hs.dv.YData));
-set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
+iIN = ceil(nIN/2); % start with middle Instance if avail
+nam = sprintf('%s%06g.dcm', s.Filename(1:end-10), iIN);
+if ~exist(nam, 'file'), iIN = 1; nam = s; end
+hs.instnc.String = num2str(iIN);
+set(hs.slider, 'Max', nIN, 'Value', iIN, 'UserData', s.Filename(1:end-10));
 if nIN == 1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
 end
 hs.ax.XLim(2) = numel(hs.dv.YData) + 0.5;
 hs.series.String = seriesInfo(s);
 try CLim = s.CLim; catch, CLim = []; end
-set_img(hs.img, dicm_img(s), CLim);
+set_img(hs.img, dicm_img(nam), CLim);
 
 %% Load subj data to review
 function loadSubj(h, ~)
@@ -322,17 +327,26 @@ for i = 1:N
 end 
 hs.table.Data = C;
 hs.subj.String = subj;
-hs.menu(2).Enable = 'on';
-f = dir(['../incoming_DICOM/20*' subj '*']);
-if ~isempty(f), hs.subj.UserData = [f(1).folder '/' f(1).name]; end
+hs.subj.UserData = fileparts(hs.fig.UserData.hdr{1}.Filename);
+hs.series.UserData = str2double(hs.fig.UserData.hdr{end}.Filename(end+(-16:-11)));
 tableCB(hs.table, struct('Indices', [1 1])); % show top series
+
+%% close subj
+function closeSubj(h, ~)
+hs = guidata(h);
+hs.table.Data = {};
+hs.img.CData = inf(2);
+hs.FD.YData = 0; hs.DV.YData = 0;
+hs.subj.UserData = '';
+hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}});
+set([hs.subj hs.series hs.instnc], 'String', '');
 
 %% Re-do current subj: useful in case of error during a session
 function redoSubj(h, ~)
 hs = guidata(h);
 subj = hs.subj.String;
 if isempty(subj), return; end
-if isempty(dir(['../incoming_DICOM/*' subj '.*']))
+if ~exist(hs.subj.UserData, 'dir')
     fprintf(2, 'Image for %s deleted?\n', subj);
     return;
 end
@@ -393,10 +407,18 @@ for iter = 1:64
     J = R * p.mm; % R_rst*J -> R0*ijk
     V = p.F(J(1,:), J(2,:), J(3,:));
     ind = ~isnan(V); % NaN means out of range
-    V = V(ind);
-    dV = p.V0(ind); % ref
-    dV = dV - V * (sum(dV)/sum(V)); % diff now, sign affects p6 sign
+    dV = p.V0(ind) - V(ind);
     mss = dV*dV' / numel(dV); % mean(dV.^2)
+    
+%     % watch mss change over iterations
+%     if iter==1
+%         figure(33); pause(1);
+%         hPlot = plot(nan(1,64), 'o-', 'MarkerFaceColor', 'r');
+%         set(gca, 'xtick', 1:64);
+%         xlabel('Iterations'); ylabel('mss');
+%     end
+%     try hPlot.YData(iter) = mss; drawnow; end %#ok
+
     if mss > mss0, break; end % give up and use previous R
     rst = R; % accecpt only if improving
     if 1-mss/mss0 < 1e-6, break; end % little effect, stop
@@ -445,9 +467,9 @@ out = F(I);
 
 %% new series or new subj: result saved as ./log/subj.mat
 % The subject folders (yyyymmdd.SubjName.SubjID) is under ../incoming_DICOM/
-% The dcm file names from Siemens push are allways in format of
-% 001_000001_000001.dcm. The first num is always 1, and second (series) and
-% third (instance) are always continuous.
+% The dcm file names from Siemens push are always in format of
+% 001_000001_000001.dcm. The first num is always 1 (StudyID?), and both second
+% (series) and third (instance) are always continuous.
 function [f, iRun] = next_series(hs)
 if ~isempty(hs.subj.UserData) % check new run for current subj
     f = hs.subj.UserData;
@@ -464,7 +486,7 @@ for i = numel(dirs):-1:1
     f = [rootDir dirs(i).name]; return;
 end
 
-if ispc || mod(now,1) > 1/1440; return; end % 1 min after mid-night?
+if ispc || mod(now,1) > hs.timer.StartDelay*2/86400; return; end % mid-night?
 for i = 1:numel(dirs)
     if now-dirs(i).datenum < 2, continue; end % keep data for 2 days
     try rmdir([rootDir dirs(i).name], 's');
@@ -485,7 +507,7 @@ end
 %% User closing GUI: stop and delete timer
 function closeFig(fh, ~)
 hs = guidata(fh);
-try stop(hs.timer); delete(hs.timer); catch, end
+try hs.timer.StopFcn = ''; stop(hs.timer); delete(hs.timer); catch, end
 delete(fh);
 
 %% menu callback for both DERIVED and _SBRef
@@ -515,17 +537,24 @@ hs = guidata(h);
 hdrs = hs.fig.UserData.hdr;
 if isempty(hdrs), return; end
 is3D = @(c)c.MRAcquisitionType=="3D" && ~contains(c.ImageType, 'DERIVED');
-ind = cellfun(is3D, hdrs);
-if ~any(ind), ind = cellfun(@(c)c.MRAcquisitionType=="3D", hdrs); end
-if ~any(ind), view_3D(h); return; end % no T1, just show in nii_viewer
-ind = find(ind, 1, 'last');
-nams = dir([hdrs{ind}.Filename(1:end-10) '*.dcm']);
+is3D = cellfun(is3D, hdrs);
+if ~any(is3D), is3D = cellfun(@(c)c.MRAcquisitionType=="3D", hdrs); end
+if sum(is3D)>1
+    isT1 = cellfun(@(c)contains(c.SequenceName, 'fl3d1'), hdrs);
+    isT1 = isT1 & is3D;
+    if any(isT1), is3D = isT1; end
+end
+if ~any(is3D), view_3D(h); return; end % no T1, just show in nii_viewer
+is3D = find(is3D, 1, 'last');
+nams = dir([hdrs{is3D}.Filename(1:end-10) '*.dcm']);
 nams = strcat(nams(1).folder, '/', {nams.name});
 T1w = dicm2nii(nams, ' ', 'no_save');
 nams = dir([hs.slider.UserData '*.dcm']);
 nams = strcat(nams(1).folder, '/', {nams.name});
 epi = dicm2nii(nams, ' ', 'no_save');
 nii_viewer(T1w, epi);
+fh = findall(0, 'type', 'figure', 'tag', 'nii_viewer');
+nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh(1));
 
 %% slider callback: show img if avail
 function sliderCB(h, ~)
@@ -538,8 +567,8 @@ if isempty(s), return; end
 hs.img.CData = dicm_img(s);
 hs.instnc.String = num2str(s.InstanceNumber);
 
-%% Save result, start timer with appropriate delay, even after error.
-function stopFunc(obj, ~)
+%% Timer StopFunc: Save result, start timer with delay, even after error.
+function saveResult(obj, ~)
 hs = guidata(obj.UserData);
 set([hs.menu hs.table hs.slider], 'Enable', 'on');
 if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
@@ -551,12 +580,7 @@ if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
     save(['./log/' hs.subj.String], 'T3');
 end
 
-[f, iRun] = next_series(hs);
-obj.StartDelay = 5; % secs to wait before checking new series/subj
-if ~isempty(f) && (~strcmp(f, hs.subj.UserData) || iRun>hs.series.UserData)
-    obj.StartDelay = 0.2; % start sooner if new series/subj avail
-end
-caller = dbstack; % start timer unless closing GUI
-if caller(end).name ~= "closeFig", start(obj); end
+if isempty(next_series(hs)), obj.StartDelay = 5; else, obj.StartDelay = 0.2; end
+start(obj);
 
 %%
