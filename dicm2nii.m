@@ -2149,11 +2149,7 @@ if strncmpi(s.Manufacturer, 'Philips', 7)
   try
     iLast = sprintf('Item_%g', s.NumberOfFrames);
     a = s.(pffgs).(iLast).PrivatePerFrameSq.Item_1.MRImageDynamicScanBeginTime;
-    if a>0
-        fprintf('%.6g\t\t', s.RepetitionTime)
-        s.RepetitionTime = a / (s.NumberOfDynamicScans-1) * 1000; % overwrite TR
-        fprintf('%.6g\n', s.RepetitionTime)
-    end
+    if a>0, s.RepetitionTime = a / (s.NumberOfDynamicScans-1) * 1000; end
   end
 end
 
