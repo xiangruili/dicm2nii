@@ -783,7 +783,6 @@ for i = 1:nRun
         % _session.tsv
         try
             tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-            das
             if verLessThanOctave
                 write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
             else
