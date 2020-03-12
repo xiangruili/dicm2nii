@@ -2958,20 +2958,23 @@ try
     set(ax,'BackgroundColor',[0 0 0])
     ax.DataAspectRatio = [s{min(end,round(nSL/2))}.PixelSpacing' 1];
     
-    infos = {'EchoTime','RepetitionTime','FlipAngle','MRAcquisitionType','Manufacturer','SeriesDescription'};
-    str = {};
-    for ii=1:length(infos)
-        if isfield(s{1},infos{ii})
-            if isnumeric(s{1}.(infos{ii})), frmt = '%s: %g';
-            else, frmt = '%s: %s';
+    try
+        infos = {'EchoTime','RepetitionTime','FlipAngle','MRAcquisitionType','Manufacturer','SeriesDescription'};
+        str = {};
+        for ii=1:length(infos)
+            if isfield(s{1},infos{ii})
+                if isnumeric(s{1}.(infos{ii})), frmt = '%s: %g';
+                else, frmt = '%s: %s';
+                end
+                str = [str {sprintf(frmt,infos{ii},s{1}.(infos{ii}))}];
             end
-            str = [str {sprintf(frmt,infos{ii},s{1}.(infos{ii}))}];
         end
+        str = [str {sprintf('%s: %g','Nslices',nSL)}];
+        str = [str {sprintf('%s: %g','Nvol',length(s)/nSL)}];
+        ha = text(ax,0,0,str,'FontSize',10,'Color',[1 1 1]);
+    catch err
+        warning(['CANNOT PREVIEW SCANNING INFOS: ' err.message])
     end
-    str = [str {sprintf('%s: %g','Nslices',nSL)}];
-    str = [str {sprintf('%s: %g','Nvol',length(s)/nSL)}];
-    ha = text(ax,0,0,str,'FontSize',10,'Color',[1 1 1]);
-    
 catch err
     warning(['CANNOT PREVIEW RUN: ' err.message])
 end
