@@ -783,13 +783,18 @@ for i = 1:nRun
         % _session.tsv
         try
             tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+            das
             if verLessThanOctave
                 write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
             else
                 write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
             end
-        catch 
+        catch ME
+            fprintf(1, '\n')
             warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+            errorMessage = sprintf('Error in function %s() at line %d.\nError Message: %s\n\n', ...
+                ME.stack(1).name, ME.stack(1).line, ME.message);
+            fprintf(1, '%s\n', errorMessage);
         end
         
         % participants.tsv
