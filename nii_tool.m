@@ -39,7 +39,7 @@ function varargout = nii_tool(cmd, varargin)
 % 
 %  oldVal = nii_tool('default', 'version', 2); % set version 2 as default
 %  % 'init' and 'save' NIfTI using above version
-%  nii_tool('default', oldVal); % restore default setting
+%  nii_tool('default', 'version', oldVal); % restore default setting
 % 
 % The default version setting affects 'init' command only. If you 'load' a NIfTI
 % file, modify it, and then 'save' it, the version will be the same as the
@@ -542,7 +542,7 @@ elseif strcmpi(cmd, 'cat3D')
     end
     
     n = numel(fnames);
-    if n<2 || ~iscellstr(fnames)
+    if n<2 || ~iscellstr(fnames) %#ok
         error('Invalid input for nii_tool(''cat3D''): %s', varargin{1});
     end
 
@@ -573,7 +573,7 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
     if nargin<2, error('nii_tool(''%s'') needs second input', cmd); end
     nii = varargin{1};
     if ~isstruct(nii) || ~isfield(nii, 'hdr') || ~isfield(nii, 'img') 
-        error(['nii_tool(''save'') needs a struct from nii_tool(''init'')' ...
+        error(['nii_tool(''update'') needs a struct from nii_tool(''init'')' ...
             ' or nii_tool(''load'') as the second input']);
     end
     
@@ -592,7 +592,7 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
             else, nii.img = single(nii.img);
             end
         else
-            error('Color dimension must have length of 3 for RGB and 4 for RGBA');
+            error('Color dimension must have length of 3 for RGB or 4 for RGBA');
         end
         
         dim(8) = []; % remove color-dim so numel(dim)=7 for nii.hdr
@@ -1215,6 +1215,6 @@ try
     if err, error('java.lang.ProcessBuilder error'); end
 catch % fallback to system() if java fails like for Octave
     cmd = regexprep(cmd, '.+? .+', '"$0"'); % double quotes if with middle space
-    [err, out] = system(sprintf('%s ', cmd{:}));
+    [err, out] = system(sprintf('%s ', cmd{:}, '2>&1'));
 end
 %%

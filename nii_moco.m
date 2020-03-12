@@ -64,12 +64,13 @@ end
 
 d = nii.hdr.dim(2:7); d(d<1 | d>32768 | mod(d,1)) = 1;
 nVol = prod(d(4:end));
+if ~isfield(nii.hdr, 'file_name'), nii.hdr.file_name = ''; end
 if nVol<2, error('Not multi-volume NIfTI: %s', nii.hdr.file_name); end
 d = d(1:3);
 Rm = nii_viewer('LocalFunc', 'nii_xform_mat', nii.hdr, 1); % moving img R
 
 sz = nii.hdr.pixdim(2:4);
-if all(abs(diff(sz)/sz(1)))<0.05 && sz(1)>2 && sz(1)<4 % 6~12mm
+if all(abs(diff(sz)/sz(1))<0.05) && sz(1)>2 && sz(1)<4 % 6~12mm
     sz = 3; % iso-voxel, 2~4mm res, simple fast smooth
 else
     sz = 9 ./ sz; % 9 mm seems good

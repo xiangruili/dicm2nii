@@ -321,9 +321,7 @@ else
         setpref('nii_viewer_para', fieldnames(pf), struct2cell(pf));
     end
     
-    set(0, 'ShowHiddenHandles', 'on');
-    a = handle(findobj('Type', 'figure', 'Tag', 'nii_viewer'));
-    set(0, 'ShowHiddenHandles', 'off');
+    a = handle(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer'));
     if isempty(a)
         fn = 'ni' * 256.^(1:2)'; % start with a big number for figure
     elseif numel(a) == 1
@@ -415,8 +413,9 @@ for i = 1:3
 end
 
 % Controls for each file
+h = hs.files.SelectionBackground; fClr = [h.getRed h.getGreen h.getBlue]/255;
 uipanel(ph, 'Units', 'pixels', 'Position', [1 4 412 33], ...
-    'BorderType', 'line', 'BorderWidth', 3, 'HighlightColor', [0 0.5 0.8]);
+    'BorderType', 'line', 'BorderWidth', 3, 'HighlightColor', fClr);
 hs.lb = java_spinner([7 10 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
 hs.ub = java_spinner([59 10 56 22], [p.ub -inf inf p.ub_step], ph, ...
@@ -460,7 +459,7 @@ for i = 1:3
     y = [c(j(2))+[0 0 -1 1]*hs.gap(j(2)); c(j(2))*[1 1] 0 dim(j(2))+1];
     hs.cross(i,:) = line(x, y);
 
-    hs.xyz(i) = text(hs.ax(i), 0.02, 0.96, num2str(xyz(i)), ...
+    hs.xyz(i) = text(0.02, 0.96, num2str(xyz(i)), 'Parent', hs.ax(i), ...
         'Units', 'normalized', 'FontSize', 12);
 end
 set(hs.hsI, 'ButtonDownFcn', cb('mousedown'));
@@ -632,9 +631,9 @@ set_cdata(hs);
 set_xyz(hs);
 
 if nargin>1
-    if ischar(varargin{1})
+    if ischar(varargin{1}) || isstruct(varargin{1})
         addOverlay(varargin{1}, fh);
-    elseif iscellstr(varargin{1})
+    elseif iscell(varargin{1})
         for i=1:numel(varargin{1}), addOverlay(varargin{1}{i}, fh); end
     end
 end
@@ -1401,10 +1400,9 @@ for i = 1:hs.files.getModel.size
         img(:,:,:,2) = p.phase(:,:,:,t);
     end
     
-    dim4 = size(img,4);
+    dim4 = size(img, 4);
     for ix = iaxis
-        ind = get(hs.ijk(ix), 'Value'); % faster than hs.ijk(ix).getValue
-        ind = round(ind);
+        ind = round(hs.ijk(ix).Value);
         if ind<1 || ind>hs.dim(ix), continue; end
         ii = {':' ':' ':'};
         io = ii;
@@ -1856,7 +1854,7 @@ im = img(ind);
 mu = mean(im);
 sd = std(im);
 rg = mu + [-2 2]*sd;
-if rg(1)<=0 && mu-sd>0, rg(1) = sd/5; end
+if rg(1)<=0, rg(1) = sd/5; end
 if rg(1)<mi || isnan(rg(1)), rg(1) = mi; end
 if rg(2)>ma || isnan(rg(2)), rg(2) = ma; end
 if rg(1)==rg(2), rg(1) = mi; if rg(1)==rg(2), rg(1) = 0; end; end
@@ -3228,12 +3226,11 @@ if isempty(fh) || ~ishandle(fh) % create surface figure
     if ispc || ismac
         uimenu(cMenu, 'Label', 'Copy figure', 'Callback', {@nii_viewer_cb 'copy' hsN.fig});
     end
-    set(fh, 'UIContextMenu', cMenu);
     
     r = 0.96; % width of two columns, remaining for colorbar
     pos = [0 1 r 1; 0 0 r 1; r 1 r 1; r 0 r 1] / 2;
     gii = cii2nii(); % get buffered Anatomical gii
-    hs.frame = uipanel(fh, 'Position', [0 0 1 1], 'BackgroundColor', 'k');
+    hs.frame = uipanel(fh, 'Position', [0 0 1 1], 'BackgroundColor', 'k', 'UIContextMenu', cMenu);
     for ig = 1:2
         v = gii.Vertices{ig};
         lim = [min(v)' max(v)'];
@@ -3462,36 +3459,35 @@ function [nii, perm, flp] = nii_reorient(nii, leftHand)
 dim = nii.hdr.dim(2:4);
 pixdim = nii.hdr.pixdim(2:4);
 [R, perm, flp] = reorient(R, dim, leftHand);
+fps = bitand(nii.hdr.dim_info, [3 12 48]) ./ [1 4 16];
 if ~isequal(perm, 1:3)
     nii.hdr.dim(2:4) = dim(perm);
     nii.hdr.pixdim(2:4) = pixdim(perm);
-    fps = bitand(nii.hdr.dim_info, [3 12 48]) ./ [1 4 16];
     nii.hdr.dim_info = [1 4 16] * fps(perm)' + bitand(nii.hdr.dim_info, 192);
     nii.img = permute(nii.img, [perm 4:8]);
 end
 sc = nii.hdr.slice_code;
-if sc>0 && perm(3)~=3 && flp(perm==3)
+if sc>0 && flp(fps==3)
     nii.hdr.slice_code = sc+mod(sc,2)*2-1; % 1<->2, 3<->4, 5<->6
 end
-if ~isequal(perm, 1:3) || any(flp)
-    if frm(1) == nii.hdr.sform_code % only update matching form
-        nii.hdr.srow_x = R(1,:);
-        nii.hdr.srow_y = R(2,:);
-        nii.hdr.srow_z = R(3,:);
-    end
-    if frm(1) == nii.hdr.qform_code
-        nii.hdr.qoffset_x = R(1,4);
-        nii.hdr.qoffset_y = R(2,4);
-        nii.hdr.qoffset_z = R(3,4);
-        R0 = normc(R(1:3, 1:3));
-        dcm2quat = dicm2nii('', 'dcm2quat', 'func_handle');
-        [q, nii.hdr.pixdim(1)] = dcm2quat(R0);
-        nii.hdr.quatern_b = q(2);
-        nii.hdr.quatern_c = q(3);
-        nii.hdr.quatern_d = q(4);
-    end
+if isequal(perm, 1:3) && ~any(flp), return; end
+if frm(1) == nii.hdr.sform_code % only update matching form
+    nii.hdr.srow_x = R(1,:);
+    nii.hdr.srow_y = R(2,:);
+    nii.hdr.srow_z = R(3,:);
 end
-for i = 1:3, if flp(i), nii.img = flip(nii.img, i); end; end
+if frm(1) == nii.hdr.qform_code
+    nii.hdr.qoffset_x = R(1,4);
+    nii.hdr.qoffset_y = R(2,4);
+    nii.hdr.qoffset_z = R(3,4);
+    R0 = normc(R(1:3, 1:3));
+    dcm2quat = dicm2nii('', 'dcm2quat', 'func_handle');
+    [q, nii.hdr.pixdim(1)] = dcm2quat(R0);
+    nii.hdr.quatern_b = q(2);
+    nii.hdr.quatern_c = q(3);
+    nii.hdr.quatern_d = q(4);
+end
+for i = find(flp), nii.img = flip(nii.img, i); end
 
 %% flip slice dir for nii hdr
 % function hdr = flip_slices(hdr)

@@ -17,17 +17,18 @@ function dict = dicm_dict(vendor, flds)
 % 141021 Store requested fields, so set dict when switching vendors.
 % 141024 Use LocationsInAcquisition as nSL for all vendors.
 % 141030 Make ScanningSequence & SequenceVariant consistent for vendors.
-% 150114 Add two more CSA header duplicate tags, and more command tags.
 % 160411 dict contains group and element.
 % 171211 Add Siemens grp 0021 and more.
 % 180514 Guess more Siemens grp 0021 tags, correct BandwidthPerPixelPhaseEncode.
 % 180914 Add vendor UIH.
+% 200117 Use table: vendor/fields go to Properties.UserData for struct.
 
 if nargin<1, vendor = 'SIEMENS'; end
-dict.vendor = vendor;
 % Shortened items common across vendors from Matlab dicom-dict.txt
 %    group element vr  name
-C = {   
+% Since Matlab 2019b, we could do {0x0002 0x0010 'UI' 'TransferSyntaxUID'}
+C = {
+    '0002' '0000' 'UL' 'FileMetaInformationGroupLength'
     '0002' '0001' 'OB' 'FileMetaInformationVersion'
     '0002' '0002' 'UI' 'MediaStorageSOPClassUID'
     '0002' '0003' 'UI' 'MediaStorageSOPInstanceUID'
@@ -152,6 +153,7 @@ C = {
     '0018' '1050' 'DS' 'SpatialResolution'
     '0018' '1060' 'DS' 'TriggerTime'
     '0018' '1063' 'DS' 'FrameTime'
+    '0018' '1080' 'CS' 'BeatRejectionFlag'
     '0018' '1088' 'IS' 'HeartRate'
     '0018' '1090' 'IS' 'CardiacNumberOfImages'
     '0018' '1094' 'IS' 'TriggerWindow'
@@ -263,6 +265,7 @@ C = {
     '0018' '9104' 'FD' 'SlabThickness'
     '0018' '9105' 'FD' 'SlabOrientation'
     '0018' '9106' 'FD' 'MidSlabPosition'
+    '0018' '9107' 'SQ' 'MRSpatialSaturationSequence'
     '0018' '9112' 'SQ' 'MRTimingAndRelatedParametersSequence'
     '0018' '9114' 'SQ' 'MREchoSequence'
     '0018' '9115' 'SQ' 'MRModifierSequence'
@@ -431,6 +434,7 @@ C = {
     '0040' '0275' 'SQ' 'RequestAttributesSequence'
     '0040' '0280' 'ST' 'CommentsOnPerformedProcedureStep'
     '0040' '0321' 'SQ' 'FilmConsumptionSequence'
+    '0040' '0555' 'SQ' 'AcquisitionContextSequence'
     '0040' '08EA' 'SQ' 'MeasurementUnitsCodeSequence'
     '0040' '1001' 'SH' 'RequestedProcedureID'
     '0040' '1400' 'LT' 'RequestedProcedureComments'
@@ -452,13 +456,6 @@ C = {
     '0050' '0018' 'DS' 'DeviceVolume'
     '0050' '0019' 'DS' 'InterMarkerDistance'
     '0050' '0020' 'LO' 'DeviceDescription'
-    '0088' '0140' 'UI' 'StorageMediaFileSetUID'
-    '0088' '0200' 'SQ' 'IconImageSequence'
-    '0400' '0550' 'SQ' 'ModifiedAttributesSequence'
-    '0400' '0561' 'SQ' 'OriginalAttributesSequence'
-    '0400' '0562' 'DT' 'AttributeModificationDatetime'
-    '0400' '0563' 'LO' 'ModifyingSystem'
-    '0400' '0565' 'CS' 'ReasonForTheAttributeModification'
     '0054' '0016' 'SQ' 'RadiopharmaceuticalInformationSequence'
     '0054' '0081' 'US' 'LocationsInAcquisition' % 'NumberOfSlices'
     '0054' '0101' 'US' 'NumberOfTemporalPositions' % 'NumberOfTimeSlices'
@@ -486,6 +483,13 @@ C = {
     '0070' '0100' 'CS' 'PresentationSizeMode'
     '0070' '0101' 'DS' 'PresentationPixelSpacing'
     '0070' '0102' 'IS' 'PresentationPixelAspectRatio'
+    '0088' '0140' 'UI' 'StorageMediaFileSetUID'
+    '0088' '0200' 'SQ' 'IconImageSequence'
+    '0400' '0550' 'SQ' 'ModifiedAttributesSequence'
+    '0400' '0561' 'SQ' 'OriginalAttributesSequence'
+    '0400' '0562' 'DT' 'AttributeModificationDatetime'
+    '0400' '0563' 'LO' 'ModifyingSystem'
+    '0400' '0565' 'CS' 'ReasonForTheAttributeModification'
     '2050' '0020' 'CS' 'PresentationLUTShape'
     '5200' '9229' 'SQ' 'SharedFunctionalGroupsSequence'
     '5200' '9230' 'SQ' 'PerFrameFunctionalGroupsSequence'
@@ -534,7 +538,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 % 	'0021' '1016' 'DS' 'Private_0021_1016' % 0 
 % 	'0021' '1017' 'DS' 'Private_0021_1017' % 0 
 	'0021' '1018' 'SH' 'RFSWDMostCriticalAspect' % Head ?
-	'0021' '1019' 'CS' 'MrPhoenixProtocol'
+	'0021' '1019' 'UT' 'MrPhoenixProtocol' % OB changed to UT to force char
 % 	'0021' '101B' 'DS' 'Private_0021_101b' % 1 
 	'0021' '101C' 'DS' 'Stim_max_online' % 17.0793 2.73105 1.00829 ?
 % 	'0021' '101D' 'IS' 'Private_0021_101d' % 0 
@@ -625,7 +629,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
     '0051' '100B' 'LO' 'AcquisitionMatrixText'
     '0051' '100C' 'LO' 'FieldOfView'
     '0051' '100D' 'SH' 'SlicePositionText'
-    '0051' '100E' 'LO' 'ImageOrientation'
+    '0051' '100E' 'LO' 'ImageOrientationText'
     '0051' '100F' 'LO' 'CoilString'
     '0051' '1011' 'LO' 'ImaPATModeText'
     '0051' '1012' 'SH' 'TablePositionText'
@@ -1276,28 +1280,23 @@ elseif strncmpi(vendor, 'UIH', 3)
 %     C = [C; {}];
 end
 
-dict.group = uint16(hex2dec(C(:,1)));
-dict.element = uint16(hex2dec(C(:,2)));
-dict.tag = uint32(dict.group) * 65536 + uint32(dict.element);
-dict.vr = C(:,3); % for implicit VR and some problematic explicit VR
-dict.name = C(:,4);
+partial = nargin>1 && ~isempty(flds); % use only provided fields
+if partial, C = C(ismember(C(:,4), flds), :); end
+grp = hex2dec(C(:,1));
+elt = hex2dec(C(:,2));
 
-if nargin>1 && ~isempty(flds) % use only provided fields
-    if ischar(flds), flds = cellstr(flds); end
-    ind = false(size(dict.tag,1), 1);
-    for i = 1:numel(flds)
-        ind = ind | strcmp(flds{i}, dict.name); % include duplicate
-    end
-    dict.fields = flds; % remember the requested fields
-    dict.tag  = dict.tag(ind);
-    dict.vr   = dict.vr(ind);
-    dict.name = dict.name(ind);
-    dict.group = dict.group(ind);
-    dict.element = dict.element(ind);
-end
+% try % table indexing seems slower: use struct for now
+%     dict = table(uint16(grp), uint16(elt), uint32(grp*2^16+elt), C(:,3), C(:,4));
+%     dict.Properties.VariableNames = {'group' 'element' 'tag' 'vr' 'name'};
+%     [~, ind] = unique(dict.tag); % sort by tag
+%     dict = dict(ind,:);
+% catch % Matalb 2013a-, Octave
+    dict = struct('group', uint16(grp), 'element', uint16(elt), ...
+        'tag', uint32(grp*65536+elt), 'vr', {C(:,3)}, 'name', {C(:,4)});
+    [dict.tag, ind] = unique(dict.tag); % sort by tag
+    dict.group = dict.group(ind); dict.element = dict.element(ind);
+    dict.vr = dict.vr(ind); dict.name = dict.name(ind);
+% end
 
-[dict.tag, ind] = unique(dict.tag); % sort by tag
-dict.vr = dict.vr(ind);
-dict.name = dict.name(ind);
-dict.group = dict.group(ind);
-dict.element = dict.element(ind);
+dict.Properties.UserData.vendor = vendor;
+if partial, dict.Properties.UserData.fields = flds; end % remember fields
