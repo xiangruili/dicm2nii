@@ -1276,6 +1276,10 @@ elseif strncmpi(vendor, 'UIH', 3)
     '0065' '1039' 'SH' 'MRGradRange'
     '0065' '1050' 'DS' 'LocationsInAcquisition' % MRNumberOfSliceInVolume
     '0065' '1051' 'SQ' 'MRVFrameSequence'}];
+elseif strncmpi(vendor, 'CANON', 5) % CANON_MEC
+    C = [C; {
+    '700D' '1005' 'DS' 'FOV'
+    '700D' '100C' 'CS' 'CorrectionCheckFlag'}];
 % elseif strncmpi(vendor, 'OtherVendor', n)
 %     C = [C; {}];
 end
