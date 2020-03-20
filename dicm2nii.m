@@ -1432,7 +1432,7 @@ s = h{1};
 ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
 % With this method, the code will get correct ref if bvec ref scheme changes 
 % some day, e.g. if GE saves (0018,9089) in the future.
-% ref = 0: IMG, UIH for now;
+% ref = 0: IMG, UIH and CANON (ImageComments) for now;
 % ref = 1: PCS, Siemens/Philips or unknown vendor, this is default
 % ref = 2: FPS, Bruker for now (need to verify)
 % ref = 3: FPS_GE, confusing signs
@@ -1486,7 +1486,7 @@ elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
 elseif nFile>1 % multiple files: order already in slices then volumes
     dict = dicm_dict(s.Manufacturer, {'B_value' 'B_factor' 'SlopInt_6_9' ...
        'DiffusionDirectionX' 'DiffusionDirectionY' 'DiffusionDirectionZ' ...
-       'MRDiffusionGradOrientation'});
+       'MRDiffusionGradOrientation' 'ImageComments'});
     iDir = (0:nDir-1) * nFile/nDir + 1; % could be mosaic or multiframe
     for j = 1:nDir % no bval/bvec for B0 volume
         s2 = h{iDir(j)};
@@ -1507,6 +1507,10 @@ elseif nFile>1 % multiple files: order already in slices then volumes
         if isempty(vec)
             vec = tryGetField(s2, 'MRDiffusionGradOrientation');
             if ref==1 && ~isempty(vec), ref = 0; end % UIH
+        end
+        if isempty(vec) % CANON
+            vec = sscanf(tryGetField(s2, 'ImageComments', ''), 'b=%*g(%g,%g,%g)');
+            if ref==1 && ~isempty(vec), ref = 0; end
         end
         if isempty(vec) % GE, old Philips
             vec(1) = tryGetField(s2, 'DiffusionDirectionX', 0);
