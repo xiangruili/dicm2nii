@@ -183,7 +183,7 @@ if doXform
     nii.hdr.descrip = ['nii_moco.m: orig ' nii.hdr.file_name];
     
     F.Method = 'spline'; % much slower than linear
-    F.ExtrapolationMethod = 'nearest';
+    F.ExtrapolationMethod = 'none';
     I = ones([d 4], 'single');
     [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
     I = permute(I, [4 1 2 3]);
@@ -198,6 +198,7 @@ for i = 1:nVol
         J = p.R(:,:,i) * I; % R_rst \ (Rm * ijk)
         F.Values = nii.img(:,:,:,i);
         a = F(J(1,:), J(2,:), J(3,:));
+        a(isnan(a)) = 0; % 'none' ExtrapolationMethod gives nan
         nii.img(:,:,:,i) = reshape(a, d(1:3));
     end
     R = Rm * p.R(:,:,i); % inv(R_rst / Rref)
