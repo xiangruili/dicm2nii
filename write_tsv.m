@@ -29,7 +29,6 @@ if exist(tsvfile,'file') && ~isempty(T) % append to already existing tsvfile
     end
     
     for ii=1:2:length(varargin)
-        if isempty(varargin{ii+1}), varargin{ii+1} = 'N/A'; end
         if ismember(varargin{ii},T.Properties.VariableNames)
             
         else

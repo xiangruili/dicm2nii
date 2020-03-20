@@ -581,15 +581,27 @@ end
 
 %% Parse BIDS
 if bids
+    % Manage Multiple SUBJECT or SESSION
     if multiSubj
         fprintf(['Multiple subjects detected!!!!! Skipping...\n' ...
             'Please convert subjects one by one with BIDS options\n'])
         fprintf('%s\n',subj{:})
+        for isub = 1:length(subj)
+            fprintf('Converting subject one by one...  %s\n',subj{isub})
+            isublist = strcmp(subjs,subj{isub});
+            FileNames = cellfun(@(y) cellfun(@(x) x.Filename,y,'uni',0),h(isublist),'uni',0);
+            dicm2nii([FileNames{:}],niiFolder,'bids')
+        end
         return;
     end
     if numel(acq)>1
-        fprintf('Multiple acquitisition detected!!!!! Skipping...\nPlease convert sessions one by one with BIDS options\n')
-        fprintf('%s\n',acq{:})
+        fprintf('Multiple acquitisition detected!!!!! \n')
+        for iacq = 1:length(acq)
+            fprintf('Converting sessions one by one...  %s\n',acq{iacq})
+            iacqlist = strcmp(acqs(keep),acq{iacq});
+            FileNames = cellfun(@(y) cellfun(@(x) x.Filename,y,'uni',0),h(iacqlist),'uni',0);
+            dicm2nii([FileNames{:}],niiFolder,'bids')
+        end
         return;
     end
 
@@ -604,11 +616,13 @@ if bids
         Subject = {'01'};
     end
     Session                = {'01'};
-    if verLessThanOctave
-        AcquisitionDate        = [acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)];
-    else
+
+    try 
         AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
         AcquisitionDate.Format = 'yyyy-MM-dd';
+    catch % octave
+        AcquisitionDate        = acq{1};
+        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
     end
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
@@ -736,7 +750,7 @@ if bids
             ModalityTablePref.Type(match) = ModalityTableSavePref{imod,2};
             ModalityTablePref.Modality(match) = ModalityTableSavePref{imod,3};
         else % append new pref
-            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(end,:)];
+            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(imod,:)];
         end
     end
     setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref);
@@ -774,8 +788,12 @@ for i = 1:nRun
             else
                 write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
             end
-        catch 
+        catch ME
+            fprintf(1, '\n')
             warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+            errorMessage = sprintf('Error in function %s() at line %d.\nError Message: %s\n\n', ...
+                ME.stack(1).name, ME.stack(1).line, ME.message);
+            fprintf(1, '%s\n', errorMessage);
         end
         
         % participants.tsv
@@ -2940,7 +2958,26 @@ try
         imagesc(ax,img);
     end
     axis(ax,'off');
+    set(ax,'BackgroundColor',[0 0 0])
     ax.DataAspectRatio = [s{min(end,round(nSL/2))}.PixelSpacing' 1];
+    
+    try
+        infos = {'EchoTime','RepetitionTime','FlipAngle','MRAcquisitionType','Manufacturer','SeriesDescription'};
+        str = {};
+        for ii=1:length(infos)
+            if isfield(s{1},infos{ii})
+                if isnumeric(s{1}.(infos{ii})), frmt = '%s: %g';
+                else, frmt = '%s: %s';
+                end
+                str = [str {sprintf(frmt,infos{ii},s{1}.(infos{ii}))}];
+            end
+        end
+        str = [str {sprintf('%s: %g','Nslices',nSL)}];
+        str = [str {sprintf('%s: %g','Nvol',length(s)/nSL)}];
+        ha = text(ax,0,0,str,'FontSize',10,'Color',[1 1 1]);
+    catch err
+        warning(['CANNOT PREVIEW SCANNING INFOS: ' err.message])
+    end
 catch err
     warning(['CANNOT PREVIEW RUN: ' err.message])
 end
