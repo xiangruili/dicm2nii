@@ -15,8 +15,8 @@ function RT_moco()
 % 
 % Limitations of current version:
 %  1. Tested only for Siemens Prisma at CCBBI at OSU. 
-%  2. It requires later matlab (2017a is the earliest version tested).
-%  3. It is ideal for portrait display monitor setup.
+%  2. Requires later matlab (2017a is the earliest version tested).
+%  3. Ideal for portrait display monitor setup for nows.
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
@@ -78,8 +78,7 @@ yyaxis right; ylabel(hs.ax, 'Framewise Displacement (mm)');
 set(hs.ax, 'YTick', 0:0.4:1.2, 'YLim', [0 1.2]);
 
 txt = @(a)text(hs.ax, 'Units', 'normalized', 'Position', a, 'FontSize', 12, ...
-    'BackgroundColor', 'w', 'Interpreter', 'none', ...
-    'HorizontalAlignment', 'right', 'VerticalAlignment', 'top');
+    'BackgroundColor', 'w', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top');
 hs.pct(1) = txt([0.995 0.32]); hs.pct(2) = txt([0.995 0.65]);
 
 hs.fd = plot(hs.ax, 0, '.:', 'Visible', 'off');
@@ -127,9 +126,8 @@ hs.series.UserData = iRun; % needed for next_series()
 s = dicm_hdr_wait(sprintf('%s/001_%06.f_000001.dcm', f, iRun));
 if isempty(s), return; end % non-image dicom, skip series
 if iRun == 1 % first series: reset GUI
-    hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}});
+    closeSubj(hs.fig);
     hs.subj.String = strrep(s.PatientName, ' ', '_'); hs.subj.UserData = f;
-    hs.fd.YData = 0; hs.dv.YData = 0; hs.table.Data = {}; hs.img.CData = inf(2);
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
 end
 
@@ -144,16 +142,13 @@ catch % T1, T2, fieldmap etc: show info/img only
     if nSL==1, nSL = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
     iSL = ceil(nSL/2); % try middle slice for better view
     nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, iSL);
+    nIN = numel(dir([nam(1:end-9) '*.dcm']));
+    if nIN<nSL, pause(nSL/50); nIN = numel(dir([nam(1:end-9) '*.dcm'])); end
+    if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
+        nIN = nIN * asc_header(s, 'sSliceArray.lConc'); % 2D T2
+    end
     if ~exist(nam, 'file')
         iSL = 1; nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, iSL);
-    end
-    nIN = nSL;
-    if contains(s.ImageType, 'DERIVED') || (contains(s.ImageType, '\M\') && ...
-            isfield(s, 'SequenceName') && contains(s.SequenceName, 'fm2d'))
-        pause(1.1); nIN = numel(dir([nam(1:end-9) '*.dcm']));
-    end
-    if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
-        nIN = nIN * asc_header(s, 'sSliceArray.lConc');
     end
     init_series(hs, s, nIN);
     set_img(hs.img, dicm_img(nam));
@@ -162,11 +157,11 @@ catch % T1, T2, fieldmap etc: show info/img only
     return;
 end
 
-nIN = asc_header(s, 'lRepetitions') + 1;
-if endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
-if isempty(nIN), nIN = asc_header(s, 'sDiffusion.lDiffDirections') + 1; end
-if isempty(nIN), nIN = 1; end
 isDTI = contains(s.ImageType, '\DIFFUSION');
+if isDTI, nIN = asc_header(s, 'sDiffusion.lDiffDirections') + 1; % free-dir too
+else, nIN = asc_header(s, 'lRepetitions') + 1;
+end
+if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
 mos = dicm_img(s); s.PixelData = mos;
 img = mos2vol(mos, nSL);
 p = refVol(img, [s.PixelSpacing' s.SpacingBetweenSlices]);
@@ -214,8 +209,8 @@ for i = 2:nIN
     N = {numel(a) sum(a<dy(2)) sum(a<dy(3))};
     hs.table.Data(1,3:6) = [N mean(fd(~isnan(fd)))];
     for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', N{j+1}/N{1}*100); end
-    % drawnow; % show vol update for offline test
-    if iN>=nIN, break; end % ISSS alike
+    if iN>=nIN, return; end % ISSS alike
+    % drawnow; % update instance for offline test
 end
 
 %% Reshape mosaic into volume, remove padded zeros
@@ -313,7 +308,6 @@ set_img(hs.img, dicm_img(nam), CLim);
 function loadSubj(h, ~)
 [fname, pName] = uigetfile('./log/*.mat', 'Select a Subject to load');
 if isnumeric(fname), return; end
-[~, subj] = fileparts(fname);
 load([pName '/' fname], 'T3');
 hs = guidata(h);
 hs.fig.UserData = T3.Properties.UserData; 
@@ -326,9 +320,10 @@ for i = 1:N
     C(i,3:5) = {numel(a) sum(a<dy(2)) sum(a<dy(3))};
 end 
 hs.table.Data = C;
-hs.subj.String = subj;
-hs.subj.UserData = fileparts(hs.fig.UserData.hdr{1}.Filename);
-hs.series.UserData = str2double(hs.fig.UserData.hdr{end}.Filename(end+(-16:-11)));
+s = hs.fig.UserData.hdr{end};
+hs.subj.String = strrep(s.PatientName, ' ', '_');
+hs.subj.UserData = fileparts(s.Filename);
+hs.series.UserData = str2double(s.Filename(end+(-16:-11)));
 tableCB(hs.table, struct('Indices', [1 1])); % show top series
 
 %% close subj
@@ -336,10 +331,10 @@ function closeSubj(h, ~)
 hs = guidata(h);
 hs.table.Data = {};
 hs.img.CData = inf(2);
-hs.FD.YData = 0; hs.DV.YData = 0;
+hs.fd.YData = 0; hs.dv.YData = 0;
 hs.subj.UserData = '';
 hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}});
-set([hs.subj hs.series hs.instnc], 'String', '');
+set([hs.subj hs.series hs.instnc hs.pct], 'String', '');
 
 %% Re-do current subj: useful in case of error during a session
 function redoSubj(h, ~)
@@ -353,7 +348,7 @@ end
 try delete(['./log/' subj '*.mat']); catch, end
 hs.table.Data = {}; % quick visual sign
 
-%% Get reference vol info. From nii_moco.m
+%% Get reference vol info. Adapted from nii_moco.m
 function p = refVol(img, pixdim)
 d = size(img);
 p.R0 = diag([pixdim 1]); % no need for real xform_mat here
@@ -409,16 +404,6 @@ for iter = 1:64
     ind = ~isnan(V); % NaN means out of range
     dV = p.V0(ind) - V(ind);
     mss = dV*dV' / numel(dV); % mean(dV.^2)
-    
-%     % watch mss change over iterations
-%     if iter==1
-%         figure(33); pause(1);
-%         hPlot = plot(nan(1,64), 'o-', 'MarkerFaceColor', 'r');
-%         set(gca, 'xtick', 1:64);
-%         xlabel('Iterations'); ylabel('mss');
-%     end
-%     try hPlot.YData(iter) = mss; drawnow; end %#ok
-
     if mss > mss0, break; end % give up and use previous R
     rst = R; % accecpt only if improving
     if 1-mss/mss0 < 1e-6, break; end % little effect, stop
@@ -429,12 +414,8 @@ for iter = 1:64
     mss0 = mss;
 end
 
-% Compute trans and rot
 R = p.R0 * rst; % inv(R_rst / Rref)
-trans = -R(1:3, 4)';
-R = R ./ sqrt(sum(R.*R)); % to be safe
-rot = -[atan2(R(2,3), R(3,3)) asin(R(1,3)) atan2(R(1,2), R(1,1))];
-m6 = [trans rot];
+m6 = -[R(1:3, 4)' atan2(R(2,3), R(3,3)) asin(R(1,3)) atan2(R(1,2), R(1,1))];
 
 %% Translation (mm) and rotation (deg) to 4x4 R. Order: ZYXT
 function R = rigid_mat(p6)
