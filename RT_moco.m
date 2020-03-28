@@ -15,8 +15,7 @@ function RT_moco()
 % 
 % Limitations of current version:
 %  1. Tested only for Siemens Prisma at CCBBI at OSU. 
-%  2. Requires later matlab (2017a is the earliest version tested).
-%  3. Ideal for portrait display monitor setup for nows.
+%  2. Require later matlab (2017a is the earliest version tested).
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
@@ -32,9 +31,10 @@ end
 res = get(0, 'ScreenSize');
 fh = figure('mc'*[256 1]'); clf(fh);
 set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ... 
-	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', 'w', ...
-    'Name', 'Real Time Image Monitor.', 'Position', [2 60 1076 res(4)-120], ...
+	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', [1 1 1]*0.94, ...
+    'Name', 'Real Time Image Monitor ', ...
     'Tag', 'RT_moco', 'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}));
+try fh.WindowState = 'maximized'; catch, fh.Position = [60 1 res(3) res(4)-80]; end
 hs.fig = fh;
 
 h = uimenu(fh, 'Label', '&Patient');
@@ -56,12 +56,25 @@ uimenu(h, 'Label', 'Show FD plot', 'Callback', @toggleFD, 'Separator', 'on');
 h = uimenu(h, 'Label', '&FD Threshold');
 for i = [0.1:0.1:0.5 0.8 1 2], uimenu(h, 'Label', num2str(i), 'Callback', @FD_yLim); end
 
+panel = @(pos)uipanel(fh, 'Position', pos, 'BorderType', 'none');
+if res(3) < res(4) % Portrait
+    pa1 = panel([0 0.62 1 0.38]);
+    pa2 = panel([0 0 1 0.62]);
+    axPos = [0.05 0.01 0.65 0.99];
+    lbPos = [0.7 0.01 0.29 1]; subjPos = [0.85 0.98]; seriesPos = [0.85 0.02];
+else
+    pa1 = panel([0 0 0.38 1]);
+    pa2 = panel([0.38 0 0.62 1]);
+    axPos = [0.05 0.31 0.9 0.67];
+    lbPos = [0.05 0.01 0.9 0.3]; subjPos = [0.3 0.8]; seriesPos = [1 0.2];
+end
+
 dy = 0.12 * (0:3);
-hs.ax = axes(fh, 'Units', 'normalized', 'Position', [0.05 0.46 0.9 0.18], ...
+hs.ax = axes(pa2, 'Position', [0.07 0.6 0.86 0.35], ...
     'NextPlot', 'add', 'XLim', [0.5 300.5], 'UserData', dy, ...
     'TickDir', 'out', 'TickLength', 0.002*[1 1], 'ColorOrder', [0 0 1; 1 0 1]);
 xlabel(hs.ax, 'Instance Number');
-hs.slider = uicontrol(fh, 'Units', 'normalized', 'Position', [0.035 0.645 0.93 0.018], ...
+hs.slider = uicontrol(pa2, 'Units', 'normalized', 'Position', [0.05 0.96 0.9 0.03], ...
     'Style', 'slider', 'Value', 1, 'Min', 1, 'Max', 300, 'Callback', @sliderCB, ...
     'BackgroundColor', 0.5*[1 1 1], 'SliderStep', [1 1]./300);
 
@@ -78,26 +91,25 @@ yyaxis right; ylabel(hs.ax, 'Framewise Displacement (mm)');
 set(hs.ax, 'YTick', 0:0.4:1.2, 'YLim', [0 1.2]);
 
 txt = @(a)text(hs.ax, 'Units', 'normalized', 'Position', a, 'FontSize', 12, ...
-    'BackgroundColor', 'w', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top');
+    'BackgroundColor', [1 1 1]*0.94, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top');
 hs.pct(1) = txt([0.995 0.32]); hs.pct(2) = txt([0.995 0.65]);
 
 hs.fd = plot(hs.ax, 0, '.:', 'Visible', 'off');
 hs.ax.YAxis(2).Visible = 'off';
 vars = {'Description' 'Series' 'Instances' '<font color="#00cc00">Green</font>' ...
     '<font color="#cccc00">Yellow</font>' 'MeanFD'};
-hs.table = uitable(fh, 'Units', 'normalized', 'Position', [0.05 0.01 0.9 0.4], ...
+hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.52], ...
     'FontSize', 14, 'RowName', [], 'ColumnWidth', {370 100 130 100 100 120}, ...
     'ColumnName', strcat('<html><h2>', vars, '</h2></html>'), ...
     'CellSelectionCallback', @tableCB);
 
-ax = axes(fh, 'Units', 'normalized', 'Position', [0.7 0.67 0.29 0.33], 'Visible', 'off');
-hs.subj = text(ax, 'Position', [0.85 1], 'FontSize', 24, 'FontWeight', 'bold', ...
+ax = axes(pa1, 'Position', lbPos, 'Visible', 'off');
+hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Interpreter', 'none');
-hs.series = text(ax, 'Position', [0.85 0], 'FontSize', 18, 'FontWeight', 'bold', ...
+hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', 'Interpreter', 'none');
 
-ax = axes(fh, 'Units', 'normalized', 'Position', [0.05 0.67 0.65 0.33], ...
-    'YDir', 'reverse', 'Visible', 'off');
+ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off');
 hs.img = image(ax, 'CData', inf(2), 'CDataMapping', 'scaled');
 axis equal; colormap gray;
 hs.instnc = text(ax, 'Units', 'normalized', 'Position', [0.99 0.01], 'Color', 'y', ...
@@ -123,9 +135,9 @@ rob = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
 rob.keyPress(key); rob.keyRelease(key); % wake up screen
 
 hs.series.UserData = iRun; % needed for next_series()
-s = dicm_hdr_wait(sprintf('%s/001_%06.f_000001.dcm', f, iRun));
+s = dicm_hdr_wait(sprintf('%s/%03u_%06u_000001.dcm', f, iRun));
 if isempty(s), return; end % non-image dicom, skip series
-if iRun == 1 % first series: reset GUI
+if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
     hs.subj.String = strrep(s.PatientName, ' ', '_'); hs.subj.UserData = f;
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
@@ -141,14 +153,14 @@ catch % T1, T2, fieldmap etc: show info/img only
     nSL = asc_header(s, 'sSliceArray.lSize'); % 2D
     if nSL==1, nSL = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
     iSL = ceil(nSL/2); % try middle slice for better view
-    nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, iSL);
+    nam = sprintf('%s/%03u_%06u_%06u.dcm', f, iRun, iSL);
     nIN = numel(dir([nam(1:end-9) '*.dcm']));
     if nIN<nSL, pause(nSL/50); nIN = numel(dir([nam(1:end-9) '*.dcm'])); end
     if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
         nIN = nIN * asc_header(s, 'sSliceArray.lConc'); % 2D T2
     end
     if ~exist(nam, 'file')
-        iSL = 1; nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, iSL);
+        iSL = 1; nam = sprintf('%s/%03u_%06u_%06u.dcm', f, iRun, iSL);
     end
     init_series(hs, s, nIN);
     set_img(hs.img, dicm_img(nam));
@@ -180,10 +192,10 @@ R1 = inv(p.R0);
 m6 = zeros(2,6);
 hs.fd.YData(2:end) = nan; hs.dv.YData(2:end) = nan;
 
-nextSeries = sprintf('%s/001_%06.f_000001.dcm', f, iRun+1);
+nextSeries = sprintf('%s/%03u_%06u_000001.dcm', f, iRun+[0 1]);
 try dt = s.RepetitionTime/1000 + 6; catch, dt = 9; end % for stopped series
 for i = 2:nIN
-    nam = sprintf('%s/001_%06.f_%06.f.dcm', f, iRun, i);
+    nam = sprintf('%s/%03u_%06u_%06u.dcm', f, iRun, i);
     tEnd = now + dt/86400;
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
@@ -255,6 +267,7 @@ hImg.CData = img;
 function c = seriesInfo(s)
 c{1} = s.SeriesDescription;
 c{2} = sprintf('Series %g', s.SeriesNumber);
+if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
 c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
 try c{4} = sprintf('TR = %g', s.RepetitionTime); catch, end
 
@@ -449,18 +462,22 @@ out = F(I);
 %% new series or new subj: result saved as ./log/subj.mat
 % The subject folders (yyyymmdd.SubjName.SubjID) is under ../incoming_DICOM/
 % The dcm file names from Siemens push are always in format of
-% 001_000001_000001.dcm. The first num is always 1 (StudyID?), and both second
-% (series) and third (instance) are always continuous.
+% 001_000001_000001.dcm. The numbers always start at 1, and are continuous. First 
+% is study, second is series and third is instance.
 function [f, iRun] = next_series(hs)
 if ~isempty(hs.subj.UserData) % check new run for current subj
     f = hs.subj.UserData;
-    iRun = hs.series.UserData + 1;
-    if ~isempty(dir(sprintf('%s/001_%06.f_000001.dcm', f, iRun))), return; end
+    iRun = hs.series.UserData;
+    if ~isempty(dir(sprintf('%s/%03u_%06u_000001.dcm', f, iRun+[0 1])))
+        iRun(2) = iRun(2) + 1; return;
+    elseif ~isempty(dir(sprintf('%s/%03u_000001_000001.dcm', f, iRun(1)+1)))
+        iRun = [iRun(1)+1 1]; return;
+    end
 end
 rootDir = '../incoming_DICOM/';
 dirs = dir([rootDir '20*']); % check new subj
 dirs(~[dirs.isdir]) = [];
-f = ''; iRun = 1;
+f = ''; iRun = [1 1];
 for i = numel(dirs):-1:1
     subj = regexp(dirs(i).name, '(?<=20\d{6}\.).*?(?=\.)', 'match', 'once');
     if exist(['./log/' subj '.mat'], 'file'), continue; end
@@ -533,9 +550,8 @@ T1w = dicm2nii(nams, ' ', 'no_save');
 nams = dir([hs.slider.UserData '*.dcm']);
 nams = strcat(nams(1).folder, '/', {nams.name});
 epi = dicm2nii(nams, ' ', 'no_save');
-nii_viewer(T1w, epi);
-fh = findall(0, 'type', 'figure', 'tag', 'nii_viewer');
-nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh(1));
+fh = nii_viewer(T1w, epi);
+nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh);
 
 %% slider callback: show img if avail
 function sliderCB(h, ~)
