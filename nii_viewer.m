@@ -334,11 +334,12 @@ end
 [siz, axPos, figPos] = plot_pos(dim.*hs.pixdim, pf.layout);
 
 fh = figure(fn);
+if nargout, varargout{1} = fh; end
 hs.fig = handle(fh); % have to use numeric for uipanel for older matlab
 figNam = p.nii.hdr.file_name;
 if numel(figNam)>40, figNam = [figNam(1:40) '...']; end
 figNam = ['nii_viewer - ' figNam ' (' formcode2str(hs.form_code(1)) ')'];
-set(fh, 'Toolbar', 'none', 'Menubar', 'none', 'Renderer', 'opengl', ...
+set(fh, 'Toolbar', 'none', 'Menubar', 'none', ... % 'Renderer', 'opengl', ...
     'NumberTitle', 'off', 'Tag', 'nii_viewer', 'DockControls', 'off', ...
     'Position', [figPos siz+[2 66]], 'Name', figNam);
 cb = @(cmd) {@nii_viewer_cb cmd hs.fig}; % callback shortcut
@@ -414,8 +415,7 @@ end
 
 % Controls for each file
 h = hs.files.SelectionBackground; fClr = [h.getRed h.getGreen h.getBlue]/255;
-uipanel(ph, 'Units', 'pixels', 'Position', [1 4 412 33], ...
-    'BorderType', 'line', 'BorderWidth', 3, 'HighlightColor', fClr);
+uicontrol(ph, 'Style', 'frame', 'Position', [1 5 412 32], 'ForegroundColor', fClr);
 hs.lb = java_spinner([7 10 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
 hs.ub = java_spinner([59 10 56 22], [p.ub -inf inf p.ub_step], ph, ...
