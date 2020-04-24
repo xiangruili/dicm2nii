@@ -1,40 +1,26 @@
 function RT_moco()
 % Display and save motion information at real time. It also shows images and the
 % progress of EPI/DTI while scanning, and allows to check motion information for
-% previous runs/patients.
+% previous series/patients.
 %
 % To make this work, you will need:
 %  1. Set up shared folder for ../incoming_DICOM at the computer running RT_moco.
 %  2. Set up real time image transfer at Siemens console.
-% 
-% Here are some example command at Siemens console to set up real time transfer:
-%  net use Y: \\yourIP\yourPath\incoming_DICOM yourPassWd /USER:yourUserName
-%  xedit -f C:\MedCom\config\Ice\IceConfig.evp -n ICE.CONFIG.OnlineSendConfiguration -p OnlineTargetPort -v -1
-%  xedit -f C:\MedCom\config\Ice\IceConfig.evp -n ICE.CONFIG.OnlineSendConfiguration -p OnlineTargetPath -v Y:\
-%  xedit -f C:\MedCom\config\Ice\IceConfig.evp -n ICE.CONFIG.OnlineSendConfiguration -p OnlineSendIMA -v 1
-% 
-% Limitations of current version:
-%  1. Tested only for Siemens Prisma at CCBBI at OSU. 
-%  2. Require later matlab (2017a is the earliest version tested).
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
 if ~exist('./log/', 'dir'), mkdir('./log/'); end % folder to save subj.mat
 
-% Create/re-use GUI and start timer.
+% Create/re-use GUI and start timer
 fh = findall(0, 'Type', 'figure', 'Tag', 'RT_moco');
-if ~isempty(fh)
-    figure(fh); hs = guidata(fh);
-    if hs.timer.Running == "off", start(hs.timer); end % in case it stopped
-    return;
-end
+if ~isempty(fh), figure(fh); return; end
 res = get(0, 'ScreenSize');
 fh = figure('mc'*[256 1]'); clf(fh);
 set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ... 
 	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', [1 1 1]*0.94, ...
-    'Name', 'Real Time Image Monitor ', ...
-    'Tag', 'RT_moco', 'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}));
-try fh.WindowState = 'maximized'; catch, fh.Position = [60 1 res(3) res(4)-80]; end
+    'Name', 'Real Time Image Monitor ', 'Tag', 'RT_moco', 'Visible', 'off', ...
+    'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}));
+try fh.WindowState = 'maximized'; catch, fh.Position = [1 60 res(3) res(4)-80]; end
 hs.fig = fh;
 
 h = uimenu(fh, 'Label', '&Patient');
@@ -52,21 +38,29 @@ hs.SBRef = uimenu(h, 'Label', 'Skip *_SBRef Series', 'Callback', @toggleChecked,
 h = uimenu(fh, 'Label', '&View');
 uimenu(h, 'Label', 'Increase Brightness', 'Callback', @setCLim);
 uimenu(h, 'Label', 'Decrease Brightness', 'Callback', @setCLim);
+hDV = uimenu(h, 'Label', '&DVARS Threshold', 'Separator', 'on');
+for i = [0.01 0.02 0.05 0.1 0.12 0.15 0.2 0.4]
+    uimenu(hDV, 'Label', num2str(i), 'Callback', @DV_yLim);
+end
 uimenu(h, 'Label', 'Show FD plot', 'Callback', @toggleFD, 'Separator', 'on');
-h = uimenu(h, 'Label', '&FD Threshold');
-for i = [0.1:0.1:0.5 0.8 1 2], uimenu(h, 'Label', num2str(i), 'Callback', @FD_yLim); end
+hFD = uimenu(h, 'Label', '&FD Axis Range');
+for i = [0.18 0.3:0.3:1.5 2.4 3 6]
+    uimenu(hFD, 'Label', num2str(i), 'Callback', @FD_range)
+end
 
 panel = @(pos)uipanel(fh, 'Position', pos, 'BorderType', 'none');
 if res(3) < res(4) % Portrait
-    pa1 = panel([0 0.62 1 0.38]);
-    pa2 = panel([0 0 1 0.62]);
-    axPos = [0.05 0.01 0.65 0.99];
-    lbPos = [0.7 0.01 0.29 1]; subjPos = [0.85 0.98]; seriesPos = [0.85 0.02];
+    pa1 = panel([0 0.62 1 0.38]); % img and label
+    pa2 = panel([0 0 1 0.62]); % table and plot
+    axPos = [0.05 0.01 0.65 0.99]; % img axis
+    lbPos = [0.7 0.01 0.29 1]; % label axis
+    subjPos = [0.85 0.98]; seriesPos = [0.85 0.02]; ha = 'right';
 else
     pa1 = panel([0 0 0.38 1]);
     pa2 = panel([0.38 0 0.62 1]);
     axPos = [0.05 0.31 0.9 0.67];
-    lbPos = [0.05 0.01 0.9 0.3]; subjPos = [0.3 0.8]; seriesPos = [1 0.2];
+    lbPos = [0.05 0.01 0.9 0.3]; 
+    subjPos = [0 0.98]; seriesPos = [1 0.1]; ha = 'left';
 end
 
 dy = 0.12 * (0:3);
@@ -99,48 +93,66 @@ hs.ax.YAxis(2).Visible = 'off';
 vars = {'Description' 'Series' 'Instances' '<font color="#00cc00">Green</font>' ...
     '<font color="#cccc00">Yellow</font>' 'MeanFD'};
 hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.52], ...
-    'FontSize', 14, 'RowName', [], 'ColumnWidth', {370 100 130 100 100 120}, ...
-    'ColumnName', strcat('<html><h2>', vars, '</h2></html>'), ...
-    'CellSelectionCallback', @tableCB);
+    'FontSize', 14, 'RowName', [], 'CellSelectionCallback', @tableCB, ...
+    'ColumnName', strcat('<html><h2>', vars, '</h2></html>'));
 
 ax = axes(pa1, 'Position', lbPos, 'Visible', 'off');
 hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ...
-    'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Interpreter', 'none');
+    'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none');
 hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold', ...
-    'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', 'Interpreter', 'none');
+    'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
+    'Interpreter', 'none', 'UserData', [1 0]);
 
-ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off');
-hs.img = image(ax, 'CData', inf(2), 'CDataMapping', 'scaled');
+ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off', 'CLim', [0 1]);
+hs.img = image(ax, 'CData', ones(2)*0.94, 'CDataMapping', 'scaled');
 axis equal; colormap gray;
 hs.instnc = text(ax, 'Units', 'normalized', 'Position', [0.99 0.01], 'Color', 'y', ...
     'FontSize', 14, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom');
 
-hs.timer = timer('StartDelay', 0.2, 'ObjectVisibility', 'off', ...
+set(fh, 'HandleVisibility', 'callback', 'Visible', 'on'); % fh.Resize = 'off';
+drawnow; wt = getpixelposition(hs.table);
+w2 = [90 120 90 90 100]; hs.table.ColumnWidth = [wt(3)-sum(w2)-26 num2cell(w2)];
+
+hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', ...
     'StopFcn', @saveResult, 'TimerFcn', @doSeries, 'UserData', fh);
-fh.HandleVisibility = 'callback'; % fh.Resize = 'off'; 
 guidata(fh, hs);
 start(hs.timer);
 
 %% TimerFunc: do a series if avail, then call stopFunc to save result
 function doSeries(obj, ~)
 hs = guidata(obj.UserData);
-hs.fig.Name(end) = 78 - hs.fig.Name(end); % indication of timer call
-[f, iRun] = next_series(hs);
-if isempty(f), return; end
+hs.fig.Name(end) = 78 - hs.fig.Name(end); % dot/space switch: timer indicator
+if hs.timer.StartDelay > 1, return; end % no new series
 set(hs.menu, 'Enable', 'off'); set([hs.table hs.slider], 'Enable', 'inactive');
 
 asc_header = dicm2nii('', 'asc_header', 'func_handle');
 dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
-rob = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
-rob.keyPress(key); rob.keyRelease(key); % wake up screen
+bot = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
+bot.keyPress(key); bot.keyRelease(key); % wake up screen
 
-hs.series.UserData = iRun; % needed for next_series()
-s = dicm_hdr_wait(sprintf('%s/%03u_%06u_000001.dcm', f, iRun));
+iRun = hs.series.UserData;
+nextSeries = sprintf('%s/%03u_%06u_000001.dcm', hs.subj.UserData, iRun+[0 1]);
+f = sprintf('%s/%03u_%06u_', hs.subj.UserData, iRun);
+s = dicm_hdr_wait([f '000001.dcm']);
 if isempty(s), return; end % non-image dicom, skip series
 if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
-    hs.subj.String = strrep(s.PatientName, ' ', '_'); hs.subj.UserData = f;
+    hs.subj.String = strrep(s.PatientName, ' ', '_');
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
+    close(findall(0, 'Type', 'figure', 'Tag', 'physiorec'));
+    if isfield(s, 'ImageComments') && contains(s.ImageComments, 'physio') ...
+            && ~exist(nextSeries, 'file')
+        fname = ['../incoming_DICOM/physio_' s.PatientName];
+        if exist(fname, 'file')
+            delete(fname);
+        else
+            fh = figure('Position', [100 300 800 120], 'Tag', 'physiorec', ...
+                'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
+            h = uicontrol(fh, 'Style', 'text', 'Position',[5 10 790 100], ...
+                'String', 'Start Physio Recording!', 'FontSize', 48);
+            for i=1:12, pause(1); h.ForegroundColor = 1 - h.ForegroundColor; end
+        end
+    end
 end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
@@ -153,14 +165,14 @@ catch % T1, T2, fieldmap etc: show info/img only
     nSL = asc_header(s, 'sSliceArray.lSize'); % 2D
     if nSL==1, nSL = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
     iSL = ceil(nSL/2); % try middle slice for better view
-    nam = sprintf('%s/%03u_%06u_%06u.dcm', f, iRun, iSL);
+    nam = sprintf('%s%06u.dcm', f, iSL);
     nIN = numel(dir([nam(1:end-9) '*.dcm']));
     if nIN<nSL, pause(nSL/50); nIN = numel(dir([nam(1:end-9) '*.dcm'])); end
     if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
         nIN = nIN * asc_header(s, 'sSliceArray.lConc'); % 2D T2
     end
     if ~exist(nam, 'file')
-        iSL = 1; nam = sprintf('%s/%03u_%06u_%06u.dcm', f, iRun, iSL);
+        iSL = 1; nam = sprintf('%s%06u.dcm', f, iSL);
     end
     init_series(hs, s, nIN);
     set_img(hs.img, dicm_img(nam));
@@ -192,10 +204,9 @@ R1 = inv(p.R0);
 m6 = zeros(2,6);
 hs.fd.YData(2:end) = nan; hs.dv.YData(2:end) = nan;
 
-nextSeries = sprintf('%s/%03u_%06u_000001.dcm', f, iRun+[0 1]);
 try dt = s.RepetitionTime/1000 + 6; catch, dt = 9; end % for stopped series
 for i = 2:nIN
-    nam = sprintf('%s/%03u_%06u_%06u.dcm', f, iRun, i);
+    nam = sprintf('%s%06u.dcm', f, i);
     tEnd = now + dt/86400;
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
@@ -282,11 +293,26 @@ else
     h.Label = 'Hide FD plot';
 end
 
-%% Set FD plat y-axis limit
-function FD_yLim(h, ~)
+%% Set FD plot y-axis limit
+function FD_range(h, ~)
+hs = guidata(h);
+dy = str2double(h.Label) * (0:3) / 3;
+yyaxis(hs.ax, 'right'); set(hs.ax, 'YTick', dy, 'YLim', dy([1 4]));
+
+%% Set DVARS plot y-axis limit, and update table
+function DV_yLim(h, ~)
 hs = guidata(h);
 dy = str2double(h.Label) * (0:3);
-yyaxis(hs.ax, 'right'); set(hs.ax, 'YTick', dy, 'YLim', dy([1 4]));
+hs.ax.UserData = dy;
+for i = 1:numel(hs.fig.UserData.DV)
+    a = hs.fig.UserData.DV{i}; a = a(~isnan(a));
+    hs.table.Data(end-i+1, 4:5) = {sum(a<dy(2)) sum(a<dy(3))};
+end
+yyaxis(hs.ax, 'left'); set(hs.ax, 'YTick', dy, 'YLim', dy([1 4]));
+rect = findobj(hs.ax, 'type', 'Rectangle');
+for i = 1:3, rect(i).Position([2 4]) = dy([i 2]); end
+DV = hs.dv.YData; a = DV(~isnan(DV));
+for i = 1:2, hs.pct(i).String = sprintf('%.3g%%', sum(a<dy(i+1))/numel(a)*100); end
 
 %% Table-click callback: show moco/series info and image if avail
 function tableCB(h, evt)
@@ -315,11 +341,12 @@ end
 hs.ax.XLim(2) = numel(hs.dv.YData) + 0.5;
 hs.series.String = seriesInfo(s);
 try CLim = s.CLim; catch, CLim = []; end
-set_img(hs.img, dicm_img(nam), CLim);
+try img = dicm_img(nam); catch, img = ones(2)*0.94; end
+set_img(hs.img, img, CLim);
 
 %% Load subj data to review
 function loadSubj(h, ~)
-[fname, pName] = uigetfile('./log/*.mat', 'Select a Subject to load');
+[fname, pName] = uigetfile('./log/*.mat', 'Select MAT file for a Patient');
 if isnumeric(fname), return; end
 load([pName '/' fname], 'T3');
 hs = guidata(h);
@@ -335,17 +362,16 @@ end
 hs.table.Data = C;
 s = hs.fig.UserData.hdr{end};
 hs.subj.String = strrep(s.PatientName, ' ', '_');
-hs.subj.UserData = fileparts(s.Filename);
-hs.series.UserData = str2double(s.Filename(end+(-16:-11)));
+[hs.subj.UserData, nam] = fileparts(s.Filename);
+hs.series.UserData = sscanf(nam, '%u_%u', 1:2);
 tableCB(hs.table, struct('Indices', [1 1])); % show top series
 
 %% close subj
 function closeSubj(h, ~)
 hs = guidata(h);
 hs.table.Data = {};
-hs.img.CData = inf(2);
+hs.img.CData = ones(2)*0.94;
 hs.fd.YData = 0; hs.dv.YData = 0;
-hs.subj.UserData = '';
 hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}});
 set([hs.subj hs.series hs.instnc hs.pct], 'String', '');
 
@@ -460,31 +486,33 @@ F = griddedInterpolant(J, out, intp);
 out = F(I);
 
 %% new series or new subj: result saved as ./log/subj.mat
-% The subject folders (yyyymmdd.SubjName.SubjID) is under ../incoming_DICOM/
+% The subj folders (yyyymmdd.PatientName.PatientID) are under ../incoming_DICOM/
 % The dcm file names from Siemens push are always in format of
-% 001_000001_000001.dcm. The numbers always start at 1, and are continuous. First 
-% is study, second is series and third is instance.
-function [f, iRun] = next_series(hs)
-if ~isempty(hs.subj.UserData) % check new run for current subj
-    f = hs.subj.UserData;
-    iRun = hs.series.UserData;
-    if ~isempty(dir(sprintf('%s/%03u_%06u_000001.dcm', f, iRun+[0 1])))
-        iRun(2) = iRun(2) + 1; return;
-    elseif ~isempty(dir(sprintf('%s/%03u_000001_000001.dcm', f, iRun(1)+1)))
-        iRun = [iRun(1)+1 1]; return;
+% 001_000001_000001.dcm. All three numbers always start at 1, and are continuous.
+% First is study, second is series and third is instance.
+function new = new_series(hs)
+f = hs.subj.UserData;
+if ~isempty(f) % check new run for current subj
+    iR = hs.series.UserData;
+    if ~isempty(dir(sprintf('%s/%03u_%06u_000001.dcm', f, iR+[0 1])))
+        hs.series.UserData(2) = iR(2) + 1; new = true; return;
+    elseif ~isempty(dir(sprintf('%s/%03u_000001_000001.dcm', f, iR(1)+1)))
+        hs.series.UserData = [iR(1)+1 1];  new = true; return;
     end
 end
 rootDir = '../incoming_DICOM/';
 dirs = dir([rootDir '20*']); % check new subj
 dirs(~[dirs.isdir]) = [];
-f = ''; iRun = [1 1];
+new = false;
 for i = numel(dirs):-1:1
     subj = regexp(dirs(i).name, '(?<=20\d{6}\.).*?(?=\.)', 'match', 'once');
     if exist(['./log/' subj '.mat'], 'file'), continue; end
-    f = [rootDir dirs(i).name]; return;
+    hs.subj.UserData = [rootDir dirs(i).name]; 
+    hs.series.UserData = [1 1]; new = true; return;
 end
 
-if ispc || mod(now,1) > hs.timer.StartDelay*2/86400; return; end % mid-night?
+% Delete old subj folder after mid-night
+if ~exist([rootDir 'host.txt'], 'file') || mod(now,1) > 10/86400; return; end
 for i = 1:numel(dirs)
     if now-dirs(i).datenum < 2, continue; end % keep data for 2 days
     try rmdir([rootDir dirs(i).name], 's');
@@ -559,10 +587,27 @@ hs = guidata(h);
 if isempty(h.UserData), return; end
 dict = dicm_dict('', {'SamplesPerPixel' 'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
 h.Value = round(h.Value);
-s = dicm_hdr(sprintf('%s%06.f.dcm', h.UserData, h.Value), dict);
+s = dicm_hdr(sprintf('%s%06u.dcm', h.UserData, h.Value), dict);
 if isempty(s), return; end
 hs.img.CData = dicm_img(s);
 hs.instnc.String = num2str(s.InstanceNumber);
+
+% %% Java robot click cell(1,1) of uitable
+% function uitable_cell(hs)
+% % uitable has no way to programmatially select a cell till R2020a
+% res = get(0, 'ScreenSize');
+% figure(hs.fig); drawnow;
+% posF = getpixelposition(hs.fig);
+% posT = getpixelposition(hs.table, true);
+% % ugly solution for now: title and height for FontSize=14 from findjobj
+% if ispc, ht = [49 27]; elseif ismac, ht = [46 20]; else, ht = [46 24]; end 
+% dY = ht(1) + ht(2)*(1-0.5); % 1 for first row
+% xy = posF(1:2) + posT(1:2) + [hs.table.ColumnWidth{1}/2 posT(4)-dY]; 
+% bot = java.awt.Robot();
+% mousexy = get(0, 'PointerLocation'); % for later restore
+% bot.mouseMove(xy(1), res(4)-xy(2));
+% bot.mousePress(16); bot.mouseRelease(16);
+% set(0, 'PointerLocation', mousexy); % restore mouse location
 
 %% Timer StopFunc: Save result, start timer with delay, even after error.
 function saveResult(obj, ~)
@@ -576,8 +621,7 @@ if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
     T3.Properties.UserData = hs.fig.UserData;
     save(['./log/' hs.subj.String], 'T3');
 end
-
-if isempty(next_series(hs)), obj.StartDelay = 5; else, obj.StartDelay = 0.2; end
+if new_series(hs), obj.StartDelay = 0.1; else, obj.StartDelay = 5; end
 start(obj);
 
 %%
