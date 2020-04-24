@@ -713,7 +713,7 @@ switch cmd
         if isempty(hs), return; end        
         htP = hs.panel.Position(4); % get old height in pixels
         posF = getpixelposition(fh); % asked size by user
-        hs.panel.Position(2:3) = posF([4 3]) - [htP 1]; % control panel
+        hs.panel.Position(2:3) = posF([4 3]) - [htP 2]; % control panel
         hs.frame.Position(3:4) = posF(3:4) - [2 htP]; % image panel
         nii_viewer_cb([], [], 'width', fh);
     case 'toggle' % turn on/off NIfTI
@@ -1202,14 +1202,9 @@ switch cmd
             'Input file name to save cropped image');
         if ~ischar(fname), return; end
         fname = fullfile(pName, fname);
-        
-        d = single(p.hdr0.dim(2:4));
-        I = ones([d 4], 'single');
-        [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
-        I = permute(I, [4 1 2 3]);
-        I = reshape(I, 4, []); % ijk in 4 by nVox
+                
         R = nii_xform_mat(p.hdr0, hs.form_code); % original R
-        k = hs.bg.Ri * R * I; % background ijk
+        k = hs.bg.Ri * R * grid3(p.hdr0.dim(2:4)); % background ijk
         
         nii = nii_tool('load', nam);
         d = size(nii.img);
@@ -1276,7 +1271,7 @@ axis(hs.ax(1), [lim(2,:) lim(3,:)]);
 axis(hs.ax(2), [lim(1,:) lim(3,:)]);
 axis(hs.ax(3), [lim(1,:) lim(2,:)]);
 
-%% KeyPressFcn for figure
+%% WindowKeyPressFcn for figure
 function KeyPressFcn(fh, evt)
 if any(strcmp(evt.Key, evt.Modifier)), return; end % only modifier
 hs = guidata(fh);
@@ -1411,10 +1406,7 @@ for i = 1:hs.files.getModel.size
         im = zeros([d dim4], 'single');
         
         if isfield(p, 'R0') % interp, maybe smooth
-            I = ones([d 4], 'single');
-            [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
-            I = permute(I, [4 1 2 3]);
-            I = reshape(I, 4, []); % ijk grids of background img
+            I = grid3(d);
             I(ix,:) = ind-1;
             
             if isfield(p, 'warp')
@@ -1883,11 +1875,7 @@ if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
     if i>1, for j = 1:3, uistack(p.hsI(j), 'down', i-1); end; end
     
     if isfield(p, 'R0') && ~isfield(p, 'ivec')
-        I = ones([d(1:3) 4], 'single');
-        [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
-        I = permute(I, [4 1 2 3]);
-        I = reshape(I, 4, []);
-        I = p.R0 \ (p.R * I) + 1;
+        I = p.R0 \ (p.R * grid3(d)) + 1;
         p.ivec = reshape(I(1:3,:)', d);
 
         R0 = normc(p.R0(1:3, 1:3));
@@ -2518,11 +2506,7 @@ end
 d = single(size(p.nii.img)); % dim for reoriented img
 d(numel(d)+1:3) = 1; d = d(1:3);
 
-I = ones([d 4], 'single');
-[I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
-I = permute(I, [4 1 2 3]);
-I = reshape(I, 4, []); % ijk grids of target img
-I = inv(R) * R0 * I + 1; %#ok ijk+1 for mask
+I = inv(R) * R0 * grid3(d) + 1; %#ok ijk+1 for mask
 I = round(I * 100) / 100;
 
 im = single(nii.img(:,:,:,1)); % first mask volume
@@ -2572,6 +2556,12 @@ str = hs.files.getModel.get(jf-1);
 if ~any(regexp(str, [regexptranslate('escape', noteStr) '$']))
     hs.files.getModel.set(jf-1, [str noteStr]);
 end
+
+%% Return 0-based 4xN 3D grid: [i; j; k; 1]
+function I = grid3(d)
+I = ones([4 d(1:3)], 'single');
+[I(1,:,:,:), I(2,:,:,:), I(3,:,:,:)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
+I = reshape(I, 4, []);
 
 %% update crosshair: ix correspond to one of the three spinners, not views
 function set_cross(hs, ix)
@@ -2875,12 +2865,7 @@ function b = xyzr2roi(c, r, hdr)
 % Return an ROI img based on the dim info in NIfTI hdr. The center and radius
 % are in unit of mm. 
 d = single(hdr.dim(2:4));
-I = ones([d 4], 'single');
-[I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
-I = permute(I, [4 1 2 3]);
-I = reshape(I, 4, []); % ijk in 4 by nVox
-R = nii_xform_mat(hdr);
-I = R * I; % xyz in 4 by nVox
+I = nii_xform_mat(hdr) * grid3(d); % xyz in 4 by nVox
 
 b = bsxfun(@minus, I(1:3,:), c(:)); % dist in x y z direction from center
 b = sum(b .* b); % dist to center squared, 1 by nVox
@@ -2986,14 +2971,14 @@ end
 siz = siz / max(siz) * 800;
 
 res = screen_pixels(1); % use 1st screen
-maxH = res(2) - 160;
+maxH = res(2) - 180;
 maxW = res(1) - 100;
 if siz(1)>maxW, siz = siz / siz(1) * maxW; end
 if siz(2)>maxH, siz = siz / siz(2) * maxH; end
 
 figPos = round((res-siz)/2);
 if figPos(1)+siz(1) > res(1), figPos(1) = res(1)-siz(1)-10; end
-if figPos(2)+siz(2) > res(2)-130, figPos(2) = min(figPos(2), 50); end
+if figPos(2)+siz(2) > res(2)-180, figPos(2) = min(figPos(2), 50); end
 
 %% Return nii struct from cii and gii
 function nii = cii2nii(nii)
