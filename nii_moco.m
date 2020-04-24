@@ -184,9 +184,8 @@ if doXform
     
     F.Method = 'spline'; % much slower than linear
     F.ExtrapolationMethod = 'none';
-    I = ones([d 4], 'single');
-    [I(:,:,:,1), I(:,:,:,2), I(:,:,:,3)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
-    I = permute(I, [4 1 2 3]);
+    I = ones([4 d], 'single');
+    [I(1,:,:,:), I(2,:,:,:), I(3,:,:,:)] = ndgrid(0:d(1)-1, 0:d(2)-1, 0:d(3)-1);
     I = reshape(I, 4, []); % ijk in 4 by nVox for original dim
     I = Rm * I; % xyz now
 end
