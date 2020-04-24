@@ -616,14 +616,7 @@ if bids
         Subject = {'01'};
     end
     Session                = {'01'};
-
-    try 
-        AcquisitionDate        = datetime(acq{1},'InputFormat','yyyyMMdd');
-        AcquisitionDate.Format = 'yyyy-MM-dd';
-    catch % octave
-        AcquisitionDate        = acq{1};
-        AcquisitionDate        = [AcquisitionDate(1:4) '-' AcquisitionDate(5:6) '-' AcquisitionDate(7:8)];
-    end
+    AcquisitionDate = acq{1}(1:4) + "-" + acq{1}(5:6) + "-" + acq{1}(7:8);
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
     
@@ -2974,7 +2967,7 @@ try
         end
         str = [str {sprintf('%s: %g','Nslices',nSL)}];
         str = [str {sprintf('%s: %g','Nvol',length(s)/nSL)}];
-        ha = text(ax,0,0,str,'FontSize',10,'Color',[1 1 1]);
+        text(ax,0,0,str,'FontSize',10,'Color',[1 1 1]);
     catch err
         warning(['CANNOT PREVIEW SCANNING INFOS: ' err.message])
     end
