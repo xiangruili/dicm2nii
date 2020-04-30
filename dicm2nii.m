@@ -616,7 +616,7 @@ if bids
         Subject = {'01'};
     end
     Session                = {'01'};
-    AcquisitionDate = acq{1}(1:4) + "-" + acq{1}(5:6) + "-" + acq{1}(7:8);
+    AcquisitionDate = {[acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)]};
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
     
