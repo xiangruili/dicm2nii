@@ -131,7 +131,6 @@ bot = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
 bot.keyPress(key); bot.keyRelease(key); % wake up screen
 
 iRun = hs.series.UserData;
-nextSeries = sprintf('%s/%03u_%06u_000001.dcm', hs.subj.UserData, iRun+[0 1]);
 f = sprintf('%s/%03u_%06u_', hs.subj.UserData, iRun);
 s = dicm_hdr_wait([f '000001.dcm']);
 if isempty(s), return; end % non-image dicom, skip series
@@ -139,20 +138,7 @@ if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
     hs.subj.String = strrep(s.PatientName, ' ', '_');
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
-    close(findall(0, 'Type', 'figure', 'Tag', 'physiorec'));
-    if isfield(s, 'ImageComments') && contains(s.ImageComments, 'physio') ...
-            && ~exist(nextSeries, 'file')
-        fname = ['../incoming_DICOM/physio_' s.PatientName];
-        if exist(fname, 'file')
-            delete(fname);
-        else
-            fh = figure('Position', [100 300 800 120], 'Tag', 'physiorec', ...
-                'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
-            h = uicontrol(fh, 'Style', 'text', 'Position',[5 10 790 100], ...
-                'String', 'Start Physio Recording!', 'FontSize', 48);
-            for i=1:12, pause(1); h.ForegroundColor = 1 - h.ForegroundColor; end
-        end
-    end
+    subjCheck(s); % check coil error, physio etc
 end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
@@ -205,6 +191,7 @@ m6 = zeros(2,6);
 hs.fd.YData(2:end) = nan; hs.dv.YData(2:end) = nan;
 
 try dt = s.RepetitionTime/1000 + 6; catch, dt = 9; end % for stopped series
+nextSeries = sprintf('%s/%03u_%06u_000001.dcm', hs.subj.UserData, iRun+[0 1]);
 for i = 2:nIN
     nam = sprintf('%s%06u.dcm', f, i);
     tEnd = now + dt/86400;
@@ -608,6 +595,35 @@ hs.instnc.String = num2str(s.InstanceNumber);
 % bot.mouseMove(xy(1), res(4)-xy(2));
 % bot.mousePress(16); bot.mouseRelease(16);
 % set(0, 'PointerLocation', mousexy); % restore mouse location
+
+
+%% check coil error, physio started, PS form info
+function subjCheck(s)
+close(findall(0, 'Type', 'figure', 'Tag', 'physiorec'));
+try coil = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X'); catch, return; end
+nextSeries = s.Filename; nextSeries(end-11) = '2'; % next series means checkback
+if ~isfield(s, 'ImageComments') || exist(nextSeries, 'file'), return; end
+txt = {};
+if ~isempty(regexp(s.CoilString, 'HE(A|P)', 'once')) && coil~=32
+    txt = [txt sprintf('Coil error? ch=%g.', coil)];
+end
+isPhantom = s.PatientSex=="O" && s.PatientAge=="035Y" && s.PatientSize==1.8288;
+if ~isPhantom && contains(s.ImageComments, 'physio')
+    fname = ['../incoming_DICOM/physio_' s.PatientName];
+    if exist(fname, 'file'), delete(fname);
+    else, txt = [txt 'Start Physio Recording!'];
+    end
+end
+if ~isPhantom && ~contains(s.ImageComments, 'PS:')
+    txt = [txt 'No PS info available.'];
+end
+fh = figure('Position', [100 300 800 numel(txt)*100], 'Tag', 'physiorec', ...
+    'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
+h = uicontrol(fh, 'Style', 'text', 'FontSize', 48, 'Units', 'normalized', ...
+    'Position', [0.01 0.01 0.98 0.98], 'String', txt);
+tObj = timer('ExecutionMode', 'fixedRate', 'TasksToExecute', 100, 'StopFcn', @(o,~)delete(o));
+tObj.TimerFcn = @(~,~)set(h, 'ForegroundColor', 1-h.ForegroundColor);
+start(tObj);
 
 %% Timer StopFunc: Save result, start timer with delay, even after error.
 function saveResult(obj, ~)
