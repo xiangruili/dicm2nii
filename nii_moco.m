@@ -47,6 +47,7 @@ function varargout = nii_moco(nii, out, ref)
 % 170120 Use later ref vol: p.ref=p.ref+1
 
 toSave = nargin>1 && ~isempty(out);
+ischar = nii_tool('func_handle', 'ischar');
 if toSave && ~ischar(out)
     error('Second input must be nii file name to save data.');
 end
@@ -56,6 +57,7 @@ if ~toSave && nargout<1
     out = fullfile(pth, out);
     toSave = true;
 end
+if toSave && isempty(regexpi(out, '(.nii|.nii.gz)$')), out = [out '.nii']; end
 
 if ischar(nii), nii = nii_tool('load', nii); end % file name
 if ~isstruct(nii) || ~all(isfield(nii, {'hdr' 'img'}))
@@ -215,7 +217,7 @@ if isnumeric(p.ref) % need to store p.ref
     if toSave
         [pth, nam, ext] = fileparts(out);
         if strcmpi(ext, '.gz'), [~, nam, e0] = fileparts(nam); ext = [e0 ext]; end
-        p.ref = fullfile(pth, [nam '_ref' ext]);
+        p.ref = fullfile(pth, strcat(nam, '_ref', ext));
         nii_tool('save', refV, p.ref);
     else % store nii struct as ref in p: result large p
         refV.hdr.file_name = ''; % just avoid overwrite accident
@@ -231,7 +233,7 @@ if toSave % save corrected nii and p
     nii_tool('save', nii, out);
     [pth, nam, ext] = fileparts(out);
     if strcmpi(ext, '.gz'), [~, nam] = fileparts(nam); end
-    nam = fullfile(pth, [nam '.mat']);
+    nam = fullfile(pth, strcat(nam, '.mat'));
     save(nam, 'p'); % save a mat file with the same name as NIfTI
 end
 
