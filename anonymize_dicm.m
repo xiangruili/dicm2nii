@@ -75,7 +75,7 @@ for i = 1:nFile
         nam = rst;
     else % 2nd arg is dir
         [~, nam, ext] = fileparts(s.Filename);
-        nam = fullfile(rst, [nam ext]);
+        nam = fullfile(rst, strcat(nam, ext));
     end
     
     try 
