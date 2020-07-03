@@ -401,11 +401,11 @@ elseif strcmpi(cmd, 'save')
         % version 1 will take only the first 4
         nii.hdr.magic = sprintf('n+%g%s', niiVer, char([0 13 10 26 10]));
         nii.hdr.vox_offset = nii.hdr.sizeof_hdr + 4 + esize;
-        fid = fopen([fname fext], 'W');
+        fid = fopen(strcat(fname, fext), 'W');
     else
         nii.hdr.magic = sprintf('ni%g%s', niiVer, char([0 13 10 26 10]));
         nii.hdr.vox_offset = 0;
-        fid = fopen([fname '.hdr'], 'W');
+        fid = fopen(strcat(fname, '.hdr'), 'W');
     end
     
     % Write nii hdr
@@ -434,7 +434,7 @@ elseif strcmpi(cmd, 'save')
     
     if ~isNii
         fclose(fid); % done with .hdr
-        fid = fopen([fname '.img'], 'W');
+        fid = fopen(strcat(fname, '.img'), 'W');
     end
 
     % Write nii image
@@ -444,10 +444,10 @@ elseif strcmpi(cmd, 'save')
     % gzip if asked
     if do_gzip
         if isNii
-            gzipOS([fname '.nii']);
+            gzipOS(strcat(fname, '.nii'));
         else
-            gzipOS([fname '.hdr']); % better not to compress .hdr
-            gzipOS([fname '.img']);
+            gzipOS(strcat(fname, '.hdr')); % better not to compress .hdr
+            gzipOS(strcat(fname, '.img'));
         end
     end
     
@@ -542,7 +542,7 @@ elseif strcmpi(cmd, 'cat3D')
     end
     
     n = numel(fnames);
-    if n<2 || ~iscellstr(fnames) %#ok
+    if n<2 || (~iscellstr(fnames) && (exist('strings', 'builtin') && ~isstring(fnames)))
         error('Invalid input for nii_tool(''cat3D''): %s', varargin{1});
     end
 
@@ -802,7 +802,7 @@ if islogical(cmd)
 end
 
 [err, str] = jsystem(cmd(fname));
-if err && ~exist([fname '.gz'], 'file')
+if err && ~exist(strcat(fname, '.gz'), 'file')
     try
         gzip(fname); deleteFile(fname);
     catch
@@ -890,6 +890,7 @@ if isempty(cmd)
     uid = @()sprintf('_%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999));
 end
 
+fname = char(fname);
 if islogical(cmd)
     outName = gunzip(fname, pth);
     outName = outName{1};
@@ -1205,6 +1206,7 @@ end
 %% faster than system: based on https://github.com/avivrosenberg/matlab-jsystem
 function [err, out] = jsystem(cmd)
 % cmd is cell str, no quotation marks needed for file names with space.
+cmd = cellstr(cmd);
 try
     pb = java.lang.ProcessBuilder(cmd);
     pb.redirectErrorStream(true); % ErrorStream to InputStream
@@ -1217,4 +1219,10 @@ catch % fallback to system() if java fails like for Octave
     cmd = regexprep(cmd, '.+? .+', '"$0"'); % double quotes if with middle space
     [err, out] = system(sprintf('%s ', cmd{:}, '2>&1'));
 end
+
+%% Return true if input is char or single string (R2016b+)
+function tf = ischar(A)
+tf = builtin('ischar', A);
+if tf, return; end
+if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
 %%
