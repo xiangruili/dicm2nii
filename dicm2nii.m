@@ -156,6 +156,7 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 %    Phase image flag for GE
 
 if nargout, varargout{1} = ''; end
+ischar = nii_tool('func_handle', 'ischar');
 if nargin==3 && ischar(fmt) && strcmp(fmt, 'func_handle') % special purpose
     varargout{1} = str2func(niiFolder);
     return;
@@ -202,7 +203,7 @@ end
 
 %% Deal with niiFolder
 if ~isfolder(niiFolder), mkdir(niiFolder); end
-niiFolder = [fullName(niiFolder) filesep];
+niiFolder = strcat(fullName(niiFolder), filesep);
 converter = ['dicm2nii.m ' getVersion];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
     more off;
@@ -246,7 +247,7 @@ elseif ischar(src) % 1 dicom or zip/tgz file
             mkdir(dcmFolder);
             delTmpDir = onCleanup(@() rmdir(dcmFolder, 's'));
         end
-        disp(['Extracting files from ' fname ext1 ' ...']);
+        fprintf('Extracting files from %s%s ...\n', fname, ext1);
         
         if strcmp(unzip_cmd, 'unzip')
             cmd = sprintf('unzip -qq -o %s -d %s', src, dcmFolder);
@@ -869,7 +870,7 @@ for i = 1:nRun
 
     nii = split_components(nii, h{i}{1}); % split vol components
     if no_save % only return the first nii
-        nii(1).hdr.file_name = [fnames{i} '.nii'];
+        nii(1).hdr.file_name = strcat(fnames{i}, '.nii');
         nii(1).hdr.magic = 'n+1';
         varargout{1} = nii_tool('update', nii(1));
         if nRun>1, fprintf(2, 'Only one series is converted.\n'); end
@@ -882,13 +883,13 @@ for i = 1:nRun
         fprintf(fmtStr, nam, nii(j).hdr.dim(2:5));
         nii(j).ext = set_nii_ext(nii(j).json); % NIfTI extension
         if pf.save_json, save_json(nii(j).json, fname); end
-        nii_tool('save', nii(j), fullfile(niiFolder,[nam ext]), rst3D);
+        nii_tool('save', nii(j), fullfile(niiFolder, strcat(nam, ext)), rst3D);
     end
         
     if isfield(nii(1).hdr, 'hdrTilt')
         nii = nii_xform(nii(1), nii.hdr.hdrTilt);
-        fprintf(fmtStr, [fnames{i} '_Tilt'], nii.hdr.dim(2:5));
-        nii_tool('save', nii, [fname '_Tilt' ext], rst3D); % save xformed nii
+        fprintf(fmtStr, strcat(fnames{i}, '_Tilt'), nii.hdr.dim(2:5));
+        nii_tool('save', nii, strcat(fname, '_Tilt', ext), rst3D); % save xformed nii
     end
     
     h{i} = h{i}{1}; % keep 1st dicm header only
@@ -903,7 +904,7 @@ if ~bids
         fnames = genvarname(fnames);
     end
     h = cell2struct(h, fnames, 2); % convert into struct
-    fname = [niiFolder 'dcmHeaders.mat'];
+    fname = fullfile(niiFolder, 'dcmHeaders.mat');
     if exist(fname, 'file') % if file exists, we update fields only
         S = load(fname);
         for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
@@ -1595,13 +1596,13 @@ h{1}.bvec = bvec; % computed bvec in image ref
 function save_dti_para(s, fname)
 if ~isfield(s, 'bvec') || all(s.bvec(:)==0), return; end
 if isfield(s, 'bval')
-    fid = fopen([fname '.bval'], 'w');
+    fid = fopen(strcat(fname, '.bval'), 'w');
     fprintf(fid, '%.5g ', s.bval); % one row
     fclose(fid);
 end
 
 str = repmat('%.6f ', 1, size(s.bvec,1));
-fid = fopen([fname '.bvec'], 'w');
+fid = fopen(strcat(fname, '.bvec'), 'w');
 fprintf(fid, [str '\n'], s.bvec); % 3 rows by # direction cols
 fclose(fid);
 
@@ -2293,7 +2294,7 @@ persistent niiFolder;
 if nargin>1, firstTime = isempty(niiFolder); niiFolder = folder; end
 if isempty(errInfo), return; end
 fprintf(2, ' %s\n', errInfo); % red text in Command Window
-fid = fopen([niiFolder 'dicm2nii_warningMsg.txt'], 'a');
+fid = fopen(fullfile(niiFolder, 'dicm2nii_warningMsg.txt'), 'a');
 fseek(fid, 0, -1); 
 fprintf(fid, '%s\n', errInfo);
 fclose(fid);
@@ -2581,7 +2582,7 @@ end
 % matlab.internal.webservices.toJSON(s)
 function save_json(s, fname)
 flds = fieldnames(s);
-fid = fopen([fname '.json'], 'w'); % overwrite silently if exist
+fid = fopen(strcat(fname, '.json'), 'w'); % overwrite silently if exist
 fprintf(fid, '{\n');
 for i = 1:numel(flds)
     nam = flds{i};
@@ -3013,10 +3014,10 @@ isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
 val = isOctave || verLessThan('matlab','9.4');
 
 %% Return full name for file/path, no matter it exists or not (200120)
-% \ is treated as / for unix. This is may be bad, since \ is legal char for unix
+% \ is treated as / for unix. This may be bad, since \ is legal char for unix
 function rst = fullName(nam)
 if ispc
-    rst = strrep(nam, '/', '\');
+    rst = strrep(char(nam), '/', '\');
     if isempty(regexp(rst, '^([a-zA-Z]:|\\\\)', 'once')) % not \\ or C:
         rst = [pwd '\' rst];
     end
@@ -3032,7 +3033,7 @@ if ispc
     end
     if numel(rst)==2 && rst(2)==':', rst(3) = '\'; end
 else
-    rst = strrep(nam, '\', '/');
+    rst = strrep(char(nam), '\', '/');
     if strncmp(rst, '~', 1), rst = [getenv('HOME') rst(2:end)]; % ~: Home
     elseif ~strncmp(rst, '/', 1), rst = [pwd '/' rst];
     end
@@ -3063,3 +3064,5 @@ function tf = isfolder(folderName)
 try tf = builtin('isfolder', folderName);
 catch, tf = isdir(folderName); %#ok
 end
+
+%%
