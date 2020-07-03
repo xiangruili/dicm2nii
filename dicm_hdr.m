@@ -945,7 +945,7 @@ R(:,4) = R * [-([s.Columns s.Rows nSL]-1)/2 1]'; % vol center to corner of 1st
 s.ImagePositionPatient = R(:,4);
 s.LastFile.ImagePositionPatient = R * [0 0 nSL-1 1]'; % last slice
 s.Manufacturer = 'Philips';
-s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
+s.Filename = fullfile(pth, strcat(nam, '.REC')); % rest for dicm_img
 s.PixelData.Start = 0;
 s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
 
@@ -1511,7 +1511,7 @@ R(:,4) = R * [-([s.Columns s.Rows nSL]-1)/2 1]'; % vol center to corner of 1st
 s.ImagePositionPatient = R(:,4);
 s.LastFile.ImagePositionPatient = R * [0 0 nSL-1 1]'; % last slice
 s.Manufacturer = 'Philips';
-s.Filename = fullfile(pth, [nam '.REC']); % rest for dicm_img
+s.Filename = fullfile(pth, strcat(nam, '.REC')); % rest for dicm_img
 s.PixelData.Start = 0;
 s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
 
