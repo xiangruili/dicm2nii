@@ -271,7 +271,6 @@ function varargout = nii_viewer(fname, varargin)
 % 180522 set_xyz: bug fix for display val >2^15.
 % Later update history can be found at github.
 %%
-
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
     varargout{1} = str2func(varargin{1});
     return;
@@ -1687,7 +1686,7 @@ if c>=3000 && c<=3099 && isfield(p.nii, 'ext') && any([p.nii.ext.ecode] == 32)
 end
 
 if nargin<3 || reOri
-	[p.nii, p.perm, p.flip] = nii_reorient(p.nii, 0);
+	[p.nii, p.perm, p.flip] = nii_reorient(p.nii, 0, ask_code);
 else
     p.perm = 1:3;
     p.flip = false(1,3);
@@ -3439,8 +3438,9 @@ v = bsxfun(@rdivide, M, sqrt(sum(M .* M)));
 % v = M ./ sqrt(sum(M .* M)); % since 2016b
 
 %% reorient nii to diagnal major
-function [nii, perm, flp] = nii_reorient(nii, leftHand)
-[R, frm] = nii_xform_mat(nii.hdr);
+function [nii, perm, flp] = nii_reorient(nii, leftHand, ask_code)
+if nargin<3, ask_code = []; end
+[R, frm] = nii_xform_mat(nii.hdr, ask_code);
 dim = nii.hdr.dim(2:4);
 pixdim = nii.hdr.pixdim(2:4);
 [R, perm, flp] = reorient(R, dim, leftHand);
@@ -3473,6 +3473,12 @@ if frm(1) == nii.hdr.qform_code
     nii.hdr.quatern_d = q(4);
 end
 for i = find(flp), nii.img = flip(nii.img, i); end
+
+%% Return true if input is char or single string (R2016b+)
+function tf = ischar(A)
+tf = builtin('ischar', A);
+if tf, return; end
+if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
 
 %% flip slice dir for nii hdr
 % function hdr = flip_slices(hdr)
