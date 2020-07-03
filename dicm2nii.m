@@ -156,7 +156,6 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 %    Phase image flag for GE
 
 if nargout, varargout{1} = ''; end
-ischar = nii_tool('func_handle', 'ischar');
 if nargin==3 && ischar(fmt) && strcmp(fmt, 'func_handle') % special purpose
     varargout{1} = str2func(niiFolder);
     return;
@@ -3065,4 +3064,9 @@ try tf = builtin('isfolder', folderName);
 catch, tf = isdir(folderName); %#ok
 end
 
+%% Return true if input is char or single string (R2016b+)
+function tf = ischar(A)
+tf = builtin('ischar', A);
+if tf, return; end
+if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
 %%
