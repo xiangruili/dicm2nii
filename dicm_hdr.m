@@ -116,7 +116,7 @@ elseif isstruct(dict) || (exist('istable', 'file') && istable(dict))
     p.fullHdr = false; % p updated only in main func
     p.dict = dict;
 elseif ischar(dict) || iscellstr(dict) || ...
-        (exist('isstring', 'builtin') && isstring(dict)) % field names
+        (exist('strings', 'builtin') && isstring(dict)) % field names
     p.fullHdr = false;
     p.dict = dicm_dict('', dict);
 else
