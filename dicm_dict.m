@@ -1275,7 +1275,8 @@ elseif strncmpi(vendor, 'UIH', 3)
     '0065' '1038' 'FD' 'MRPerfusionNoiseLevel'
     '0065' '1039' 'SH' 'MRGradRange'
     '0065' '1050' 'DS' 'LocationsInAcquisition' % MRNumberOfSliceInVolume
-    '0065' '1051' 'SQ' 'MRVFrameSequence'}];
+    '0065' '1051' 'SQ' 'MRVFrameSequence'
+    '0065' '1058' 'IS' 'PEDirectionFlipped'}];
 elseif strncmpi(vendor, 'CANON', 5) % CANON_MEC
     C = [C; {
     '700D' '1005' 'DS' 'FOV'
