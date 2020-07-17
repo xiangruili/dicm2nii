@@ -2057,10 +2057,6 @@ end
 
 if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
     phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
-% elseif isfield(s, 'ProtocolDataBlock') % GE
-%     try % VIEWORDER "1" == bottom_up
-%         phPos = s.ProtocolDataBlock.VIEWORDER == '1';
-%     end
 elseif isfield(s, 'UserDefineData') % GE
     % https://github.com/rordenlab/dcm2niix/issues/163
     try
@@ -2075,8 +2071,11 @@ elseif isfield(s, 'UserDefineData') % GE
 else
     if isfield(s, 'Stack') % Philips
         try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
-    elseif isfield(s, 'PEDirectionDisplayed') % UIH
-        try d = s.PEDirectionDisplayed(1); catch, return; end
+    elseif isfield(s, 'PEDirectionFlipped') % UIH
+        % https://github.com/rordenlab/dcm2niix/issues/410
+        if ~isfield(s, 'PEDirectionDisplayed'), return; end
+        d = s.PEDirectionDisplayed;
+        if s.PEDirectionFlipped, d = d(end); else, d = d(1); end
     elseif isfield(s, 'Private_0177_1100') % Bruker
         expr ='(?<=\<\+?)[LRAPSI]{1}(?=;\s*phase\>)'; % <+P;phase> or <P;phase>  
         d = regexp(char(s.Private_0177_1100'), expr, 'match', 'once');
