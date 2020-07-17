@@ -274,7 +274,7 @@ function varargout = nii_viewer(fname, varargin)
 if nargin==2 && ischar(fname) && strcmp(fname, 'func_handle')
     varargout{1} = str2func(varargin{1});
     return;
-elseif nargin>0 && ischar(fname) && strcmp(fname, 'LocalFunc')
+elseif nargin>1 && ischar(fname) && strcmp(fname, 'LocalFunc')
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
@@ -1741,9 +1741,7 @@ if c == 1002 % Label
     end
 end
 rg = get_range(p.nii, isfield(p, 'labels'));
-if isfield(p.nii, 'NamedMap')
-    try, p.map = p.nii.NamedMap{1}.map; end
-end
+try, p.map = p.nii.NamedMap{1}.map; end
 
 %% Return xform mat and form_code: form_code may have two if not to ask_code
 function [R, frm] = nii_xform_mat(hdr, ask_code)
@@ -3160,9 +3158,10 @@ for i = regexp(xml, '<DataArray[\s>]') % often 2 of them
     end
     
     % now only for NIFTI_INTENT_POINTSET
-    gii.AnatomicalStructurePrimary = gii_meta(c, 'AnatomicalStructurePrimary');
-    gii.AnatomicalStructureSecondary = gii_meta(c, 'AnatomicalStructureSecondary');
-    gii.GeometricType = gii_meta(c, 'GeometricType');
+    meta = @(k)regexp(c, ['(?<=>' k '<.*?<Value>).*?(?=</Value>)'], 'match', 'once');
+    gii.AnatomicalStructurePrimary = meta('AnatomicalStructurePrimary');
+    gii.AnatomicalStructureSecondary = meta('AnatomicalStructureSecondary');
+    gii.GeometricType = meta('GeometricType');
     frms = {'NIFTI_XFORM_UNKNOWN' 'NIFTI_XFORM_SCANNER_ANAT' ...
         'NIFTI_XFORM_ALIGNED_ANAT' 'NIFTI_XFORM_TALAIRACH' 'NIFTI_XFORM_MNI_152'};
     gii.DataSpace = find(strcmp(gii_element(c, 'DataSpace'), frms)) - 1;
@@ -3181,10 +3180,6 @@ function [val, i0] = gii_element(ch, key, isnum)
 i0 = regexp(ch, ['<' key '[\s>]'], 'once');
 val = regexp(ch(i0:end), ['(?<=<' key '.*?>).*?(?=</' key '>)'], 'match', 'once');
 if nargin>2 && isnum, val = str2num(val); end
-
-%% Return MetaData value for cii/gii 'Name'
-function val = gii_meta(ch, key)
-val = regexp(ch, ['(?<=>' key '<.*?<Value>).*?(?=</Value>)'], 'match', 'once');
 
 %% Open surface view or add cii to it
 function cii_view(hsN)
