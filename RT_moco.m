@@ -138,7 +138,7 @@ if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
     hs.subj.String = strrep(s.PatientName, ' ', '_');
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
-    subjCheck(s); % check coil error, physio etc
+    try subjCheck(s); catch, end % check coil error, physio etc
 end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
@@ -190,11 +190,10 @@ R1 = inv(p.R0);
 m6 = zeros(2,6);
 hs.fd.YData(2:end) = nan; hs.dv.YData(2:end) = nan;
 
-try dt = s.RepetitionTime/1000 + 6; catch, dt = 9; end % for stopped series
 nextSeries = sprintf('%s/%03u_%06u_000001.dcm', hs.subj.UserData, iRun+[0 1]);
 for i = 2:nIN
     nam = sprintf('%s%06u.dcm', f, i);
-    tEnd = now + dt/86400;
+    tEnd = now + 1/1440; % 1 minute no mosaic coming, treat as stopped series
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
         pause(0.2); 
@@ -490,29 +489,34 @@ end
 rootDir = '../incoming_DICOM/';
 dirs = dir([rootDir '20*']); % check new subj
 dirs(~[dirs.isdir]) = [];
+v = arrayfun(@(a)exist([rootDir '/' a.name '/001_000001_000001.dcm'], 'file'), dirs);
+dirs(~v) = [];
 new = false;
 for i = numel(dirs):-1:1
-    subj = regexp(dirs(i).name, '(?<=20\d{6}\.).*?(?=\.)', 'match', 'once');
+    subj = regexp(dirs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
     if exist(['./log/' subj '.mat'], 'file'), continue; end
     hs.subj.UserData = [rootDir dirs(i).name]; 
     hs.series.UserData = [1 1]; new = true; return;
 end
 
-% Delete old subj folder after mid-night
+% Delete old subj folder right after mid-night
 if ~exist([rootDir 'host.txt'], 'file') || mod(now,1) > 10/86400; return; end
+if ~isempty(dir([rootDir 'physio_*'])), delete([rootDir 'physio_*']); end
+dirs(now-[dirs.datenum]<2) = []; % keep for 2 days
 for i = 1:numel(dirs)
-    if now-dirs(i).datenum < 2, continue; end % keep data for 2 days
     try rmdir([rootDir dirs(i).name], 's');
-    catch me, disp(me.message);
+    catch me, disp(me.message); assignin('base', 'me', me);
     end
 end
 
-%% Wait till the file is copied completely
+%% Wait till a file copy is complete
 function s = dicm_hdr_wait(varargin)
 tEnd = now + 1/86400; % wait up to 1 second
 while 1
     s = dicm_hdr(varargin{:});
-    try if s.PixelData.Start+s.PixelData.Bytes <= s.FileSize, return; end; end %#ok
+    try %#ok, maybe too strict to be equal? Test indicates always equal 
+        if s.PixelData.Start+s.PixelData.Bytes == s.FileSize, return; end
+    end
     if now>tEnd, s = []; return; end % give up
     pause(0.1);
 end
@@ -597,22 +601,20 @@ hs.instnc.String = num2str(s.InstanceNumber);
 % set(0, 'PointerLocation', mousexy); % restore mouse location
 
 
-%% check coil error, physio started, PS form info
+%% check coil error, physio started, PS form info for CCBBI
 function subjCheck(s)
 close(findall(0, 'Type', 'figure', 'Tag', 'physiorec'));
-try coil = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X'); catch, return; end
+txt = {};
+asc_header = dicm2nii('', 'asc_header', 'func_handle');
+coil = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList[0].sCoilElementID.tCoilID');
+nCh = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X');
+if nCh~=32 && coil == "Head_32", txt = {sprintf('%s error? ch=%g.', coil, nCh)}; end
 nextSeries = s.Filename; nextSeries(end-11) = '2'; % next series means checkback
 if ~isfield(s, 'ImageComments') || exist(nextSeries, 'file'), return; end
-txt = {};
-if ~isempty(regexp(s.CoilString, 'HE(A|P)', 'once')) && coil~=32
-    txt = [txt sprintf('Coil error? ch=%g.', coil)];
-end
 isPhantom = s.PatientSex=="O" && s.PatientAge=="035Y" && s.PatientSize==1.8288;
 if ~isPhantom && contains(s.ImageComments, 'physio')
     fname = ['../incoming_DICOM/physio_' s.PatientName];
-    if exist(fname, 'file'), delete(fname);
-    else, txt = [txt 'Start Physio Recording!'];
-    end
+    if ~exist(fname, 'file'), txt = [txt 'Start Physio Recording!']; end
 end
 if ~isPhantom && ~contains(s.ImageComments, 'PS:')
     txt = [txt 'No PS info available.'];
@@ -639,5 +641,4 @@ if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
 end
 if new_series(hs), obj.StartDelay = 0.1; else, obj.StartDelay = 5; end
 start(obj);
-
 %%
