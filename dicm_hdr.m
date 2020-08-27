@@ -106,7 +106,7 @@ function [s, info, dict] = dicm_hdr(fname, dict, iFrames)
 % 180620 philips_xml: bug fix to convert str to num for sort_frames.
 % 180712 bug fix for implict VR in search method (thx LorenaF).
 
-persistent dict_full;
+persistent dict_full nHdr;
 s = []; info = '';
 if nargin<2 || isempty(dict)
     if isempty(dict_full), dict_full = dicm_dict; end
@@ -138,7 +138,8 @@ if fSize<140 % 132 + one empty tag, ignore truncated
     info = ['Invalid file: ' fname];
     return;
 end
-b8 = fread(fid, 130000, 'uint8=>uint8')'; % enough for most dicom
+if isempty(nHdr), nHdr = 200000; end
+b8 = fread(fid, nHdr, 'uint8=>uint8')'; % enough for most dicom
 
 iTagStart = 132; % start of first tag
 isDicm = isequal(b8(129:132), 'DICM');
@@ -188,7 +189,7 @@ end
 tg = char([224 127 16 0]); % PixelData, VR can be OW/OB even if expl
 if p.be, tg = tg([2 1 4 3]); end
 found = false;
-for nb = [0 2e6 20e6 fSize] % if not enough, read more till all read
+for nb = [0 2e6 fSize] % if not enough, read more till all read
     b8 = [b8 fread(fid, nb, 'uint8=>uint8')']; %#ok
     i = strfind(char(b8), tg);
     i = i(mod(i,2)==1); % must be odd number
@@ -212,6 +213,7 @@ for nb = [0 2e6 20e6 fSize] % if not enough, read more till all read
         break;
     end
 end
+if nHdr<p.iPixelData || nHdr>p.iPixelData*2, nHdr = p.iPixelData + 10000; end
 
 s.Filename = fopen(fid);
 s.FileSize = fSize;
