@@ -817,7 +817,7 @@ for i = 1:nRun
         if j==1
             img = dicm_img(s, 0); % initialize img with dicm data type
             if ndims(img)>4 % err out, likely won't work for other series
-                error('Image with 5 or more dim not supported: %s', s.NiftiName);
+                error('Image with 5 or more dim not supported: %s', s.Filename);
             end
             applyRescale = tryGetField(s, 'ApplyRescale', false);
             if applyRescale, img = single(img); end
@@ -1357,7 +1357,7 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
     if strcmp(SliceOrder, '1') % 0/1: sequential/interleaved based on limited data
         t([1:2:nSL 2:2:nSL]) = t;
     elseif ~strcmp(SliceOrder, '0')
-        errorLog(['Unknown SLICEORDER (' SliceOrder ') for ' s.NiftiName]);
+        errorLog(['Unknown SLICEORDER (' SliceOrder ') for ' s.Filename]);
         return;
     end
 end
@@ -1443,10 +1443,11 @@ s = h{1};
 ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
 % With this method, the code will get correct ref if bvec ref scheme changes 
 % some day, e.g. if GE saves (0018,9089) in the future.
-% ref = 0: IMG, UIH and CANON (ImageComments) for now;
+% ref = 0: IMG, UIH for now;
 % ref = 1: PCS, Siemens/Philips or unknown vendor, this is default
 % ref = 2: FPS, Bruker for now (need to verify)
 % ref = 3: FPS_GE, confusing signs
+% ref = 4: CANON (ImageComments) by ChrisR
 %  Since some dicom do not save bval or bvec for bval=0 case, it is better to
 %  loop all directions to detect 'ref'.
 
@@ -1504,7 +1505,7 @@ elseif nFile>1 % multiple files: order already in slices then volumes
         val = tryGetField(s2, 'B_value');
         if val == 0, continue; end
         vec = tryGetField(s2, 'DiffusionGradientDirection'); % Siemens/Philips
-        if isempty(val) || isempty(vec) % GE/UIH
+        if isempty(val) || isempty(vec) % GE/UIH/CANON
             s2 = dicm_hdr(s2.Filename, dict);
         end
         
@@ -1521,7 +1522,7 @@ elseif nFile>1 % multiple files: order already in slices then volumes
         end
         if isempty(vec) % CANON
             vec = sscanf(tryGetField(s2, 'ImageComments', ''), 'b=%*g(%g,%g,%g)');
-            if ref==1 && ~isempty(vec), ref = 0; end
+            if ref==1 && ~isempty(vec), ref = 4; end
         end
         if isempty(vec) % GE, old Philips
             vec(1) = tryGetField(s2, 'DiffusionDirectionX', 0);
@@ -1576,6 +1577,8 @@ elseif ref == 3 % FPS: GE in Freq/Phase/Slice reference
     flp(3) = ~flp(3); % GE slice dir opposite to LPS for all sag/cor/tra
     if ixyz(3)==1, flp(1) = ~flp(1); end % Sag slice: don't know why
     bvec(:, flp) = -bvec(:, flp);
+elseif ref == 4 % CANON: ChrisR solution
+    bvec = [bvec(:,[2 1]) -bvec(:,3)];
 end
 
 % bval may need to be scaled by norm(bvec)
@@ -1719,7 +1722,7 @@ if isempty(pos) % keep right-handed, and warn user
     if haveIPP && haveIOP
         errorLog(['Please check whether slices are flipped: ' s.NiftiName]);
     else
-        errorLog(['No orientation/location information found for ' s.NiftiName]);
+        errorLog(['No orientation/location information found in ' s.Filename]);
     end
 elseif sign(pos-R(iSL,4)) ~= signSL % same direction?
     R(:,3) = -R(:,3);
@@ -2051,12 +2054,13 @@ fld = 'InPlanePhaseEncodingDirection';
 if isfield(s, fld)
     if     strncmpi(s.(fld), 'COL', 3), iPhase = 2; % based on dicm_img(s,0)
     elseif strncmpi(s.(fld), 'ROW', 3), iPhase = 1;
-    else, errorLog(['Unknown ' fld ' for ' s.NiftiName ': ' s.(fld)]);
+    else, errorLog(['Unknown ' fld ' for ' s.Filename ': ' s.(fld)]);
     end
 end
 
 if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
     phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
+    return;
 elseif isfield(s, 'UserDefineData') % GE
     % https://github.com/rordenlab/dcm2niix/issues/163
     try
@@ -2068,35 +2072,35 @@ elseif isfield(s, 'UserDefineData') % GE
     phasePolarFlag = bitget(b(i+49), 3);
     phPos = ~xor(phasePolarFlag, sliceOrderFlag);
     end
-else
-    if isfield(s, 'Stack') % Philips
-        try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
-    elseif isfield(s, 'PEDirectionFlipped') % UIH
-        % https://github.com/rordenlab/dcm2niix/issues/410
-        if ~isfield(s, 'PEDirectionDisplayed'), return; end
-        d = s.PEDirectionDisplayed;
-        if s.PEDirectionFlipped, d = d(end); else, d = d(1); end
-    elseif isfield(s, 'Private_0177_1100') % Bruker
-        expr ='(?<=\<\+?)[LRAPSI]{1}(?=;\s*phase\>)'; % <+P;phase> or <P;phase>  
-        d = regexp(char(s.Private_0177_1100'), expr, 'match', 'once');
-        id = regexp('LRAPSI', d);
-        id = id + mod(id,2)*2-1;
-        str = 'LRAPFH'; d = str(id);
-    else % unknown Manufacturer
-        return;
-    end
-    try R = reshape(s.ImageOrientationPatient, 3, 2); catch, return; end
-    [~, ixy] = max(abs(R)); % like [1 2]
-    if isempty(iPhase) % if no InPlanePhaseEncodingDirection
-        iPhase = strfind('RLAPFH', d);
-        iPhase = ceil(iPhase/2); % 1/2/3 for RL/AP/FH
-        iPhase = find(ixy==iPhase); % now 1 or 2
-    end
-    if     any(d == 'LPH'), phPos = false; % in dicom ref
-    elseif any(d == 'RAF'), phPos = true;
-    end
-    if R(ixy(iPhase), iPhase)<0, phPos = ~phPos; end % tricky! in image ref
+    return;
 end
+
+if isfield(s, 'Stack') % Philips
+    try d = s.Stack.Item_1.MRStackPreparationDirection(1); catch, return; end
+elseif all(isfield(s, {'PEDirectionFlipped' 'PEDirectionDisplayed'})) % UIH
+    % https://github.com/rordenlab/dcm2niix/issues/410
+    d = s.PEDirectionDisplayed;
+    if s.PEDirectionFlipped, d = d(end); else, d = d(1); end
+elseif isfield(s, 'Private_0177_1100') % Bruker
+    expr ='(?<=\<\+?)[LRAPSI]{1}(?=;\s*phase\>)'; % <+P;phase> or <P;phase>
+    d = regexp(char(s.Private_0177_1100'), expr, 'match', 'once');
+    id = regexp('LRAPSI', d);
+    id = id + mod(id,2)*2-1;
+    str = 'LRAPFH'; d = str(id);
+else % unknown Manufacturer
+    return;
+end
+try R = reshape(s.ImageOrientationPatient, 3, 2); catch, return; end
+[~, ixy] = max(abs(R)); % like [1 2]
+if isempty(iPhase) % if no InPlanePhaseEncodingDirection
+    iPhase = strfind('RLAPFH', d);
+    iPhase = ceil(iPhase/2); % 1/2/3 for RL/AP/FH
+    iPhase = find(ixy==iPhase); % now 1 or 2
+end
+if     any(d == 'LPH'), phPos = false; % in dicom ref
+elseif any(d == 'RAF'), phPos = true;
+end
+if R(ixy(iPhase), iPhase)<0, phPos = ~phPos; end % tricky! in image ref
 
 %% subfunction: extract useful fields for multiframe dicom
 function s = multiFrameFields(s)
@@ -2498,9 +2502,9 @@ end
 % In PDF: 0,10 - 3,13 - 6,16 - 9,19 - 1,11 - 4,14 - 7,17 - 2,12 - 5,15 - 8,18
 % result: 0,10 - 3,13 - 6,16 - 9,19 - 2,12 - 5,15 - 8,18 - 1,11 - 4,14 - 7,17
 function t = mb_slicetiming(s, TA)
-dict = dicm_dict(s.Manufacturer, 'MosaicRefAcqTimes');
+dict = dicm_dict(s.Manufacturer, 'CSAImageHeaderInfo');
 s2 = dicm_hdr(s.LastFile.Filename, dict);
-t = s2.MosaicRefAcqTimes; % try last volume first
+t = csa_header(s2, 'MosaicRefAcqTimes'); % try last volume first
 
 % No SL acc factor. Not even multiband flag. This is UGLY
 nSL = double(s.LocationsInAcquisition);
