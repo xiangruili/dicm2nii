@@ -148,18 +148,16 @@ hs.series.String = seriesInfo(s);
 try 
     nSL = s.CSAImageHeaderInfo.NumberOfImagesInMosaic; % EPI | DTI mosaic
 catch % T1, T2, fieldmap etc: show info/img only
-    nSL = asc_header(s, 'sSliceArray.lSize'); % 2D
-    if nSL==1, nSL = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
-    iSL = ceil(nSL/2); % try middle slice for better view
+    nIN = asc_header(s, 'sSliceArray.lSize'); % 2D
+    if nIN==1, nIN = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
+    iSL = ceil(nIN/2); % try middle slice for better view
     nam = sprintf('%s%06u.dcm', f, iSL);
-    nIN = numel(dir([nam(1:end-9) '*.dcm']));
-    if nIN<nSL, pause(nSL/50); nIN = numel(dir([nam(1:end-9) '*.dcm'])); end
-    if now-getfield(dir(s.Filename), 'datenum') < 1/1440 % within 1 min
-        nIN = nIN * asc_header(s, 'sSliceArray.lConc'); % 2D T2
-    end
-    if ~exist(nam, 'file')
-        iSL = 1; nam = sprintf('%s%06u.dcm', f, iSL);
-    end
+    if ~exist(nam, 'file'), iSL = 1; nam = sprintf('%s%06u.dcm', f, iSL); end
+    nTE = asc_header(s, 'lContrasts');
+    % fieldmap phase diff series: nTE=2, EchoNumber=2
+    % if startsWith(s.SequenceName, '*fm2d') && contains(s.ImageType, '\P\')
+    if isfield(s, 'EchoNumber') && s.EchoNumber>1, nTE = 1; end
+    nIN = max(nIN*nTE, numel(dir([f '*.dcm']))); % just in case nTE unreliable
     init_series(hs, s, nIN);
     set_img(hs.img, dicm_img(nam));
     hs.slider.Value = iSL;
@@ -496,7 +494,8 @@ for i = numel(dirs):-1:1
     subj = regexp(dirs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
     if exist(['./log/' subj '.mat'], 'file'), continue; end
     hs.subj.UserData = [rootDir dirs(i).name]; 
-    hs.series.UserData = [1 1]; new = true; return;
+    hs.series.UserData = [1 1];
+    new = true; return;
 end
 
 % Delete old subj folder right after mid-night
@@ -609,7 +608,7 @@ asc_header = dicm2nii('', 'asc_header', 'func_handle');
 coil = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList[0].sCoilElementID.tCoilID');
 nCh = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X');
 if nCh~=32 && coil == "Head_32", txt = {sprintf('%s error? ch=%g.', coil, nCh)}; end
-nextSeries = s.Filename; nextSeries(end-11) = '2'; % next series means checkback
+nextSeries = s.Filename; nextSeries(end-11) = '2'; % next series means re-do
 if ~isfield(s, 'ImageComments') || exist(nextSeries, 'file'), return; end
 isPhantom = s.PatientSex=="O" && s.PatientAge=="035Y" && s.PatientSize==1.8288;
 if ~isPhantom && contains(s.ImageComments, 'physio')
