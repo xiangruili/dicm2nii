@@ -1443,11 +1443,11 @@ s = h{1};
 ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
 % With this method, the code will get correct ref if bvec ref scheme changes 
 % some day, e.g. if GE saves (0018,9089) in the future.
-% ref = 0: IMG, UIH for now;
+% ref = 0: IMG, UIH for now; PE='ROW" not tested 
 % ref = 1: PCS, Siemens/Philips or unknown vendor, this is default
 % ref = 2: FPS, Bruker for now (need to verify)
 % ref = 3: FPS_GE, confusing signs
-% ref = 4: CANON (ImageComments) by ChrisR
+% ref = 4: PFS, CANON (ImageComments) by ChrisR
 %  Since some dicom do not save bval or bvec for bval=0 case, it is better to
 %  loop all directions to detect 'ref'.
 
@@ -1577,8 +1577,10 @@ elseif ref == 3 % FPS: GE in Freq/Phase/Slice reference
     flp(3) = ~flp(3); % GE slice dir opposite to LPS for all sag/cor/tra
     if ixyz(3)==1, flp(1) = ~flp(1); end % Sag slice: don't know why
     bvec(:, flp) = -bvec(:, flp);
-elseif ref == 4 % CANON: ChrisR solution
-    bvec = [bvec(:,[2 1]) -bvec(:,3)];
+elseif ref == 4 % CANON
+    if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'COL')
+        bvec(:, 1:2) = -bvec(:, [2 1]);
+    end
 end
 
 % bval may need to be scaled by norm(bvec)
@@ -1610,13 +1612,13 @@ fclose(fid);
 
 %% Subfunction, return a parameter from CSA Image/Series header
 function val = csa_header(s, key)
-val = [];
 fld = 'CSAImageHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 if isfield(s, key), val = s.(key); return; end % general tag: 2nd choice
 try val = s.PerFrameFunctionalGroupsSequence.Item_1.(fld).Item_1.(key); return; end
 fld = 'CSASeriesHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
+val = [];
 
 %% Subfunction, Convert 3x3 direction cosine matrix to quaternion
 % Simplied from Quaternions by Przemyslaw Baranski 
@@ -2632,7 +2634,8 @@ for i = 1:numel(flds)
     if isempty(val)
         fprintf(fid, 'null,\n');
     elseif ischar(val)
-        fprintf(fid, '"%s",\n', strrep(val, '\', '\\'));
+        val = regexprep(val, '([\\"])', '\\$1'); % escape \ "
+        fprintf(fid, '"%s",\n', val);
     elseif iscellstr(val)
         fprintf(fid, '[');
         fprintf(fid, '"%s", ', val{:});
