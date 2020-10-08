@@ -19,7 +19,7 @@ fh = figure('mc'*[256 1]'); clf(fh);
 set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ... 
 	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', [1 1 1]*0.94, ...
     'Name', 'Real Time Image Monitor ', 'Tag', 'RT_moco', 'Visible', 'off', ...
-    'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}));
+    'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}}));
 try fh.WindowState = 'maximized'; catch, fh.Position = [1 60 res(3) res(4)-80]; end
 hs.fig = fh;
 
@@ -64,7 +64,7 @@ else
 end
 
 dy = 0.12 * (0:3);
-hs.ax = axes(pa2, 'Position', [0.07 0.6 0.86 0.35], ...
+hs.ax = axes(pa2, 'Position', [0.07 0.5 0.86 0.38], ...
     'NextPlot', 'add', 'XLim', [0.5 300.5], 'UserData', dy, ...
     'TickDir', 'out', 'TickLength', 0.002*[1 1], 'ColorOrder', [0 0 1; 1 0 1]);
 xlabel(hs.ax, 'Instance Number');
@@ -90,9 +90,18 @@ hs.pct(1) = txt([0.995 0.32]); hs.pct(2) = txt([0.995 0.65]);
 
 hs.fd = plot(hs.ax, 0, '.:', 'Visible', 'off');
 hs.ax.YAxis(2).Visible = 'off';
+
+ax = axes(pa2, 'Position', [0.07 0.88 0.86 0.04], 'Color', fh.Color);
+hs.resp = plot(ax, nan, ones(1,3), 'o', 'Color', 'none', 'MarkerSize', 8);
+set(hs.resp(1), 'MarkerFaceColor', [0 0 0]);
+set(hs.resp(2), 'MarkerFaceColor', [1 0 0]);
+set(hs.resp(3), 'MarkerFaceColor', [0 0.8 0]);
+title(ax, ' ', 'FontSize', 14, 'interpreter', 'tex');
+set(ax, 'XLim', [0.5 300.5], 'YLim', [0.5 1.5], 'Visible', 'off');
+
 vars = {'Description' 'Series' 'Instances' '<font color="#00cc00">Green</font>' ...
     '<font color="#cccc00">Yellow</font>' 'MeanFD'};
-hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.52], ...
+hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.42], ...
     'FontSize', 14, 'RowName', [], 'CellSelectionCallback', @tableCB, ...
     'ColumnName', strcat('<html><h2>', vars, '</h2></html>'));
 
@@ -105,13 +114,22 @@ hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold'
 
 ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off', 'CLim', [0 1]);
 hs.img = image(ax, 'CData', ones(2)*0.94, 'CDataMapping', 'scaled');
-axis equal; colormap gray;
+axis equal; colormap(ax, 'gray');
 hs.instnc = text(ax, 'Units', 'normalized', 'Position', [0.99 0.01], 'Color', 'y', ...
     'FontSize', 14, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom');
 
 set(fh, 'HandleVisibility', 'callback', 'Visible', 'on'); % fh.Resize = 'off';
 drawnow; wt = getpixelposition(hs.table);
 w2 = [90 120 90 90 100]; hs.table.ColumnWidth = [wt(3)-sum(w2)-26 num2cell(w2)];
+
+% set up serial port
+delete(instrfind('Tag', 'RTMM'));
+if ispc, port = 'COM1'; else, port = '/dev/ttyUSB0'; end % change this to yours
+hs.serial = serial(port, 'BaudRate', 115200, 'Terminator', '', 'Tag', 'RTMM', ...
+    'Timeout', 0.3, 'UserData', struct('fig', fh, 'send', false), ...
+    'BytesAvailableFcnCount', 1, 'BytesAvailableFcnMode', 'byte', ...
+    'BytesAvailableFcn', @read_resp); %#ok
+try fopen(hs.serial); catch, end
 
 hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', ...
     'StopFcn', @saveResult, 'TimerFcn', @doSeries, 'UserData', fh);
@@ -211,6 +229,10 @@ for i = 2:nIN
     a = img(ind) - img0(ind); % use only edge voxles: faster and more sensitive
     hs.dv.YData(iN) = sqrt(a*a' / numel(a)) / mn;
     img0 = img;
+    if hs.serial.UserData.send
+        fwrite(hs.serial, uint8(hs.dv.YData(iN) / hs.ax.YAxis(1).Limits(2)*255));
+    end
+    
     a = hs.dv.YData(1:iN); a = a(~isnan(a));
     dy = hs.ax.UserData; fd = hs.fd.YData(1:iN);
     N = {numel(a) sum(a<dy(2)) sum(a<dy(3))};
@@ -242,7 +264,9 @@ set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
 if nIN==1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
 end
-hs.ax.XLim(2) = nIN + 0.5; 
+hs.ax.XLim(2) = nIN + 0.5;
+hs.resp(1).Parent.XLim(2) = hs.ax.XLim(2);
+set(hs.resp, 'XData', nan, 'YData', 1); update_resp(hs);
 hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
@@ -264,7 +288,8 @@ c{1} = s.SeriesDescription;
 c{2} = sprintf('Series %g', s.SeriesNumber);
 if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
 c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
-try c{4} = sprintf('TR = %g', s.RepetitionTime); catch, end
+c{4} = datestr(datenum(s.AcquisitionDate, 'yyyymmdd'), 'ddd, mmm dd, yyyy');
+try c{5} = sprintf('TR = %g', s.RepetitionTime); catch, end
 
 %% toggle FD display on/off
 function toggleFD(h, ~)
@@ -323,6 +348,15 @@ if nIN == 1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
 end
 hs.ax.XLim(2) = numel(hs.dv.YData) + 0.5;
+hs.resp(1).Parent.XLim(2) = hs.ax.XLim(2);
+try 
+    for i = 1:3
+        a = hs.fig.UserData.resp{iR}{i};
+        set(hs.resp(i), 'XData', a, 'YData', ones(size(a)));
+    end
+catch, set(hs.resp, 'XData', nan, 'YData', 1);
+end
+update_resp(hs);
 hs.series.String = seriesInfo(s);
 try CLim = s.CLim; catch, CLim = []; end
 try img = dicm_img(nam); catch, img = ones(2)*0.94; end
@@ -356,7 +390,7 @@ hs = guidata(h);
 hs.table.Data = {};
 hs.img.CData = ones(2)*0.94;
 hs.fd.YData = 0; hs.dv.YData = 0;
-hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}});
+hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}});
 set([hs.subj hs.series hs.instnc hs.pct], 'String', '');
 
 %% Re-do current subj: useful in case of error during a session
@@ -523,6 +557,7 @@ end
 %% User closing GUI: stop and delete timer
 function closeFig(fh, ~)
 hs = guidata(fh);
+try delete(hs.serial); catch, end
 try hs.timer.StopFcn = ''; stop(hs.timer); delete(hs.timer); catch, end
 delete(fh);
 
@@ -633,11 +668,36 @@ set([hs.menu hs.table hs.slider], 'Enable', 'on');
 if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
     hs.fig.UserData.FD{end+1} = hs.fd.YData;
     hs.fig.UserData.DV{end+1} = hs.dv.YData;
+    hs.fig.UserData.resp{end+1} = {hs.resp.XData};
     T3 = cell2table(flip(hs.table.Data(:,[1 2 6]), 1), ...
         'VariableNames', {'Description' 'SeriesNumber' 'MeanFD'});
     T3.Properties.UserData = hs.fig.UserData;
     save(['./log/' hs.subj.String], 'T3');
+    hs.serial.UserData.send = false; % stop until asked again
 end
 if new_series(hs), obj.StartDelay = 0.1; else, obj.StartDelay = 5; end
 start(obj);
+
+%% Serial BytesAvail callback: update response: 1=missed, 2=incorrect, 3=correct 
+function read_resp(s, ~)
+b = fread(s, 1);
+if b == 63, fwrite(s, uint8('RTMM')); return; % answer identity
+elseif b == 77, s.UserData.send = true; return; % start to send motion info
+end
+if b<1 || b>3, warning('Unknown serial data received:'), disp(b); return; end
+hs = guidata(s.UserData.fig);
+if hs.timer.StartDelay>1, return; end % not during a series
+x = find(~isnan(hs.dv.YData), 1, 'last');
+if isempty(x), x = 0; end
+hs.resp(b).XData(end+1) = x + 1;  hs.resp(b).YData(end+1) = 1;
+update_resp(hs);
+
+%% update response text
+function update_resp(hs)
+n = cellfun(@numel, {hs.resp.XData}) - 1;
+h = hs.resp(1).Parent.Title;
+if ~any(n>0), h.Visible = 'off'; return; end
+h.Visible = 'on';
+h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
+    ", \color[rgb]{0 0.8 0}Correct " + n(3) + ", \color{blue}Total " + sum(n);
 %%
