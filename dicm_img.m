@@ -102,7 +102,7 @@ if any(strcmp(tsUID, {'1.2.840.10008.1.2.1' '1.2.840.10008.1.2.2' '1.2.840.10008
     end
     
     dim = double([s.Columns s.Rows]);
-    nFrame = n/spp/dim(1)/dim(2);
+    nFrame = n / (spp * dim(1) * dim(2));
     if ~isfield(s, 'PlanarConfiguration') || s.PlanarConfiguration==0
         img = reshape(img, [spp dim nFrame]);
         img = permute(img, [2 3 1 4]);
