@@ -869,8 +869,26 @@ elseif strncmpi(vendor, 'GE', 2)
     '0043' '1097' 'LO' 'ImageFilteringParameters'
     '0043' '1098' 'UI' 'ASSETAcquisitionCalibrationSeriesUID'
     '0043' '109A' 'IS' 'RxStackIdentification'
+    '0043' '10A8' 'DS' 'DualDriveMode_AmplitudeAttenuation_PhaseOffset'
     '0043' '10AA' 'LO' 'AdditionalFilteringParameters'
-    '0043' '10B3' 'DS' 'AdvancedEddyCorrection' }];
+    '0043' '10B2' 'LO' 'MRTablePositionInformation'
+    '0043' '10B3' 'DS' 'AdvancedEddyCorrection'
+    '0043' '10B6' 'LO' 'MultibandParameters' % 2\4\19\\\\
+    '0043' '10B7' 'LO' 'CompressedSensingParameters'
+    '0043' '10B8' 'DS' 'GradCompParameters'
+    '0043' '10BA' 'DS' 'EchoSpacing'
+    '0043' '10BB' 'LO' 'PixelInformation'
+    '0043' '10BC' 'IS' 'HeartBeatsPattern'
+    '0043' '10C0' 'DS' 'RxDualDrive'
+    '0043' '10C1' 'LO' 'FullCoilModeREGs'
+    '0043' '10C2' 'LO' 'LocalCoilModeREGs'
+%     '0043' '10C5' 'LO' ''
+%     '0043' '10C6' 'DS' ''
+%     '0043' '10C7' 'DS' ''
+%     '0043' '10C8' 'UL' ''
+%     '0043' '10C9' 'IS' '' 
+    }];
+
     % SlopInt:
     % 6: b_value 7: private imaging options 2  8: ihtagging  9: ihtagspc
     % 10: ihfcineim  11: ihfcinent  12: Reserved  13: oprtarr 
@@ -928,6 +946,7 @@ elseif strncmpi(vendor, 'Philips', 7)
     '2001' '1062' 'CS' 'SeriesCommitted'
     '2001' '1063' 'CS' 'ExaminationSource'
     '2001' '106E' 'SH' 'SeriesType'
+    '2001' '1072' 'CS' 'ParadigmUID'
     '2001' '107B' 'IS' 'MRSeriesAcquisitionNumber'
     '2001' '1081' 'IS' 'NumberOfDynamicScans'
     '2001' '1082' 'IS' 'MRSeriesEchoTrainLength' % duplicate
