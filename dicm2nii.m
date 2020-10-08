@@ -282,11 +282,11 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'PixelRepresentation' 'BitsStored' 'HighBit' 'SamplesPerPixel' ...
     'PlanarConfiguration' 'EchoTime' 'RescaleIntercept' 'RescaleSlope' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
-    'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber'};
+    'TriggerTime' 'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
 % read header for all files, use parpool if available and worthy
-if ~no_save, fprintf('Validating %g files ...\n', nFile); end
+if ~no_save, fprintf('Validating %g files ... ', nFile); end
 hh = cell(1, nFile); errStr = cell(1, nFile);
 doParFor = pf.use_parfor && nFile>2000 && useParTool;
 for k = 1:nFile
@@ -298,6 +298,7 @@ for k = 1:nFile
         break; 
     end
 end
+if ~no_save, fprintf('(%g valid)\n', sum(~cellfun(@isempty,hh))); end
 
 %% sort headers into cell h by SeriesInstanceUID, EchoTime and InstanceNumber
 h = {}; % in case of no dicom files at all
@@ -1335,11 +1336,10 @@ if isempty(t) && strncmpi(s.Manufacturer, 'UIH', 3)
     t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
 end
 
-if isempty(t) && isfield(s, 'RTIA_timer') % GE
-    t = zeros(nSL, 1);
-    nFile = numel(h);
-    % seen problem for 1st vol, so use last vol
-    for j = 1:nSL, t(j) = tryGetField(h{nFile-nSL+j}, 'RTIA_timer', 0); end
+if isempty(t) && any(isfield(s, {'TriggerTime' 'RTIA_timer'})) % GE
+    ind = numel(h) + (1-nSL:0); % seen problem for 1st vol, so use last vol
+    t = cellfun(@(c)tryGetField(c, 'TriggerTime', 0), h(ind));
+    if all(diff(t)==0), t = cellfun(@(c)tryGetField(c, 'RTIA_timer', 0), h(ind)); end
     if all(diff(t)==0), t = []; 
     else
         t = t - min(t);
@@ -1556,15 +1556,14 @@ h{1}.bvec_original = bvec; % original from dicom
 
 % http://wiki.na-mic.org/Wiki/index.php/NAMIC_Wiki:DTI:DICOM_for_DWI_and_DTI
 [ixyz, R] = xform_mat(s, nii.hdr.dim(2:4)); % R takes care of slice dir
+PE = tryGetField(s, 'InPlanePhaseEncodingDirection', '');
 if ref == 1 % PCS: Siemens/Philips
     R = normc(R(:, 1:3));
     bvec = bvec * R; % dicom plane to image plane
 elseif ref == 2 % FPS: Bruker in Freq/Phase/Slice reference
-    if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
-        bvec = bvec(:, [2 1 3]);
-    end
+    if strcmp(PE, 'ROW'), bvec = bvec(:, [2 1 3]); end
 elseif ref == 3 % FPS: GE in Freq/Phase/Slice reference
-    if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'ROW')
+    if strcmp(PE, 'ROW')
         bvec = bvec(:, [2 1 3]);
         bvec(:, 2) = -bvec(:, 2); % because of transpose?
         if ixyz(3)<3
@@ -1578,7 +1577,7 @@ elseif ref == 3 % FPS: GE in Freq/Phase/Slice reference
     if ixyz(3)==1, flp(1) = ~flp(1); end % Sag slice: don't know why
     bvec(:, flp) = -bvec(:, flp);
 elseif ref == 4 % CANON
-    if strcmp(tryGetField(s, 'InPlanePhaseEncodingDirection'), 'COL')
+    if strcmp(PE, 'COL') % && is_PA % no PE polarity till 200913
         bvec(:, 1:2) = -bvec(:, [2 1]);
     end
 end
@@ -1959,7 +1958,7 @@ uicontrol('Style', 'Pushbutton', 'Position', [6 235 112 24], ...
 
 jSrc = javaObjectEDT('javax.swing.JTextField');
 warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
-hs.src = javacomponent(jSrc, [118 234 294 24], fh);
+hs.src = javacomponent(jSrc, [118 234 294 24], fh); %#ok<*JAVCM>
 hs.src.FocusLostCallback = cb('set_src');
 hs.src.Text = getpf('src', pwd);
 % hs.src.ActionPerformedCallback = cb('set_src'); % fire when pressing ENTER
@@ -2063,7 +2062,10 @@ end
 if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
     phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
     return;
-elseif isfield(s, 'UserDefineData') % GE
+elseif isfield(s, 'RectilinearPhaseEncodeReordering') % GE
+    phPos = ~isempty(regexpi(s.RectilinearPhaseEncodeReordering, 'REVERSE', 'once'));
+    return;
+elseif isfield(s, 'UserDefineData') % earlier GE
     % https://github.com/rordenlab/dcm2niix/issues/163
     try
     b = s.UserDefineData;
