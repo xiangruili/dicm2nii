@@ -994,7 +994,7 @@ for i = 1:numel(ext)
         fclose(fid1);
         deleteMat = onCleanup(@() deleteFile(tmp)); % delete temp file after done
         ext(i).edata_decoded = load(tmp); % load into struct
-    elseif any(ext(i).ecode == [4 6 32]) % 4 AFNI, 6 plain text, 32 CIfTI
+    elseif any(ext(i).ecode == [4 6 32 44]) % 4 AFNI, 6 plain text, 32 CIfTI, 44 MRS (json)
         str = char(ext(i).edata(:)');
         if isempty(strfind(str, 'dicm2nii.m'))
             ext(i).edata_decoded = deblank(str);
