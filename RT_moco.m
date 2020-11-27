@@ -4,12 +4,17 @@ function RT_moco()
 % previous series/patients.
 %
 % To make this work, you will need:
-%  1. Set up shared folder for ../incoming_DICOM at the computer running RT_moco.
+%  1. Set up shared folder at the computer running RT_moco. 
+%     The folder default to ../incoming_DICOM, but better set to youw own by 
+%     setpref('dicm2nii_gui_para', 'incomingDcm', '/mypath/myIncomingDicom');
+%     The result log will be saved into incoming_DICOM/RTMM_log/ folder.
 %  2. Set up real time image transfer at Siemens console.
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
-if ~exist('./log/', 'dir'), mkdir('./log/'); end % folder to save subj.mat
+hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
+hs.logDir = [hs.rootDir 'RTMM_log/'];
+if ~exist(hs.logDir, 'dir'), mkdir(hs.logDir); end % folder to save subj.mat
 
 % Create/re-use GUI and start timer
 fh = findall(0, 'Type', 'figure', 'Tag', 'RT_moco');
@@ -128,7 +133,7 @@ if ispc, port = 'COM1'; else, port = '/dev/ttyUSB0'; end % change this to yours
 hs.serial = serial(port, 'BaudRate', 115200, 'Terminator', '', 'Tag', 'RTMM', ...
     'Timeout', 0.3, 'UserData', struct('fig', fh, 'send', false), ...
     'BytesAvailableFcnCount', 1, 'BytesAvailableFcnMode', 'byte', ...
-    'BytesAvailableFcn', @read_resp); %#ok
+    'BytesAvailableFcn', @serialRead); %#ok
 try fopen(hs.serial); catch, end
 
 hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', ...
@@ -148,7 +153,7 @@ dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
 bot = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
 bot.keyPress(key); bot.keyRelease(key); % wake up screen
 
-iRun = hs.series.UserData;
+iRun = hs.series.UserData; % updated in new_series()
 f = sprintf('%s/%03u_%06u_', hs.subj.UserData, iRun);
 s = dicm_hdr_wait([f '000001.dcm']);
 if isempty(s), return; end % non-image dicom, skip series
@@ -156,13 +161,14 @@ if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
     hs.subj.String = strrep(s.PatientName, ' ', '_');
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
-    try subjCheck(s); catch, end % check coil error, physio etc
+    try subjCheck(s, hs.rootDir); catch, end % check coil error, physio etc
 end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
 if hs.SBRef.Checked=="on" && endsWith(s.SeriesDescription, '_SBRef'), return; end
 
-hs.series.String = seriesInfo(s);
+isMoCo = contains(s.ImageType, '\MOCO');
+if ~isMoCo, hs.series.String = seriesInfo(s); end
 try 
     nSL = s.CSAImageHeaderInfo.NumberOfImagesInMosaic; % EPI | DTI mosaic
 catch % T1, T2, fieldmap etc: show info/img only
@@ -220,13 +226,20 @@ for i = 2:nIN
     hs.img.CData = mos; hs.instnc.String = num2str(iN);
     hs.slider.Value = iN; % show progress
     if isDTI, hs.table.Data{1,3} = i; hs.dv.YData(iN) = 0; continue; end
-    p.F.Values = smooth_mc(img, p.sz);
-    [m6(2,:), R1] = moco_estim(p, R1);
+    
+    if isMoCo % FD from dicom hdr, DV uses MoCo img for now
+        s1 = dicm_hdr(nam, dicm_dict('Siemens', 'CSAImageHeaderInfo'));
+        m6(2,:) = [s1.CSAImageHeaderInfo.RBMoCoTrans; ...
+                   s1.CSAImageHeaderInfo.RBMoCoRot];
+    else
+        p.F.Values = smooth_mc(img, p.sz);
+        [m6(2,:), R1] = moco_estim(p, R1);
+    end
     a = abs(m6(2,:) - m6(1,:)); m6(1,:) = m6(2,:);
     hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: head radius
     
     img = double(mos);
-    a = img(ind) - img0(ind); % use only edge voxles: faster and more sensitive
+    a = img(ind) - img0(ind); % use only edge voxles: faster & more sensitive
     hs.dv.YData(iN) = sqrt(a*a' / numel(a)) / mn;
     img0 = img;
     if hs.serial.UserData.send
@@ -259,7 +272,6 @@ end
 %% Initialize GUI for a new series
 function init_series(hs, s, nIN)
 hs.dv.YData = zeros(nIN,1); hs.fd.YData = zeros(nIN,1);
-hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN 0 0 0}; hs.table.Data];
 set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
 if nIN==1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
@@ -267,9 +279,11 @@ end
 hs.ax.XLim(2) = nIN + 0.5;
 hs.resp(1).Parent.XLim(2) = hs.ax.XLim(2);
 set(hs.resp, 'XData', nan, 'YData', 1); update_resp(hs);
-hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
+if contains(s.ImageType, '\MOCO'), return; end % use previous series
+hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN 0 0 0}; hs.table.Data];
+hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 
 %% Set img and img axis
 function set_img(hImg, img, CLim)
@@ -364,10 +378,10 @@ set_img(hs.img, img, CLim);
 
 %% Load subj data to review
 function loadSubj(h, ~)
-[fname, pName] = uigetfile('./log/*.mat', 'Select MAT file for a Patient');
+hs = guidata(h);
+[fname, pName] = uigetfile([hs.logDir '*.mat'], 'Select MAT file for a Patient');
 if isnumeric(fname), return; end
 load([pName '/' fname], 'T3');
-hs = guidata(h);
 hs.fig.UserData = T3.Properties.UserData; 
 DV = hs.fig.UserData.DV;
 N = size(T3, 1);
@@ -402,7 +416,7 @@ if ~exist(hs.subj.UserData, 'dir')
     fprintf(2, 'Image for %s deleted?\n', subj);
     return;
 end
-try delete(['./log/' subj '*.mat']); catch, end
+try delete([hs.logDir subj '*.mat']); catch, end
 hs.table.Data = {}; % quick visual sign
 
 %% Get reference vol info. Adapted from nii_moco.m
@@ -503,8 +517,8 @@ out = smooth3(F(J), 'gaussian'); % sz=3
 F = griddedInterpolant(J, out, intp);
 out = F(I);
 
-%% new series or new subj: result saved as ./log/subj.mat
-% The subj folders (yyyymmdd.PatientName.PatientID) are under ../incoming_DICOM/
+%% new series or new subj: result saved as incoming_DICOM/RTMM_log/subj.mat
+% The subj folders (yyyymmdd.PatientName.PatientID) default to ../incoming_DICOM/
 % The dcm file names from Siemens push are always in format of
 % 001_000001_000001.dcm. All three numbers always start at 1, and are continuous.
 % First is study, second is series and third is instance.
@@ -512,32 +526,31 @@ function new = new_series(hs)
 f = hs.subj.UserData;
 if ~isempty(f) % check new run for current subj
     iR = hs.series.UserData;
-    if ~isempty(dir(sprintf('%s/%03u_%06u_000001.dcm', f, iR+[0 1])))
+    if exist(sprintf('%s/%03u_%06u_000001.dcm', f, iR+[0 1]), 'file')
         hs.series.UserData(2) = iR(2) + 1; new = true; return;
-    elseif ~isempty(dir(sprintf('%s/%03u_000001_000001.dcm', f, iR(1)+1)))
+    elseif exist(sprintf('%s/%03u_000001_000001.dcm', f, iR(1)+1), 'file')
         hs.series.UserData = [iR(1)+1 1];  new = true; return;
     end
 end
-rootDir = '../incoming_DICOM/';
-dirs = dir([rootDir '20*']); % check new subj
+dirs = dir([hs.rootDir '20*']); % check new subj
 dirs(~[dirs.isdir]) = [];
-v = arrayfun(@(a)exist([rootDir '/' a.name '/001_000001_000001.dcm'], 'file'), dirs);
+v = arrayfun(@(a)exist([hs.rootDir '/' a.name '/001_000001_000001.dcm'], 'file'), dirs);
 dirs(~v) = [];
 new = false;
 for i = numel(dirs):-1:1
     subj = regexp(dirs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
-    if exist(['./log/' subj '.mat'], 'file'), continue; end
-    hs.subj.UserData = [rootDir dirs(i).name]; 
+    if exist([hs.logDir subj '.mat'], 'file'), continue; end
+    hs.subj.UserData = [hs.rootDir dirs(i).name]; 
     hs.series.UserData = [1 1];
     new = true; return;
 end
 
 % Delete old subj folder right after mid-night
-if ~exist([rootDir 'host.txt'], 'file') || mod(now,1) > 10/86400; return; end
-if ~isempty(dir([rootDir 'physio_*'])), delete([rootDir 'physio_*']); end
+if ~exist([hs.rootDir 'host.txt'], 'file') || mod(now,1) > 10/86400; return; end
+if ~isempty(dir([hs.rootDir 'physio_*'])), delete([hs.rootDir 'physio_*']); end
 dirs(now-[dirs.datenum]<2) = []; % keep for 2 days
 for i = 1:numel(dirs)
-    try rmdir([rootDir dirs(i).name], 's');
+    try rmdir([hs.rootDir dirs(i).name], 's');
     catch me, disp(me.message); assignin('base', 'me', me);
     end
 end
@@ -563,7 +576,7 @@ delete(fh);
 
 %% menu callback for both DERIVED and _SBRef
 function toggleChecked(h, ~)
-if h.Checked == "on", h.Checked = "off"; else, h.Checked = "on"; end
+if h.Checked == "on", h.Checked = 'off'; else, h.Checked = 'on'; end
 
 %% Increase/Decrease image CLim
 function setCLim(h, ~)
@@ -634,9 +647,9 @@ hs.instnc.String = num2str(s.InstanceNumber);
 % bot.mousePress(16); bot.mouseRelease(16);
 % set(0, 'PointerLocation', mousexy); % restore mouse location
 
-
 %% check coil error, physio started, PS form info for CCBBI
-function subjCheck(s)
+function subjCheck(s, rootDir)
+f = fopen([rootDir 'currentID.txt'], 'w'); fprintf(f, s.PatientName); fclose(f);
 close(findall(0, 'Type', 'figure', 'Tag', 'physiorec'));
 txt = {};
 asc_header = dicm2nii('', 'asc_header', 'func_handle');
@@ -647,7 +660,7 @@ nextSeries = s.Filename; nextSeries(end-11) = '2'; % next series means re-do
 if ~isfield(s, 'ImageComments') || exist(nextSeries, 'file'), return; end
 isPhantom = s.PatientSex=="O" && s.PatientAge=="035Y" && s.PatientSize==1.8288;
 if ~isPhantom && contains(s.ImageComments, 'physio')
-    fname = ['../incoming_DICOM/physio_' s.PatientName];
+    fname = [rootDir 'physio_' s.PatientName];
     if ~exist(fname, 'file'), txt = [txt 'Start Physio Recording!']; end
 end
 if ~isPhantom && ~contains(s.ImageComments, 'PS:')
@@ -672,20 +685,21 @@ if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
     T3 = cell2table(flip(hs.table.Data(:,[1 2 6]), 1), ...
         'VariableNames', {'Description' 'SeriesNumber' 'MeanFD'});
     T3.Properties.UserData = hs.fig.UserData;
-    save(['./log/' hs.subj.String], 'T3');
+    save([hs.logDir hs.subj.String], 'T3');
     hs.serial.UserData.send = false; % stop until asked again
 end
 if new_series(hs), obj.StartDelay = 0.1; else, obj.StartDelay = 5; end
 start(obj);
 
 %% Serial BytesAvail callback: update response: 1=missed, 2=incorrect, 3=correct 
-function read_resp(s, ~)
+function serialRead(s, ~)
 b = fread(s, 1);
-if b == 63, fwrite(s, uint8('RTMM')); return; % answer identity
-elseif b == 77, s.UserData.send = true; return; % start to send motion info
-end
-if b<1 || b>3, warning('Unknown serial data received:'), disp(b); return; end
 hs = guidata(s.UserData.fig);
+if     b == '?', fwrite(s, uint8('RTMM')); return; % identity
+elseif b == 'P', fwrite(s, uint8(hs.subj.String)); return; % PatientName
+elseif b == 'M', s.UserData.send = true; return; % start to send motion info
+elseif b<1 || b>3, return; % ignore for now
+end
 if hs.timer.StartDelay>1, return; end % not during a series
 x = find(~isnan(hs.dv.YData), 1, 'last');
 if isempty(x), x = 0; end
@@ -700,4 +714,24 @@ if ~any(n>0), h.Visible = 'off'; return; end
 h.Visible = 'on';
 h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
     ", \color[rgb]{0 0.8 0}Correct " + n(3) + ", \color{blue}Total " + sum(n);
+
+%% need PhoenixZIPReport to arrive after scan starts
+% function setCountDown(hs, s)
+% h = tObj.UserData;
+% a = dir(s.Filename);
+% if contains(s.ImageType, 'DERIVED') || contains(s.ImageType, '\MOCO') || ...
+%         endsWith(s.SeriesDescription, '_SBRef') || now-a.datenum>5/86400
+%     h.Visible = 'off';
+%     try stop(tObj); catch, end
+%     return;
+% end
+% h.UserData.tEnd = a.datenum + (asc_header(s, 'lTotalScanTimeSec') - 1) / 86400;
+% h.Visible = 'on';
+% start(tObj);
+% 
+% function countDown(tObj, ~, h)
+% t = tObj.UserData.tEnd - now;
+% if t<0, stop(tObj); h.String(6) = []; 
+% else, h.String{6} = ['Remaining: ' datestr(t, 'MM:SS')];
+% end
 %%
