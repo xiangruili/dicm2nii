@@ -14,7 +14,7 @@ function varargout = nii_tool(cmd, varargin)
 % 
 % nii_tool('default', 'version', 1, 'rgb_dim', 1);
 % nii = nii_tool('init', img);
-% nii = nii_tool('update', nii);
+% nii = nii_tool('update', nii, mat);
 % nii_tool('save', nii, filename, force_3D);
 % hdr = nii_tool('hdr', filename);
 % img = nii_tool('img', filename_or_hdr);
@@ -72,13 +72,16 @@ function varargout = nii_tool(cmd, varargin)
 % RGB in 8th dim.
 % 
 % 
-% nii = nii_tool('update', nii);
+% nii = nii_tool('update', nii, mat);
 % 
 % - Update nii.hdr according to nii.img. This is useful if one changes nii.img
 % type or dimension. The 'save' command calls this internally, so it is not
 % necessary to call this before 'save'. A useful case to call 'update' is that
 % one likes to use nii struct without saving it to a file, and 'update' will
 % make nii.hdr.dim and others correct.
+% 
+% If the 3rd input, new transformation matrix is provided, it will be set as the
+% sform transformation matrix.
 % 
 % 
 % hdr = nii_tool('hdr', filename);
@@ -288,6 +291,8 @@ if strcmpi(cmd, 'init')
         if i<0 || i>8 || mod(i,1)>0, error('Invalid RGB_dim number'); end
         nii.img = permute(nii.img, [1:i-1 i+1:8 i]); % RGB to dim8
     end
+    nii.hdr.file_name = inputname(2);
+    if isempty(nii.hdr.file_name), nii.hdr.file_name = 'tmpNII'; end
     varargout{1} = nii_tool('update', nii); % set datatype etc
     
 elseif strcmpi(cmd, 'save')
@@ -581,6 +586,14 @@ elseif strcmpi(cmd, 'update') % old img2datatype subfunction
     ndim = numel(dim);
     dim(ndim+1:7) = 1;
     
+    if nargin>2 % set new sform mat
+        R = varargin{2};
+        if size(R,2)~=4, error('Invalid matrix dimension.'); end
+        nii.hdr.srow_x = R(1,:);
+        nii.hdr.srow_y = R(2,:);
+        nii.hdr.srow_z = R(3,:);
+    end
+    
     if ndim == 8 % RGB/RGBA data. Change img type to uint8/single if needed
         valpix = dim(8);
         if valpix == 4 % RGBA
@@ -704,14 +717,14 @@ if niiVer == 1
     'srow_y'            4   'single'    [0 1 0 0]       296
     'srow_z'            4   'single'    [0 0 1 0]       312
     'intent_name'       16  'char*1'    ''              328
-    'magic'             4   'char*1'    ''              344
+    'magic'             4   'char*1'    'n+1'           344
     'extension'         4   'uint8'     [0 0 0 0]       348
     };
 
 elseif niiVer == 2
     C = {
     'sizeof_hdr'        1   'int32'     540             0
-    'magic'             8   'char*1'    ''              4
+    'magic'             8   'char*1'    'n+2'           4
     'datatype'          1   'int16'     0               12
     'bitpix'            1   'int16'     0               14
     'dim'               8   'int64'     ones(1,8)       16
