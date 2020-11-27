@@ -1037,13 +1037,13 @@ if bids % parse filename: _task-label
 end
 
 % Store motion parameters for MoCo series
-if all(isfield(s, {'RBMoCoTrans' 'RBMoCoRot'})) && nVol>1
+if ~isempty(csa_header(s, 'RBMoCoRot')) && nVol>1
     inc = numel(h) / nVol;
     s.RBMoCoTrans = zeros(nVol, 3);
     s.RBMoCoRot   = zeros(nVol, 3);
     for j = 1:nVol
-        s.RBMoCoTrans(j,:) = tryGetField(h{(j-1)*inc+1}, 'RBMoCoTrans', [0 0 0]);
-        s.RBMoCoRot(j,:)   = tryGetField(h{(j-1)*inc+1}, 'RBMoCoRot',   [0 0 0]);
+        s.RBMoCoTrans(j,:) = csa_header(h{(j-1)*inc+1}, 'RBMoCoTrans');
+        s.RBMoCoRot(j,:)   = csa_header(h{(j-1)*inc+1}, 'RBMoCoRot');
     end
 end
 
@@ -1653,6 +1653,11 @@ if q(1)<0, q = -q; end % as MRICron
 
 %% Subfunction: get dicom xform matrix and related info
 function [ixyz, R, pixdim, xyz_unit] = xform_mat(s, dim)
+if nargin<2
+    dim = double([s.Columns s.Rows tryGetField(s, 'LocationsInAcquisition', 0)]);
+    nSL = nMosaic(s);
+    if ~isempty(nSL) && nSL>0, dim = [dim(1:2)/ceil(sqrt(nSL)) nSL]; end
+end
 haveIOP = isfield(s, 'ImageOrientationPatient');
 if haveIOP, R = reshape(s.ImageOrientationPatient, 3, 2);
 else, R = [1 0 0; 0 1 0]';
