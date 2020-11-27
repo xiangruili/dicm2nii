@@ -1,4 +1,4 @@
-# DICOM to NIfTI conversion, DICOM and NIfTI tools, NIfTI visualization (version 2020.10.08)
+# DICOM to NIfTI conversion, DICOM and NIfTI tools, NIfTI visualization (version 2020.11.27)
 [![View xiangruili/dicm2nii on File Exchange](https://www.mathworks.com/matlabcentral/images/matlab-file-exchange.svg)](https://www.mathworks.com/matlabcentral/fileexchange/42997-xiangruili-dicm2nii)
 
 # dicm2nii
@@ -26,4 +26,4 @@ Read/write DICOM header and image, independent of Matlab Image Processing Toolbo
 DICOM tools performing the tasks as indicated by the name.
 
 # RT_moco
-Real time motion monitor and more for Siemens scanner.
+Real time motion/image monitor and more for Siemens scanner.
