@@ -371,11 +371,11 @@ h.MouseReleasedCallback = @(~,~)uicontrol(hs.focus); % move focus away
 % h.Focusable = false;
 h.setToolTipText(['<html>Select image to show/modify its display ' ...
     'parameters.<br>Click checkbox to turn on/off image']);
-jScroll = com.mathworks.mwswing.MJScrollPane(h);
+jScroll = com.mathworks.mwswing.MJScrollPane(h); %#ok<*JAPIMATHWORKS>
 width = h.getPreferredScrollableViewportSize.getWidth;
 width = max(60, min(width+20, pos(3)-408)); % 20 pixels for vertical scrollbar
 warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
-[~, hs.scroll] = javacomponent(jScroll, [2 4 width 60], hs.panel);
+[~, hs.scroll] = javacomponent(jScroll, [2 4 width 60], hs.panel); %#ok<*JAVCM>
 hCB = handle(h.getCheckBoxListSelectionModel, 'CallbackProperties');
 hCB.ValueChangedCallback = cb('toggle'); % check/uncheck
 hs.files = javaObjectEDT(h); % trick to avoid java error by Yair
@@ -613,7 +613,7 @@ try % panel has JavaFrame in later matlab
     jFrame = handle(hs.frame.JavaFrame.getGUIDEView, 'CallbackProperties');
 catch
     warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
-    jFrame = fh.JavaFrame.getAxisComponent;
+    jFrame = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
 end
 try java_dnd(jFrame, cb('drop')); catch me, disp(me.message); end
 
