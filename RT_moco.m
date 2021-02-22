@@ -5,7 +5,7 @@ function RT_moco()
 %
 % To make this work, you will need:
 %  1. Set up shared folder at the computer running RT_moco. 
-%     The folder default to ../incoming_DICOM, but better set to youw own by 
+%     The folder default to ../incoming_DICOM, but better set to your own by 
 %     setpref('dicm2nii_gui_para', 'incomingDcm', '/mypath/myIncomingDicom');
 %     The result log will be saved into incoming_DICOM/RTMM_log/ folder.
 %  2. Set up real time image transfer at Siemens console.
@@ -136,8 +136,12 @@ hs.serial = serial(port, 'BaudRate', 115200, 'Terminator', '', 'Tag', 'RTMM', ..
     'BytesAvailableFcn', @serialRead); %#ok
 try fopen(hs.serial); catch, end
 
-hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', ...
-    'StopFcn', @saveResult, 'TimerFcn', @doSeries, 'UserData', fh);
+hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', 'UserData', fh, ...
+    'StopFcn', @saveResult, 'TimerFcn', @doSeries);
+
+hs.countDown = timer('ExecutionMode', 'fixedRate', 'ObjectVisibility', 'off', ...
+    'TimerFcn', {@countDown hs}, 'UserData', 0);
+
 guidata(fh, hs);
 start(hs.timer);
 
@@ -148,7 +152,6 @@ hs.fig.Name(end) = 78 - hs.fig.Name(end); % dot/space switch: timer indicator
 if hs.timer.StartDelay > 1, return; end % no new series
 set(hs.menu, 'Enable', 'off'); set([hs.table hs.slider], 'Enable', 'inactive');
 
-asc_header = dicm2nii('', 'asc_header', 'func_handle');
 dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
 bot = java.awt.Robot(); key = java.awt.event.KeyEvent.VK_SHIFT;
 bot.keyPress(key); bot.keyRelease(key); % wake up screen
@@ -159,9 +162,9 @@ s = dicm_hdr_wait([f '000001.dcm']);
 if isempty(s), return; end % non-image dicom, skip series
 if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
-    hs.subj.String = strrep(s.PatientName, ' ', '_');
+    hs.subj.String = regexprep(s.PatientName, '[_\s]', '');
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
-    try subjCheck(s, hs.rootDir); catch, end % check coil error, physio etc
+    try subjCheck(s); catch, end % check coil error etc
 end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
@@ -194,6 +197,10 @@ if isDTI, nIN = asc_header(s, 'sDiffusion.lDiffDirections') + 1; % free-dir too
 else, nIN = asc_header(s, 'lRepetitions') + 1;
 end
 if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
+dn = dir(s.Filename);
+hs.countDown.UserData = (nIN-1) * s.RepetitionTime/86400000 + dn.datenum;
+if nIN>5 && hs.countDown.Running == "off", start(hs.countDown); end
+
 mos = dicm_img(s); s.PixelData = mos;
 img = mos2vol(mos, nSL);
 p = refVol(img, [s.PixelSpacing' s.SpacingBetweenSlices]);
@@ -218,6 +225,7 @@ for i = 2:nIN
     tEnd = now + 1/1440; % 1 minute no mosaic coming, treat as stopped series
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
+        countDown(hs.countDown, [], hs)
         pause(0.2); 
     end
     s = dicm_hdr_wait(nam, dict); iN = s.InstanceNumber;
@@ -271,6 +279,11 @@ end
 
 %% Initialize GUI for a new series
 function init_series(hs, s, nIN)
+tim = [s.AcquisitionDate(3:end) s.AcquisitionTime(1:6)];
+fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
+fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), tim);
+fclose(fid);
+
 hs.dv.YData = zeros(nIN,1); hs.fd.YData = zeros(nIN,1);
 set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
 if nIN==1, hs.slider.Visible = 'off';
@@ -281,7 +294,7 @@ hs.resp(1).Parent.XLim(2) = hs.ax.XLim(2);
 set(hs.resp, 'XData', nan, 'YData', 1); update_resp(hs);
 set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
-if contains(s.ImageType, '\MOCO'), return; end % use previous series
+if contains(s.ImageType, '\MOCO'), return; end
 hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN 0 0 0}; hs.table.Data];
 hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 
@@ -304,6 +317,7 @@ if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
 c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
 c{4} = datestr(datenum(s.AcquisitionDate, 'yyyymmdd'), 'ddd, mmm dd, yyyy');
 try c{5} = sprintf('TR = %g', s.RepetitionTime); catch, end
+c{6} = ''; % countdown
 
 %% toggle FD display on/off
 function toggleFD(h, ~)
@@ -393,7 +407,7 @@ for i = 1:N
 end 
 hs.table.Data = C;
 s = hs.fig.UserData.hdr{end};
-hs.subj.String = strrep(s.PatientName, ' ', '_');
+hs.subj.String = regexprep(s.PatientName, '[_\s]', '');
 [hs.subj.UserData, nam] = fileparts(s.Filename);
 hs.series.UserData = sscanf(nam, '%u_%u', 1:2);
 tableCB(hs.table, struct('Indices', [1 1])); % show top series
@@ -523,6 +537,7 @@ out = F(I);
 % 001_000001_000001.dcm. All three numbers always start at 1, and are continuous.
 % First is study, second is series and third is instance.
 function new = new_series(hs)
+try setCountDown(hs); catch, end
 f = hs.subj.UserData;
 if ~isempty(f) % check new run for current subj
     iR = hs.series.UserData;
@@ -547,12 +562,45 @@ end
 
 % Delete old subj folder right after mid-night
 if ~exist([hs.rootDir 'host.txt'], 'file') || mod(now,1) > 10/86400; return; end
-if ~isempty(dir([hs.rootDir 'physio_*'])), delete([hs.rootDir 'physio_*']); end
 dirs(now-[dirs.datenum]<2) = []; % keep for 2 days
 for i = 1:numel(dirs)
     try rmdir([hs.rootDir dirs(i).name], 's');
     catch me, disp(me.message); assignin('base', 'me', me);
     end
+end
+
+%% Subfunction: get a parameter in CSA series ASC header: MrPhoenixProtocol
+function val = asc_header(s, key)
+val = []; 
+csa = 'CSASeriesHeaderInfo';
+if ~isfield(s, csa) % in case of multiframe
+    try s.(csa) = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1; catch,end
+end
+if ~isfield(s, csa), return; end
+if isfield(s.(csa), 'MrPhoenixProtocol')
+    str = s.(csa).MrPhoenixProtocol;
+elseif isfield(s.(csa), 'MrProtocol') % older version dicom
+    str = s.(csa).MrProtocol;
+else % in case of failure to decode CSA header
+    str = char(s.(csa)(:)');
+    str = regexp(str, 'ASCCONV BEGIN(.*)ASCCONV END', 'tokens', 'once');
+    if isempty(str), return; end
+    str = str{1};
+end
+
+expr = ['\n' regexptranslate('escape', key) '.*?=\s*(.*?)\n'];
+str = regexp(str, expr, 'tokens', 'once');
+if isempty(str), return; end
+str = strtrim(str{1});
+
+if strncmp(str, '""', 2) % str parameter
+    val = str(3:end-2);
+elseif strncmp(str, '"', 1) % str parameter for version like 2004A
+    val = str(2:end-1);
+elseif strncmp(str, '0x', 2) % hex parameter, convert to decimal
+    val = sscanf(str(3:end), '%x', 1);
+else % decimal
+    val = sscanf(str, '%g', 1);
 end
 
 %% Wait till a file copy is complete
@@ -571,7 +619,8 @@ end
 function closeFig(fh, ~)
 hs = guidata(fh);
 try delete(hs.serial); catch, end
-try hs.timer.StopFcn = ''; stop(hs.timer); delete(hs.timer); catch, end
+try hs.timer.StopFcn = ''; catch, end
+try tObj = timerfindall; stop(tObj); delete(tObj); catch, end
 delete(fh);
 
 %% menu callback for both DERIVED and _SBRef
@@ -647,26 +696,19 @@ hs.instnc.String = num2str(s.InstanceNumber);
 % bot.mousePress(16); bot.mouseRelease(16);
 % set(0, 'PointerLocation', mousexy); % restore mouse location
 
-%% check coil error, physio started, PS form info for CCBBI
-function subjCheck(s, rootDir)
-f = fopen([rootDir 'currentID.txt'], 'w'); fprintf(f, s.PatientName); fclose(f);
-close(findall(0, 'Type', 'figure', 'Tag', 'physiorec'));
+%% Check coil error, PS form info for CCBBI
+function subjCheck(s)
+close(findall(0, 'Type', 'figure', 'Tag', 'coilCheck'));
+if now-getfield(dir(s.Filename), 'datenum') > 9/86400, return; end % likely re-do
+if s.PatientSex=="O" && s.PatientBirthDate=="19850101", return; end % phantom
+cID = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList[0].sCoilElementID.tCoilID');
+nCh = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList.__attribute__.size');
+% nCh = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X');
 txt = {};
-asc_header = dicm2nii('', 'asc_header', 'func_handle');
-coil = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList[0].sCoilElementID.tCoilID');
-nCh = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X');
-if nCh~=32 && coil == "Head_32", txt = {sprintf('%s error? ch=%g.', coil, nCh)}; end
-nextSeries = s.Filename; nextSeries(end-11) = '2'; % next series means re-do
-if ~isfield(s, 'ImageComments') || exist(nextSeries, 'file'), return; end
-isPhantom = s.PatientSex=="O" && s.PatientAge=="035Y" && s.PatientSize==1.8288;
-if ~isPhantom && contains(s.ImageComments, 'physio')
-    fname = [rootDir 'physio_' s.PatientName];
-    if ~exist(fname, 'file'), txt = [txt 'Start Physio Recording!']; end
-end
-if ~isPhantom && ~contains(s.ImageComments, 'PS:')
-    txt = [txt 'No PS info available.'];
-end
-fh = figure('Position', [100 300 800 numel(txt)*100], 'Tag', 'physiorec', ...
+if nCh~=32 && cID == "Head_32", txt = {sprintf('%s error? ch=%g.', cID, nCh)}; end
+if ~contains(s.ImageComments, 'PS:'), txt = [txt 'No PS info available.']; end
+if isempty(txt), return; end
+fh = figure('Position', [100 300 800 numel(txt)*100], 'Tag', 'coilCheck', ...
     'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
 h = uicontrol(fh, 'Style', 'text', 'FontSize', 48, 'Units', 'normalized', ...
     'Position', [0.01 0.01 0.98 0.98], 'String', txt);
@@ -674,7 +716,7 @@ tObj = timer('ExecutionMode', 'fixedRate', 'TasksToExecute', 100, 'StopFcn', @(o
 tObj.TimerFcn = @(~,~)set(h, 'ForegroundColor', 1-h.ForegroundColor);
 start(tObj);
 
-%% Timer StopFunc: Save result, start timer with delay, even after error.
+%% Timer StopFunc: Save result, start timer with delay, even after error
 function saveResult(obj, ~)
 hs = guidata(obj.UserData);
 set([hs.menu hs.table hs.slider], 'Enable', 'on');
@@ -703,7 +745,7 @@ end
 if hs.timer.StartDelay>1, return; end % not during a series
 x = find(~isnan(hs.dv.YData), 1, 'last');
 if isempty(x), x = 0; end
-hs.resp(b).XData(end+1) = x + 1;  hs.resp(b).YData(end+1) = 1;
+hs.resp(b).XData(end+1) = x + 1; hs.resp(b).YData(end+1) = 1;
 update_resp(hs);
 
 %% update response text
@@ -715,23 +757,63 @@ h.Visible = 'on';
 h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
     ", \color[rgb]{0 0.8 0}Correct " + n(3) + ", \color{blue}Total " + sum(n);
 
-%% need PhoenixZIPReport to arrive after scan starts
-% function setCountDown(hs, s)
-% h = tObj.UserData;
-% a = dir(s.Filename);
-% if contains(s.ImageType, 'DERIVED') || contains(s.ImageType, '\MOCO') || ...
-%         endsWith(s.SeriesDescription, '_SBRef') || now-a.datenum>5/86400
-%     h.Visible = 'off';
-%     try stop(tObj); catch, end
-%     return;
-% end
-% h.UserData.tEnd = a.datenum + (asc_header(s, 'lTotalScanTimeSec') - 1) / 86400;
-% h.Visible = 'on';
-% start(tObj);
-% 
-% function countDown(tObj, ~, h)
-% t = tObj.UserData.tEnd - now;
-% if t<0, stop(tObj); h.String(6) = []; 
-% else, h.String{6} = ['Remaining: ' datestr(t, 'MM:SS')];
-% end
+%% start countdown
+function setCountDown(hs)
+c = fileread([hs.rootDir 'syngo.log']); % C:\MedCom\log\syngo.MR.Exam.Appl.log
+tFmt = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?';
+
+a = regexp(c, [tFmt 'step ''(.*?) [.*?''MeasStarted'''], 'tokens', 'dotexceptnewline');
+dn0 = datenum(a{end}{1}, 'yyyy-mm-dd HH:MM:SS');
+proc = a{end}{2}; % last proc
+if numel(a)==1, hs.subj.String = fileread([hs.rootDir 'host.txt']); end
+
+a = regexp(c, [tFmt 'StoppedByUser'], 'tokens', 'dotexceptnewline');
+if ~isempty(a) && hs.countDown.Running == "on" && datenum(a{end}{1}, 'yyyy-mm-dd HH:MM:SS') > dn0
+    stop(hs.countDown);
+    hs.series.String{6} = 'Stopped by operator';
+end
+
+% OCR to get time from "Scanning 05:42" screenshot
+mmss = [hs.rootDir 'syngo.bmp'];
+if hs.countDown.Running == "on", [~,~] = system(['rm ' mmss]); return; end
+dn = dir(mmss);
+if isempty(dn) || dn.bytes<100 || now-dn.datenum<0.1/86400, return; end
+im = imread(mmss);
+im = uint8(interp2(double(im(end+(-25:0), 1:96, 1)), 5, 'cubic'));
+try 
+    txt = ocr(im, 'CharacterSet', 'Scanig0123456789:'); % computer vision toolbox
+catch
+    imwrite(im, './tmp.bmp')
+    [~, txt.Text] = system('env LD_LIBRARY_PATH='''' tesseract ./tmp.bmp -');
+end
+t2 = sscanf(txt.Text, 'Scanning %2d:%2d');
+if numel(t2)<2, return; end
+tEnd = dn.datenum + [60 1]*t2/86400;
+delete(mmss);
+
+if tEnd-now < 2/86400, return; end
+hs.countDown.UserData = tEnd;
+start(hs.countDown);
+hs.dv.YData = hs.dv.YData*0; hs.fd.YData = hs.dv.YData;
+hs.slider.Visible = 'off';
+set(hs.resp, 'XData', nan, 'YData', 1); update_resp(hs);
+set([hs.instnc hs.pct], 'String', '');
+set_img(hs.img, zeros(2));
+hs.series.String = {proc '' datestr(dn0, 'HH:MM:SS AM') ...
+    datestr(dn0, 'ddd, mmm dd, yyyy') '' ''};
+if isempty(hs.subj.String), return; end
+fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
+fprintf(fid, '%s_%s_%s', hs.subj.String, proc, datestr(dn0, 'yymmddHHMMSS'));
+fclose(fid);
+
+%% timer func to show scanning time
+function countDown(tObj, ~, hs)
+t = tObj.UserData - now;
+if t<0
+    stop(tObj); hs.series.String{6} = ''; 
+else
+    hs.series.String{6} = ['Scanning ' datestr(t, 'MM:SS')];
+    [~,~] = system(['rm ' hs.rootDir 'syngo.bmp']);
+end
+
 %%
