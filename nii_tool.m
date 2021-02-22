@@ -328,7 +328,7 @@ elseif strcmpi(cmd, 'save')
     % Deal with NIfTI version and sizeof_hdr
     niiVer = para.version;
     if isfield(nii.hdr, 'version'), niiVer = nii.hdr.version; end
-    if niiVer==1 && any(nii.hdr.dim(2:end) > 32767), niiVer = 2; end
+    if niiVer<2 && any(nii.hdr.dim(2:end) > 32767), niiVer = 2; end
 
     if niiVer == 1
         nii.hdr.sizeof_hdr = 348; % in case it was loaded from other version
