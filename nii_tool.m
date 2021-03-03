@@ -264,6 +264,7 @@ function varargout = nii_tool(cmd, varargin)
 % 180104 check_gzip: add /usr/local/bin to PATH for unix if needed.
 % 180119 use jsystem for better speed.
 % 180710 bug fix for cal_max/cal_min in 'update'.
+% 210302 take care of unicode char in hdr (Thx Yong).
 
 persistent C para; % C columns: name, length, format, value, offset
 if isempty(C)
@@ -420,6 +421,11 @@ elseif strcmpi(cmd, 'save')
         else % niiVer=2 omit some fields, also take care of other cases
             val = C0{i,4};
         end
+        fmt0 = C0{i,3};
+        if strcmp(C0{i,3}, 'char')
+            val = unicode2native(val);
+            fmt0 = 'uint8';
+        end
         n = numel(val);
         len = C0{i,2};
         if n>len
@@ -427,7 +433,7 @@ elseif strcmpi(cmd, 'save')
         elseif n<len
             val(n+1:len) = 0; % pad 0, normally for char
         end
-        fwrite(fid, val, C0{i,3});
+        fwrite(fid, val, fmt0);
     end
     
     % Write nii ext: extension is in hdr
@@ -677,7 +683,7 @@ if niiVer == 1
     % name              len  format     value           offset
     'sizeof_hdr'        1   'int32'     348             0
     'data_type'         10  'char*1'    ''              4
-    'db_name'           18  'char*1'    ''              14
+    'db_name'           18  'char'      ''              14
     'extents'           1   'int32'     16384           32
     'session_error'     1   'int16'     0               36
     'regular'           1   'char*1'    'r'             38
@@ -703,8 +709,8 @@ if niiVer == 1
     'toffset'           1   'single'    0               136
     'glmax'             1   'int32'     0               140
     'glmin'             1   'int32'     0               144
-    'descrip'           80  'char*1'    ''              148
-    'aux_file'          24  'char*1'    ''              228
+    'descrip'           80  'char'      ''              148
+    'aux_file'          24  'char'      ''              228
     'qform_code'        1   'int16'     0               252
     'sform_code'        1   'int16'     0               254
     'quatern_b'         1   'single'    0               256
@@ -716,7 +722,7 @@ if niiVer == 1
     'srow_x'            4   'single'    [1 0 0 0]       280
     'srow_y'            4   'single'    [0 1 0 0]       296
     'srow_z'            4   'single'    [0 0 1 0]       312
-    'intent_name'       16  'char*1'    ''              328
+    'intent_name'       16  'char'      ''              328
     'magic'             4   'char*1'    'n+1'           344
     'extension'         4   'uint8'     [0 0 0 0]       348
     };
@@ -741,8 +747,8 @@ elseif niiVer == 2
     'toffset'           1   'double'    0               216
     'slice_start'       1   'int64'     0               224
     'slice_end'         1   'int64'     0               232
-    'descrip'           80  'char*1'    ''              240
-    'aux_file'          24  'char*1'    ''              320
+    'descrip'           80  'char'      ''              240
+    'aux_file'          24  'char'      ''              320
     'qform_code'        1   'int32'     0               344
     'sform_code'        1   'int32'     0               348
     'quatern_b'         1   'double'    0               352
@@ -757,9 +763,9 @@ elseif niiVer == 2
     'slice_code'        1   'int32'     0               496
     'xyzt_units'        1   'int32'     0               500
     'intent_code'       1   'int32'     0               504
-    'intent_name'       16  'char*1'    ''              508
+    'intent_name'       16  'char'      ''              508
     'dim_info'          1   'uint8'     0               524
-    'unused_str'        15  'char*1'    ''              525
+    'unused_str'        15  'char'      ''              525
     'extension'         4   'uint8'     [0 0 0 0]       540
     };
 else
@@ -964,6 +970,8 @@ for i = 1:size(C,1)
     end
     if strcmp(C{i,3}, 'char*1')
         a = deblank(char(a));
+    elseif strcmp(C{i,3}, 'char')
+        a = deblank(native2unicode(a));
     else
         a = cast_swap(a, C{i,3}, swap);
         a = double(a);
