@@ -739,6 +739,7 @@ b = fread(s, 1);
 hs = guidata(s.UserData.fig);
 if     b == '?', fwrite(s, uint8('RTMM')); return; % identity
 elseif b == 'P', fwrite(s, uint8(hs.subj.String)); return; % PatientName
+elseif b == 'T', fwrite(s, uint8(hs.series.String{6})); return; % count down
 elseif b == 'M', s.UserData.send = true; return; % start to send motion info
 elseif b<1 || b>3, return; % ignore for now
 end
@@ -760,15 +761,15 @@ h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
 %% start countdown
 function setCountDown(hs)
 c = fileread([hs.rootDir 'syngo.log']); % C:\MedCom\log\syngo.MR.Exam.Appl.log
-tFmt = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?';
+tFmt = 'yyyy-mm-dd HH:MM:SS'; expr = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?';
 
-a = regexp(c, [tFmt 'step ''(.*?) [.*?''MeasStarted'''], 'tokens', 'dotexceptnewline');
-dn0 = datenum(a{end}{1}, 'yyyy-mm-dd HH:MM:SS');
+a = regexp(c, [expr 'step ''(.*?) [.*?''MeasStarted'''], 'tokens', 'dotexceptnewline');
+dn0 = datenum(a{end}{1}, tFmt);
 proc = a{end}{2}; % last proc
 if numel(a)==1, hs.subj.String = fileread([hs.rootDir 'host.txt']); end
 
-a = regexp(c, [tFmt 'StoppedByUser'], 'tokens', 'dotexceptnewline');
-if ~isempty(a) && hs.countDown.Running == "on" && datenum(a{end}{1}, 'yyyy-mm-dd HH:MM:SS') > dn0
+a = regexp(c, [expr 'StoppedByUser'], 'tokens', 'dotexceptnewline');
+if ~isempty(a) && hs.countDown.Running == "on" && datenum(a{end}{1}, tFmt) > dn0
     stop(hs.countDown);
     hs.series.String{6} = 'Stopped by operator';
 end
