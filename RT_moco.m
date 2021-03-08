@@ -164,7 +164,6 @@ if all(iRun == 1) % first series: reset GUI
     closeSubj(hs.fig);
     hs.subj.String = regexprep(s.PatientName, '[_\s]', '');
     close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
-    try subjCheck(s); catch, end % check coil error etc
 end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
@@ -696,26 +695,6 @@ hs.instnc.String = num2str(s.InstanceNumber);
 % bot.mousePress(16); bot.mouseRelease(16);
 % set(0, 'PointerLocation', mousexy); % restore mouse location
 
-%% Check coil error, PS form info for CCBBI
-function subjCheck(s)
-close(findall(0, 'Type', 'figure', 'Tag', 'coilCheck'));
-if now-getfield(dir(s.Filename), 'datenum') > 9/86400, return; end % likely re-do
-if s.PatientSex=="O" && s.PatientBirthDate=="19850101", return; end % phantom
-cID = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList[0].sCoilElementID.tCoilID');
-nCh = asc_header(s, 'sCoilSelectMeas.aRxCoilSelectData[0].asList.__attribute__.size');
-% nCh = sum(s.CSAImageHeaderInfo.UsedChannelString == 'X');
-txt = {};
-if nCh~=32 && cID == "Head_32", txt = {sprintf('%s error? ch=%g.', cID, nCh)}; end
-if ~contains(s.ImageComments, 'PS:'), txt = [txt 'No PS info available.']; end
-if isempty(txt), return; end
-fh = figure('Position', [100 300 800 numel(txt)*100], 'Tag', 'coilCheck', ...
-    'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
-h = uicontrol(fh, 'Style', 'text', 'FontSize', 48, 'Units', 'normalized', ...
-    'Position', [0.01 0.01 0.98 0.98], 'String', txt);
-tObj = timer('ExecutionMode', 'fixedRate', 'TasksToExecute', 100, 'StopFcn', @(o,~)delete(o));
-tObj.TimerFcn = @(~,~)set(h, 'ForegroundColor', 1-h.ForegroundColor);
-start(tObj);
-
 %% Timer StopFunc: Save result, start timer with delay, even after error
 function saveResult(obj, ~)
 hs = guidata(obj.UserData);
@@ -763,7 +742,7 @@ function setCountDown(hs)
 c = fileread([hs.rootDir 'syngo.log']); % C:\MedCom\log\syngo.MR.Exam.Appl.log
 tFmt = 'yyyy-mm-dd HH:MM:SS'; expr = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?';
 
-a = regexp(c, [expr 'step ''(.*?) [.*?''MeasStarted'''], 'tokens', 'dotexceptnewline');
+a = regexp(c, [expr 'MeasStarted>.*step ''(.*?) \[\d+\]'], 'tokens', 'dotexceptnewline');
 dn0 = datenum(a{end}{1}, tFmt);
 proc = a{end}{2}; % last proc
 if numel(a)==1, hs.subj.String = fileread([hs.rootDir 'host.txt']); end
