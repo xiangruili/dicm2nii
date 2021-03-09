@@ -196,9 +196,6 @@ if isDTI, nIN = asc_header(s, 'sDiffusion.lDiffDirections') + 1; % free-dir too
 else, nIN = asc_header(s, 'lRepetitions') + 1;
 end
 if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
-dn = dir(s.Filename);
-hs.countDown.UserData = (nIN-1) * s.RepetitionTime/86400000 + dn.datenum;
-if nIN>5 && hs.countDown.Running == "off", start(hs.countDown); end
 
 mos = dicm_img(s); s.PixelData = mos;
 img = mos2vol(mos, nSL);
@@ -224,8 +221,8 @@ for i = 2:nIN
     tEnd = now + 1/1440; % 1 minute no mosaic coming, treat as stopped series
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
-        countDown(hs.countDown, [], hs)
-        pause(0.2); 
+        setCountDown(hs); % detect StoppedByUser
+        pause(0.2);
     end
     s = dicm_hdr_wait(nam, dict); iN = s.InstanceNumber;
     mos = dicm_img(s);
@@ -739,39 +736,29 @@ h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
 
 %% start countdown
 function setCountDown(hs)
-c = fileread([hs.rootDir 'syngo.log']); % C:\MedCom\log\syngo.MR.Exam.Appl.log
-tFmt = 'yyyy-mm-dd HH:MM:SS'; expr = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?';
-
-a = regexp(c, [expr 'MeasStarted>.*step ''(.*?) \[\d+\]'], 'tokens', 'dotexceptnewline');
-dn0 = datenum(a{end}{1}, tFmt);
-proc = a{end}{2}; % last proc
-if numel(a)==1, hs.subj.String = fileread([hs.rootDir 'host.txt']); end
-
-a = regexp(c, [expr 'StoppedByUser'], 'tokens', 'dotexceptnewline');
-if ~isempty(a) && hs.countDown.Running == "on" && datenum(a{end}{1}, tFmt) > dn0
-    stop(hs.countDown);
-    hs.series.String{6} = 'Stopped by operator';
+nam = [hs.rootDir 'ScanSec'];
+dn = dir(nam);
+if isempty(dn), return; end
+c = fileread(nam);
+delete(nam);
+if contains(c, 'OnStoppedByUser')
+    if hs.countDown.Running == "on"
+        stop(hs.countDown);
+        hs.series.String{6} = 'Stopped by operator';
+    end
+    return;
 end
 
-% OCR to get time from "Scanning 05:42" screenshot
-mmss = [hs.rootDir 'syngo.bmp'];
-if hs.countDown.Running == "on", [~,~] = system(['rm ' mmss]); return; end
-dn = dir(mmss);
-if isempty(dn) || dn.bytes<100 || now-dn.datenum<0.1/86400, return; end
-im = imread(mmss);
-im = uint8(interp2(double(im(end+(-25:0), 1:96, 1)), 5, 'cubic'));
-try 
-    txt = ocr(im, 'CharacterSet', 'Scanig0123456789:'); % computer vision toolbox
-catch
-    imwrite(im, './tmp.bmp')
-    [~, txt.Text] = system('env LD_LIBRARY_PATH='''' tesseract ./tmp.bmp -');
-end
-t2 = sscanf(txt.Text, 'Scanning %2d:%2d');
-if numel(t2)<2, return; end
-tEnd = dn.datenum + [60 1]*t2/86400;
-delete(mmss);
+proc = regexp(c, '(?<=tProtocolName\s*=\s*").*?(?=")', 'match', 'once');
+secs = str2double(regexp(c, '(?<=lTotalScanTimeSec\s*=\s*)\d+', 'match', 'once'));
+expr = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?MeasStarted>.*step ''(.*?) \[\d+\]';
+toks = regexp(c, expr, 'tokens', 'once', 'dotexceptnewline');
+dn0 = datenum(toks{1}, 'yyyy-mm-dd HH:MM:SS');
+tim = regexp(c, '\w{3} \d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}.\d{2}', 'match', 'once');
+dn1 = datenum(tim, 'ddd mm/dd/yyyy HH:MM:SS.fff');
+tEnd = dn0 + secs/86400 + dn.datenum - dn1;
+if tEnd-now<2/86400 || ~strcmp(proc, toks{2}), return; end
 
-if tEnd-now < 2/86400, return; end
 hs.countDown.UserData = tEnd;
 start(hs.countDown);
 hs.dv.YData = hs.dv.YData*0; hs.fd.YData = hs.dv.YData;
@@ -781,19 +768,16 @@ set([hs.instnc hs.pct], 'String', '');
 set_img(hs.img, zeros(2));
 hs.series.String = {proc '' datestr(dn0, 'HH:MM:SS AM') ...
     datestr(dn0, 'ddd, mmm dd, yyyy') '' ''};
-if isempty(hs.subj.String), return; end
 fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
-fprintf(fid, '%s_%s_%s', hs.subj.String, proc, datestr(dn0, 'yymmddHHMMSS'));
+subj = fileread([hs.rootDir 'host.txt']);
+fprintf(fid, '%s_%s_%s', subj, proc, datestr(dn0, 'yymmddHHMMSS'));
 fclose(fid);
 
 %% timer func to show scanning time
 function countDown(tObj, ~, hs)
 t = tObj.UserData - now;
-if t<0
-    stop(tObj); hs.series.String{6} = ''; 
-else
-    hs.series.String{6} = ['Scanning ' datestr(t, 'MM:SS')];
-    [~,~] = system(['rm ' hs.rootDir 'syngo.bmp']);
+if t<0, stop(tObj); hs.series.String{6} = ''; 
+else, hs.series.String{6} = ['Scanning ' datestr(t, 'MM:SS')];
 end
 
 %%
