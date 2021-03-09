@@ -1070,10 +1070,10 @@ elseif iPhase == 1, fps_bits = [4 1 16];
 else,               fps_bits = [0 0 16];
 end
 
-% Reorient if MRAcquisitionType==3D || isDTI && nSL>1
+% Reorient if MRAcquisitionType==3D && nSL>1
 % If FSL etc can read dim_info for STC, we can always reorient.
 [~, perm] = sort(ixyz); % may permute 3 dimensions in this order
-if (strcmp(tryGetField(s, 'MRAcquisitionType', ''), '3D') || s.isDTI) && ...
+if strcmp(tryGetField(s, 'MRAcquisitionType', ''), '3D') && ...
         dim(3)>1 && (~isequal(perm, 1:3)) % skip if already XYZ order
     R(:, 1:3) = R(:, perm); % xform matrix after perm
     fps_bits = fps_bits(perm);
