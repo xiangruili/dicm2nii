@@ -153,7 +153,6 @@ function varargout = dicm2nii(src, niiFolder, fmt)
 % TODO: need testing files to figure out following parameters:
 %    flag for MOCO series for GE/Philips
 %    GE non-axial slice (phase: ROW) bvec sign
-%    Phase image flag for GE
 
 if nargout, varargout{1} = ''; end
 if nargin==3 && ischar(fmt) && strcmp(fmt, 'func_handle') % special purpose
@@ -282,7 +281,8 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'PixelRepresentation' 'BitsStored' 'HighBit' 'SamplesPerPixel' ...
     'PlanarConfiguration' 'EchoTime' 'RescaleIntercept' 'RescaleSlope' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
-    'TriggerTime' 'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber'};
+    'TriggerTime' 'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber' ...
+    'CoilString'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
 % read header for all files, use parpool if available and worthy
@@ -298,68 +298,90 @@ for k = 1:nFile
         break; 
     end
 end
-if ~no_save, fprintf('(%g valid)\n', sum(~cellfun(@isempty,hh))); end
+hh(cellfun(@(c)isempty(c) || any(~isfield(c, flds(1:2))) || ~isfield(c, 'PixelData') ...
+    || (isstruct(c.PixelData) && c.PixelData.Bytes<1), hh)) = [];
+if ~no_save, fprintf('(%g valid)\n', numel(hh)); end
 
-%% sort headers into cell h by SeriesInstanceUID, EchoTime and InstanceNumber
+%% sort headers into cell h by SeriesInstanceUID/SeriesNumber
 h = {}; % in case of no dicom files at all
-errInfo = '';
-seriesUIDs = {}; ETs = {};
-for k = 1:nFile
-    s = hh{k};
-    if isempty(s) || any(~isfield(s, flds(1:2))) || ~isfield(s, 'PixelData') ...
-            || (isstruct(s.PixelData) && s.PixelData.Bytes<1)
-        if ~isempty(errStr{k}) % && isempty(strfind(errInfo, errStr{k}))
-            errInfo = sprintf('%s\n%s\n', errInfo, errStr{k});
-        end
-        continue; % ingore the file
-    end
-
-    if isfield(s, flds{4}) && (pf.use_seriesUID || ~isfield(s, 'SeriesNumber'))
-        sUID = s.SeriesInstanceUID;
-    else % make up UID
-        if isfield(s, 'SeriesNumber'), sN = s.SeriesNumber; 
-        else, sN = fix(toc*1e6); % unique sN for each dicm file
-        end
-        sUID = sprintf('%s%g', tryGetField(s, 'SeriesDescription', ''), sN);
-    end
-    
-    m = find(strcmp(sUID, seriesUIDs));
-    if isempty(m)
-        m = numel(seriesUIDs) + 1;
-        seriesUIDs{m} = sUID;
-        ETs{m} = [];
-    end
-    
-    % EchoTime is needed for Siemens fieldmap mag series
-    et = tryGetField(s, 'EchoTime');
-    if isempty(et), i = 1;
-    else
-        i = find(et == ETs{m}); % strict equal?
-        if isempty(i)
-            i = numel(ETs{m}) + 1;
-            ETs{m}(i) = et;
-            if i>1
-                [ETs{m}, ind] = sort(ETs{m});
-                i = find(et == ETs{m});
-                h{m}{end+1}{1} = [];
-                h{m} = h{m}(ind);
-            end
-        end
-    end
-    j = tryGetField(s, 'InstanceNumber');
-    if isempty(j) || j<1
-        try j = numel(h{m}{i}) + 1;
-        catch, j = 1; 
-        end
-    end
-    h{m}{i}{j} = s; % sort partial header
+if pf.use_seriesUID % use UID unless asked not to do so
+    hasID = cellfun(@(c)isfield(c,'SeriesInstanceUID'), hh);
+    hh0 = hh(hasID);
+    sUID = cellfun(@(c)c.SeriesInstanceUID, hh0, 'UniformOutput', false);
+    [sUID, ~, ic] = unique(sUID);
+    for k = 1:numel(sUID), h{k} = hh0(ic==k); end
+    hh = hh(~hasID); % likely none after UID
 end
-clear hh errStr;
+hasSN = cellfun(@(c)isfield(c,'SeriesNumber'), hh);
+hh0 = hh(hasSN);
+sNs = cellfun(@(c)c.SeriesNumber, hh0);
+[sNs, ~, ic] = unique(sNs);
+n = numel(h);
+for k = 1:numel(sNs), h{k+n} = hh0(ic==k); end % rely on SN
+hh = hh(~hasSN);
+n = numel(h);
+for k = 1:numel(hh), h{k+n} = hh(k); end % treat as separate series if no SN
+
+%% Split each series by CoilString (seen for uncombined Siemens)
+hSuf = repmat({''}, 1, numel(h));
+for i = 1:numel(h)
+    hh = h{i};
+    try
+        cs = cellfun(@(c)c.CoilString, hh, 'UniformOutput', false);
+        [cs, ~, ic] = unique(cs);
+        if numel(cs)<2, continue; end
+        for k = 1:numel(cs)
+            h{end+1} = hh(ic==k); hSuf{end+1} = ['_c' cs{k}]; % like dcm2niix
+        end
+        h{i} = [];
+    end
+end
+a = cellfun(@isempty, h);
+h(a) = []; hSuf(a) = [];
+
+%% Split series by ComplexImageComponent
+for i = 1:numel(h)
+    hh = h{i};
+    try
+        cs = cellfun(@(c)c.ComplexImageComponent, hh, 'UniformOutput', false);
+        [cs, ~, ic] = unique(cs);
+        if numel(cs)<2, continue; end
+        for k = 1:numel(cs)
+            h{end+1} = hh(ic==k); hSuf{end+1} = ['_' cs{k}];
+        end
+        h{i} = [];
+    end
+end
+a = cellfun(@isempty, h);
+h(a) = []; hSuf(a) = [];
+
+%% Split series by EchoTime
+for i = 1:numel(h)
+    hh = h{i};
+    try
+        [ETs, ~, ic] = unique(cellfun(@(c)c.EchoTime, hh));
+        if numel(ETs)<2, continue; end
+        for k = 1:numel(ETs)
+            h{end+1} = hh(ic==k); hSuf{end+1} = [hSuf{i} '_e' num2str(k)];
+        end
+        h{i} = [];
+    end
+end
+a = cellfun(@isempty, h);
+h(a) = []; hSuf(a) = [];
+
+%% sort each series by InstanceNumber
+for i = 1:numel(h)
+    try
+        [~, ia] = sort(cellfun(@(c)c.InstanceNumber, h{i}));
+        h{i} = h{i}(ia);
+    end
+end
 
 %% Check headers: remove dim-inconsistent series
 nRun = numel(h);
 if nRun<1 % no valid series
-    errorLog(sprintf('No valid files found:\n%s.', errInfo)); 
+    errorLog(sprintf('No valid files found:\n%s.', strjoin(unique(errStr), '\n'))); 
     return;
 end
 keep = true(1, nRun); % true for useful runs
@@ -369,9 +391,6 @@ fldsCk = {'ImageOrientationPatient' 'NumberOfFrames' 'Columns' 'Rows' ...
           'PixelSpacing' 'RescaleIntercept' 'RescaleSlope' 'SamplesPerPixel' ...
           'SpacingBetweenSlices' 'SliceThickness'}; % last for thickness
 for i = 1:nRun
-    h{i} = [h{i}{:}]; % concatenate different EchoTime
-    h{i}(cellfun(@isempty, h{i})) = []; % remove all empty cell
-    
     s = h{i}{1};
     if ~isfield(s, 'LastFile') % avoid re-read for PAR/HEAD/BV file
         s = dicm_hdr(s.Filename); % full header for 1st file
@@ -399,12 +418,6 @@ for i = 1:nRun
         for k = 2:nFile % this can be slow: improve in the future
             h{i}{k} = dicm_hdr(h{i}{k}.Filename); % full header
             h{i}{k} = multiFrameFields(h{i}{k});
-        end
-        if ~isfield(s, 'EchoTimes') && isfield(s, 'EchoTime')
-            h{i}{1}.EchoTimes = nan(1, nFile);
-            for k = 1:nFile
-                h{i}{1}.EchoTimes(k) = tryGetField(h{i}{k}, 'EchoTime', 0); 
-            end
         end
     end
     
@@ -447,7 +460,7 @@ for i = 1:nRun
         if s.isDTI, continue; end % allow missing directions for DTI
         a = zeros(1, nFile);
         for j = 1:nFile, a(j) = tryGetField(h{i}{j}, 'InstanceNumber', 1); end
-        if any(diff(a) ~= 1) % like CMRR ISSS seq or multi echo. Error for UIH
+        if numel(unique(diff(4)))>1 % like CMRR ISSS seq or multi echo. Error for UIH
             errorLog(['InstanceNumber discontinuity detected for ' series '.' ...
                 'See VolumeTiming in NIfTI ext or dcmHeaders.mat.']);
             dict = dicm_dict('', {'AcquisitionDate' 'AcquisitionTime'});
@@ -498,7 +511,7 @@ for i = 1:nRun
         if isfield(h{i}{1}, fldsCk{k}), h{i}{1}.(fldsCp{j}) = s.(fldsCp{j}); end
     end
 end
-h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); 
+h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); hSuf = hSuf(keep);
 subjs = subjs(keep); vendor = vendor(keep);
 subj = unique(subjs);
 acq = unique(acqs(keep));
@@ -506,11 +519,11 @@ acq = unique(acqs(keep));
 % sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
 [~, ind] = sortrows([subjs' studyIDs' num2cell(sNs')]);
-h = h(ind); subjs = subjs(ind); studyIDs = studyIDs(ind); sNs = sNs(ind);
+h = h(ind); subjs = subjs(ind); studyIDs = studyIDs(ind); sNs = sNs(ind); hSuf = hSuf(ind);
 multiStudy = cellfun(@(c)numel(unique(studyIDs(strcmp(subjs,c))))>1, subjs);
 
 %% Generate unique result file names
-% Unique names are in format of SeriesDescription_s007. Special cases are: 
+% Unique names are in format of SeriesDescription[_hSuf]_s007. Special cases are: 
 %  for phase image, such as field_map phase, append '_phase' to the name;
 %  for MoCo series, append '_MoCo' to the name if both series are present.
 %  for multiple subjs, it is SeriesDescription_subj_s007
@@ -527,7 +540,7 @@ j_s = nan(nRun, 1); % index-1 for _s003. needed if 4+ length SeriesNumbers
 for i = 1:nRun
     s = h{i}{1};
     sN = sNs(i);
-    a = ProtocolName(s);
+    a = [ProtocolName(s) hSuf{i}];
     if isPhase(s), a = [a '_phase']; end % phase image
     if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\'), a = [a '_MoCo']; end
     if multiSubj, a = [a '_' subjs{i}]; end
@@ -1007,21 +1020,13 @@ if ~isfield(h{1}, 'CardiacTriggerDelayTimes') && nVol>1 && isfield(h{1}, fld)
     if ~all(diff(tt)==0), h{1}.CardiacTriggerDelayTimes = tt; end
 end
 
-% Get EchoTime for each vol
-if ~isfield(h{1}, 'EchoTimes') && nVol>1 && isfield(h{1}, 'EchoTime')
-    if numel(h) == 1 % 4D multi frames
-        iFrames = 1:dim(3):dim(3)*nVol;
-        if isfield(h{1}, 'SortFrames'), iFrames = h{1}.SortFrames(iFrames); end
-        s2 = struct('EffectiveEchoTime', nan(1,nVol));
-        s2 = dicm_hdr(h{1}, s2, iFrames);
-        ETs = s2.EffectiveEchoTime;
-    else % regular dicom. Vida done previously
-        ETs = zeros(1, nVol);
-        inc = numel(h) / nVol;
-        for j = 1:nVol
-            ETs(j) = tryGetField(h{(j-1)*inc+1}, 'EchoTime', 0);
-        end
-    end
+% Get EchoTime for each vol for 4D multi frames
+if ~isfield(h{1}, 'EchoTimes') && nVol>1 && isfield(h{1}, 'EchoTime') && numel(h)<2
+    iFrames = 1:dim(3):dim(3)*nVol;
+    if isfield(h{1}, 'SortFrames'), iFrames = h{1}.SortFrames(iFrames); end
+    s2 = struct('EffectiveEchoTime', nan(1,nVol));
+    s2 = dicm_hdr(h{1}, s2, iFrames);
+    ETs = s2.EffectiveEchoTime;
     if ~all(diff(ETs)==0), h{1}.EchoTimes = ETs; end
 end
 
