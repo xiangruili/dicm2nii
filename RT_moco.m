@@ -59,13 +59,13 @@ if res(3) < res(4) % Portrait
     pa2 = panel([0 0 1 0.62]); % table and plot
     axPos = [0.05 0.01 0.65 0.99]; % img axis
     lbPos = [0.7 0.01 0.29 1]; % label axis
-    subjPos = [0.85 0.98]; seriesPos = [0.85 0.02]; ha = 'right';
+    subjPos = [0.85 0.98]; seriesPos = [0.85 0.02]; msPos = [0.85 0.7]; ha = 'right';
 else
     pa1 = panel([0 0 0.38 1]);
     pa2 = panel([0.38 0 0.62 1]);
     axPos = [0.05 0.31 0.9 0.67];
     lbPos = [0.05 0.01 0.9 0.3]; 
-    subjPos = [0 0.98]; seriesPos = [1 0.1]; ha = 'left';
+    subjPos = [0 0.98]; seriesPos = [1 0.1]; msPos = [0 0.6]; ha = 'left';
 end
 
 dy = 0.12 * (0:3);
@@ -116,6 +116,9 @@ hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ..
 hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
     'Interpreter', 'none', 'UserData', [1 0]);
+hs.MMSS = text(ax, 'Position', msPos, 'FontSize', 18, 'FontWeight', 'bold', ...
+    'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
+    'String', {'' ''}, 'Color', 'b');
 
 ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off', 'CLim', [0 1]);
 hs.img = image(ax, 'CData', ones(2)*0.94, 'CDataMapping', 'scaled');
@@ -196,6 +199,11 @@ if isDTI, nIN = asc_header(s, 'sDiffusion.lDiffDirections') + 1; % free-dir too
 else, nIN = asc_header(s, 'lRepetitions') + 1;
 end
 if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
+if nIN>5 && hs.countDown.Running == "off" % work for mosaic without tricks
+    dn = dir(s.Filename);
+    hs.countDown.UserData = (nIN-1) * s.RepetitionTime/86400000 + dn.datenum;
+    start(hs.countDown);
+end
 
 mos = dicm_img(s); s.PixelData = mos;
 img = mos2vol(mos, nSL);
@@ -221,7 +229,7 @@ for i = 2:nIN
     tEnd = now + 1/1440; % 1 minute no mosaic coming, treat as stopped series
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
-        setCountDown(hs); % detect StoppedByUser
+        if hs.countDown.Running=="on", countDown(hs.countDown, 0, hs); end
         pause(0.2);
     end
     s = dicm_hdr_wait(nam, dict); iN = s.InstanceNumber;
@@ -292,6 +300,7 @@ set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
 if contains(s.ImageType, '\MOCO'), return; end
 hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN 0 0 0}; hs.table.Data];
+try hs.table.Multiselect = 'off'; hs.table.Selection = [1 1]; end %#ok R2020a+
 hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 
 %% Set img and img axis
@@ -313,7 +322,6 @@ if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
 c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
 c{4} = datestr(datenum(s.AcquisitionDate, 'yyyymmdd'), 'ddd, mmm dd, yyyy');
 try c{5} = sprintf('TR = %g', s.RepetitionTime); catch, end
-c{6} = ''; % countdown
 
 %% toggle FD display on/off
 function toggleFD(h, ~)
@@ -675,23 +683,6 @@ if isempty(s), return; end
 hs.img.CData = dicm_img(s);
 hs.instnc.String = num2str(s.InstanceNumber);
 
-% %% Java robot click cell(1,1) of uitable
-% function uitable_cell(hs)
-% % uitable has no way to programmatially select a cell till R2020a
-% res = get(0, 'ScreenSize');
-% figure(hs.fig); drawnow;
-% posF = getpixelposition(hs.fig);
-% posT = getpixelposition(hs.table, true);
-% % ugly solution for now: title and height for FontSize=14 from findjobj
-% if ispc, ht = [49 27]; elseif ismac, ht = [46 20]; else, ht = [46 24]; end 
-% dY = ht(1) + ht(2)*(1-0.5); % 1 for first row
-% xy = posF(1:2) + posT(1:2) + [hs.table.ColumnWidth{1}/2 posT(4)-dY]; 
-% bot = java.awt.Robot();
-% mousexy = get(0, 'PointerLocation'); % for later restore
-% bot.mouseMove(xy(1), res(4)-xy(2));
-% bot.mousePress(16); bot.mouseRelease(16);
-% set(0, 'PointerLocation', mousexy); % restore mouse location
-
 %% Timer StopFunc: Save result, start timer with delay, even after error
 function saveResult(obj, ~)
 hs = guidata(obj.UserData);
@@ -715,7 +706,7 @@ b = fread(s, 1);
 hs = guidata(s.UserData.fig);
 if     b == '?', fwrite(s, uint8('RTMM')); return; % identity
 elseif b == 'P', fwrite(s, uint8(hs.subj.String)); return; % PatientName
-elseif b == 'T', fwrite(s, uint8(hs.series.String{6})); return; % count down
+elseif b == 'T', fwrite(s, uint8(strjoin(hs.MMSS.String))); return; % count down
 elseif b == 'M', s.UserData.send = true; return; % start to send motion info
 elseif b<1 || b>3, return; % ignore for now
 end
@@ -737,47 +728,33 @@ h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
 %% start countdown
 function setCountDown(hs)
 nam = [hs.rootDir 'ScanSec'];
-dn = dir(nam);
-if isempty(dn), return; end
-c = fileread(nam);
-delete(nam);
-if contains(c, 'OnStoppedByUser')
-    if hs.countDown.Running == "on"
-        stop(hs.countDown);
-        hs.series.String{6} = 'Stopped by operator';
-    end
-    return;
-end
-
-proc = regexp(c, '(?<=tProtocolName\s*=\s*").*?(?=")', 'match', 'once');
-secs = str2double(regexp(c, '(?<=lTotalScanTimeSec\s*=\s*)\d+', 'match', 'once'));
-expr = '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?MeasStarted>.*step ''(.*?) \[\d+\]';
-toks = regexp(c, expr, 'tokens', 'once', 'dotexceptnewline');
-dn0 = datenum(toks{1}, 'yyyy-mm-dd HH:MM:SS');
-tim = regexp(c, '\w{3} \d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}.\d{2}', 'match', 'once');
-dn1 = datenum(tim, 'ddd mm/dd/yyyy HH:MM:SS.fff');
-tEnd = dn0 + secs/86400 + dn.datenum - dn1;
-if tEnd-now<2/86400 || ~strcmp(proc, toks{2}), return; end
-
-hs.countDown.UserData = tEnd;
-start(hs.countDown);
-hs.dv.YData = hs.dv.YData*0; hs.fd.YData = hs.dv.YData;
-hs.slider.Visible = 'off';
-set(hs.resp, 'XData', nan, 'YData', 1); update_resp(hs);
-set([hs.instnc hs.pct], 'String', '');
-set_img(hs.img, zeros(2));
-hs.series.String = {proc '' datestr(dn0, 'HH:MM:SS AM') ...
-    datestr(dn0, 'ddd, mmm dd, yyyy') '' ''};
-fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
-subj = fileread([hs.rootDir 'host.txt']);
-fprintf(fid, '%s_%s_%s', subj, proc, datestr(dn0, 'yymmddHHMMSS'));
-fclose(fid);
+if ~exist(nam, 'file'), return; end
+c0 = fileread(nam); pause(0.2); c = fileread(nam);
+if ~isequal(c0, c), pause(1); c = fileread(nam); end
+tMod = dir(nam); delete(nam);
+% From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec "ModTime"
+tokns = regexp(c, '"(.*?)" "(.*?)" (\d+) "(.*?)"', 'tokens', 'once');
+tStrt = datenum(tokns{1}, 'yyyy-mm-dd HH:MM:SS,fff');
+tSyng = datenum(tokns{4}, 'ddd mm/dd/yyyy HH:MM:SS.fff');
+tFnsh = tStrt + str2double(tokns{3})/86400 + tMod.datenum - tSyng;
+if tFnsh-now < 2/86400, return; end
+hs.countDown.UserData = tFnsh;
+hs.MMSS.String = {tokns{2} ''};
+if hs.countDown.Running=="off", start(hs.countDown); end
 
 %% timer func to show scanning time
 function countDown(tObj, ~, hs)
 t = tObj.UserData - now;
-if t<0, stop(tObj); hs.series.String{6} = ''; 
-else, hs.series.String{6} = ['Scanning ' datestr(t, 'MM:SS')];
+nam = [hs.rootDir 'StoppedByUser'];
+if exist(nam, 'file')
+    delete(nam);
+    if now-getfield(dir(nam), 'datenum') < 9/86400
+        stop(tObj);
+        hs.MMSS.String{2} = 'Stopped by operator';
+        error('StoppedByUser');
+    end
+elseif t<0, stop(tObj); hs.MMSS.String = {'' ''};
+else, hs.MMSS.String{2} = ['Scanning ' datestr(t, 'MM:SS')];
 end
 
 %%
