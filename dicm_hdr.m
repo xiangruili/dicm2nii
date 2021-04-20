@@ -795,7 +795,7 @@ i1 = regexp(str(i2:end), '\n\s*\d+', 'once') + i2 + 1;
 i2 = regexp(str(i1:end), '\n\s*#', 'once') + i1 - 1;
 para = eval(['[' str(i1:i2) ']']); % read all numbers
 nFrame = size(para, 1); 
-if size(para,2) ~= numel(iColumn)
+if size(para,2) ~= iColumn(end)-1
     warning('dicm_hdr:badPAR', 'Inconsistent table rows to the definition');
 end
 
