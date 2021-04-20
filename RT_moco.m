@@ -13,6 +13,7 @@ function RT_moco()
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
 hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
+hs.backupDir = getpref('dicm2nii_gui_para', 'backupDir', '');
 hs.logDir = [hs.rootDir 'RTMM_log/'];
 if ~exist(hs.logDir, 'dir'), mkdir(hs.logDir); end % folder to save subj.mat
 
@@ -109,6 +110,7 @@ vars = {'Description' 'Series' 'Instances' '<font color="#00cc00">Green</font>' 
 hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.42], ...
     'FontSize', 14, 'RowName', [], 'CellSelectionCallback', @tableCB, ...
     'ColumnName', strcat('<html><h2>', vars, '</h2></html>'));
+try hs.table.Multiselect = 'off'; catch, end % R2020a+
 
 ax = axes(pa1, 'Position', lbPos, 'Visible', 'off');
 hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ...
@@ -300,8 +302,15 @@ set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
 if contains(s.ImageType, '\MOCO'), return; end
 hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN 0 0 0}; hs.table.Data];
-try hs.table.Multiselect = 'off'; hs.table.Selection = [1 1]; end %#ok R2020a+
+try hs.table.Selection = [1 1]; catch, end % R2020a+
 hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
+
+pat = asc_header(s,'sPat.lAccelFactPE');
+if pat==1, thr = 0.12; else, thr = 0.15; end % arbitrary
+h = findobj(hs.fig, 'Type', 'uimenu', 'Label', '&DVARS Threshold');
+thrs = str2double(get(h.Children, 'Label'));
+[~, i] = min(abs(thrs-thr));
+DV_yLim(h.Children(i));
 
 %% Set img and img axis
 function set_img(hImg, img, CLim)
@@ -564,12 +573,16 @@ for i = numel(dirs):-1:1
     new = true; return;
 end
 
-% Delete old subj folder right after mid-night
+% Move/Delete old subj folder right after mid-night
 if ~exist([hs.rootDir 'host.txt'], 'file') || mod(now,1) > 10/86400; return; end
 dirs(now-[dirs.datenum]<2) = []; % keep for 2 days
 for i = 1:numel(dirs)
-    try rmdir([hs.rootDir dirs(i).name], 's');
-    catch me, disp(me.message); assignin('base', 'me', me);
+    try 
+        if isempty(hs.backupDir), rmdir([hs.rootDir dirs(i).name], 's');
+        else, movefile([hs.rootDir dirs(i).name], [hs.backupDir dirs(i).name]);
+        end
+    catch me
+        disp(me.message); assignin('base', 'me', me);
     end
 end
 
@@ -732,7 +745,7 @@ if ~exist(nam, 'file'), return; end
 c0 = fileread(nam); pause(0.2); c = fileread(nam);
 if ~isequal(c0, c), pause(1); c = fileread(nam); end
 tMod = dir(nam); delete(nam);
-% From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec "ModTime"
+% From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec "CurrentTime"
 tokns = regexp(c, '"(.*?)" "(.*?)" (\d+) "(.*?)"', 'tokens', 'once');
 tStrt = datenum(tokns{1}, 'yyyy-mm-dd HH:MM:SS,fff');
 tSyng = datenum(tokns{4}, 'ddd mm/dd/yyyy HH:MM:SS.fff');
