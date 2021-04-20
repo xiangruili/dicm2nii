@@ -791,11 +791,13 @@ iColumn = cumsum([1 iColumn]); % col start ind for corresponding colLabel
 keyInLabel = @(key)strcmpi(colLabel, key);
 colIndex = @(key)iColumn(keyInLabel(key));
 
-i1 = regexp(str(i2:end), '\n\s*\d+', 'once') + i2;
-n = iColumn(end)-1; % number of items each row, 41 for V4
-para = sscanf(str(i1:end), '%g'); % read all numbers
-nFrame = floor(numel(para) / n); 
-para = reshape(para(1:n*nFrame), n, nFrame)'; % whole table now
+i1 = regexp(str(i2:end), '\n\s*\d+', 'once') + i2 + 1;
+i2 = regexp(str(i1:end), '\n\s*#', 'once') + i1 - 1;
+para = eval(['[' str(i1:i2) ']']); % read all numbers
+nFrame = size(para, 1); 
+if size(para,2) ~= numel(iColumn)
+    warning('dicm_hdr:badPAR', 'Inconsistent table rows to the definition');
+end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
 keys = {'dynamic scan number' 'gradient orientation number' 'echo number' ...
