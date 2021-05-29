@@ -595,6 +595,7 @@ end
 
 %% Parse BIDS
 if bids
+    pf.save_json = true; % force to save json for BIDS
     % Manage Multiple SUBJECT or SESSION
     if multiSubj
         fprintf(['Multiple subjects detected!!!!! Skipping...\n' ...
@@ -670,8 +671,11 @@ if bids
             T.Modality(i) = ModalityTablePref.Modality(find(match,1,'first'));
         end
     end
+    setappdata(0,'ModalityTable',T)
+    setappdata(0,'SubjectTable',S)
 
     % GUI
+    if ~all(runIdentified)
     setappdata(0,'Canceldicm2nii',false)
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
@@ -716,8 +720,6 @@ if bids
         TT.ColumnName = TCN;
     end
     TT.ColumnEditable = [false true true];
-    setappdata(0,'ModalityTable',TT.Data)
-    setappdata(0,'SubjectTable',TS.Data)
 
     % button
    	Bpos = [hf.Position(3)-120 20 100 30];
@@ -741,14 +743,12 @@ if bids
     ax.XTickLabel = [];
     TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)},axesArgs);
     
-    if all(runIdentified)
-        hf.CloseRequestFcn = ''; drawnow; close(hf, 'force');
-    else
-        waitfor(hf);
-    end
+    waitfor(hf);
     if getappdata(0,'Canceldicm2nii')
         return;
     end
+    end
+    
     % get results
     ModalityTable = getappdata(0,'ModalityTable');
     SubjectTable = getappdata(0,'SubjectTable');
