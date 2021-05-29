@@ -661,9 +661,11 @@ if bids
     T = table(Name,Type,Modality);
     
     ModalityTablePref = getpref('dicm2nii_gui_para', 'ModalityTable', T);
+    runIdentified = false(nRun,1);
     for i = 1:nRun
         match = cellfun(@(Mod) strcmp(Mod,T{i,1}),table2cell(ModalityTablePref(:,1)));
         if any(match)
+            runIdentified(i) = true;
             T.Type(i) = ModalityTablePref.Type(find(match,1,'first'));
             T.Modality(i) = ModalityTablePref.Modality(find(match,1,'first'));
         end
@@ -739,7 +741,11 @@ if bids
     ax.XTickLabel = [];
     TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)},axesArgs);
     
-    waitfor(hf);
+    if all(runIdentified)
+        hf.CloseRequestFcn = ''; drawnow; close(hf, 'force');
+    else
+        waitfor(hf);
+    end
     if getappdata(0,'Canceldicm2nii')
         return;
     end
