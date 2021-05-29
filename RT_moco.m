@@ -12,11 +12,6 @@ function RT_moco()
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
 
-hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
-hs.backupDir = getpref('dicm2nii_gui_para', 'backupDir', '');
-hs.logDir = [hs.rootDir 'RTMM_log/'];
-if ~exist(hs.logDir, 'dir'), mkdir(hs.logDir); end % folder to save subj.mat
-
 % Create/re-use GUI and start timer
 fh = findall(0, 'Type', 'figure', 'Tag', 'RT_moco');
 if ~isempty(fh), figure(fh); return; end
@@ -28,6 +23,10 @@ set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ...
     'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}}));
 try fh.WindowState = 'maximized'; catch, fh.Position = [1 60 res(3) res(4)-80]; end
 hs.fig = fh;
+hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
+hs.backupDir = getpref('dicm2nii_gui_para', 'backupDir', '');
+hs.logDir = [hs.rootDir 'RTMM_log/'];
+if ~exist(hs.logDir, 'dir'), mkdir(hs.logDir); end % folder to save subj.mat
 
 h = uimenu(fh, 'Label', '&Patient');
 hs.menu(1) = uimenu(h, 'Label', 'Load Patient', 'Callback', @loadSubj);
@@ -42,6 +41,7 @@ hs.derived = uimenu(h, 'Label', 'Skip DERIVED Series', 'Checked', 'on', ...
 hs.SBRef = uimenu(h, 'Label', 'Skip *_SBRef Series', 'Callback', @toggleChecked, 'Checked', 'on');
 
 h = uimenu(fh, 'Label', '&View');
+uimenu(h, 'Label', 'Reset Brightness', 'Callback', @setCLim);
 uimenu(h, 'Label', 'Increase Brightness', 'Callback', @setCLim);
 uimenu(h, 'Label', 'Decrease Brightness', 'Callback', @setCLim);
 hDV = uimenu(h, 'Label', '&DVARS Threshold', 'Separator', 'on');
@@ -58,9 +58,9 @@ panel = @(pos)uipanel(fh, 'Position', pos, 'BorderType', 'none');
 if res(3) < res(4) % Portrait
     pa1 = panel([0 0.62 1 0.38]); % img and label
     pa2 = panel([0 0 1 0.62]); % table and plot
-    axPos = [0.05 0.01 0.65 0.99]; % img axis
-    lbPos = [0.7 0.01 0.29 1]; % label axis
-    subjPos = [0.85 0.98]; seriesPos = [0.85 0.02]; msPos = [0.85 0.7]; ha = 'right';
+    axPos = [0.05 0 0.65 1]; % img axis
+    lbPos = [0.65 0 0.34 1]; % label axis
+    subjPos = [1 0.95]; seriesPos = [1 0.1]; msPos = [1 0.7]; ha = 'right';
 else
     pa1 = panel([0 0 0.38 1]);
     pa2 = panel([0.38 0 0.62 1]);
@@ -112,21 +112,21 @@ hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.42]
     'ColumnName', strcat('<html><h2>', vars, '</h2></html>'));
 try hs.table.Multiselect = 'off'; catch, end % R2020a+
 
-ax = axes(pa1, 'Position', lbPos, 'Visible', 'off');
-hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ...
-    'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none');
-hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold', ...
-    'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
-    'Interpreter', 'none', 'UserData', [1 0]);
-hs.MMSS = text(ax, 'Position', msPos, 'FontSize', 18, 'FontWeight', 'bold', ...
-    'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
-    'String', {'' ''}, 'Color', 'b');
-
 ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off', 'CLim', [0 1]);
 hs.img = image(ax, 'CData', ones(2)*0.94, 'CDataMapping', 'scaled');
 axis equal; colormap(ax, 'gray');
 hs.instnc = text(ax, 'Units', 'normalized', 'Position', [0.99 0.01], 'Color', 'y', ...
     'FontSize', 14, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom');
+
+ax = axes(pa1, 'Position', lbPos, 'Visible', 'off');
+hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ...
+    'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none');
+hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
+    'BackgroundColor', fh.Color, 'Interpreter', 'none', 'UserData', [1 0]);
+hs.MMSS = text(ax, 'Position', msPos, 'FontSize', 18, 'FontWeight', 'bold', ...
+    'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
+    'BackgroundColor', fh.Color, 'String', {'' ''}, 'Color', 'b');
 
 set(fh, 'HandleVisibility', 'callback', 'Visible', 'on'); % fh.Resize = 'off';
 drawnow; wt = getpixelposition(hs.table);
@@ -183,6 +183,7 @@ catch % T1, T2, fieldmap etc: show info/img only
     if nIN==1, nIN = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
     iSL = ceil(nIN/2); % try middle slice for better view
     nam = sprintf('%s%06u.dcm', f, iSL);
+    if ~exist(nam, 'file'), pause(2); end % wait for dicom
     if ~exist(nam, 'file'), iSL = 1; nam = sprintf('%s%06u.dcm', f, iSL); end
     nTE = asc_header(s, 'lContrasts');
     % fieldmap phase diff series: nTE=2, EchoNumber=2
@@ -215,7 +216,7 @@ ijk = round(p.R0 \ p.mm + 1); % informative voxels
 ind = sub2ind(size(img), ijk(1,:), ijk(2,:), ijk(3,:));
 img0 = double(mos);
 mn = mean(img0(ind));
-s.CLim = mn + std(img0(ind)*3); if isDTI, s.CLim = s.CLim / 2; end
+s.CLim = imgClim(img0);
 set_img(hs.img, mos, s.CLim);
 init_series(hs, s, nIN);
 viewer = findall(0, 'Type', 'figure', 'Tag', 'nii_viewer');
@@ -239,7 +240,11 @@ for i = 2:nIN
     img = mos2vol(mos, nSL);
     hs.img.CData = mos; hs.instnc.String = num2str(iN);
     hs.slider.Value = iN; % show progress
-    if isDTI, hs.table.Data{1,3} = i; hs.dv.YData(iN) = 0; continue; end
+    if isDTI
+        if i==2, hs.img.Parent.CLim(2) = imgClim(mos); end % 1st is B0
+        hs.table.Data{1,3} = i; hs.dv.YData(iN) = 0;
+        continue;
+    end
     
     if isMoCo % FD from dicom hdr, DV uses MoCo img for now
         s1 = dicm_hdr(nam, dicm_dict('Siemens', 'CSAImageHeaderInfo'));
@@ -314,11 +319,7 @@ DV_yLim(h.Children(i));
 
 %% Set img and img axis
 function set_img(hImg, img, CLim)
-if nargin<3 || isempty(CLim) || isnan(CLim)
-    img0 = double(img(img>100));
-    if isempty(img0), img0 = 1; end
-    CLim = mean(img0) + std(img0)*2;
-end
+if nargin<3 || isempty(CLim) || isnan(CLim), CLim = imgClim(img); end
 d = size(img) + 0.5;
 set(hImg.Parent, 'CLim', [0 CLim], 'XLim', [0.5 d(2)], 'YLim', [0.5 d(1)]);
 hImg.CData = img;
@@ -326,6 +327,7 @@ hImg.CData = img;
 %% get some series information
 function c = seriesInfo(s)
 c{1} = s.SeriesDescription;
+if numel(c{1})>24, c{1} = [c{1}(1:12) '...' c{1}(end-3:end)]; end
 c{2} = sprintf('Series %g', s.SeriesNumber);
 if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
 c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
@@ -544,7 +546,7 @@ out = smooth3(F(J), 'gaussian'); % sz=3
 F = griddedInterpolant(J, out, intp);
 out = F(I);
 
-%% new series or new subj: result saved as incoming_DICOM/RTMM_log/subj.mat
+%% new series or new subj: result saved as incoming_DCM/RTMM_log/subj.mat
 % The subj folders (yyyymmdd.PatientName.PatientID) default to ../incoming_DICOM/
 % The dcm file names from Siemens push are always in format of
 % 001_000001_000001.dcm. All three numbers always start at 1, and are continuous.
@@ -649,7 +651,8 @@ function setCLim(h, ~)
 hs = guidata(h);
 ax = hs.img.Parent;
 if startsWith(h.Label, 'Increase'), ax.CLim(2) = ax.CLim(2)*0.8;
-else, ax.CLim(2) = ax.CLim(2)*1.2;
+elseif startsWith(h.Label, 'Decrease'), ax.CLim(2) = ax.CLim(2)*1.2;
+else, ax.CLim(2) = imgClim(hs.img.CData);
 end
 
 %% show series in nii_viewer
@@ -746,28 +749,35 @@ c0 = fileread(nam); pause(0.2); c = fileread(nam);
 if ~isequal(c0, c), pause(1); c = fileread(nam); end
 tMod = dir(nam); delete(nam);
 % From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec "CurrentTime"
-tokns = regexp(c, '"(.*?)" "(.*?)" (\d+) "(.*?)"', 'tokens', 'once');
-tStrt = datenum(tokns{1}, 'yyyy-mm-dd HH:MM:SS,fff');
-tSyng = datenum(tokns{4}, 'ddd mm/dd/yyyy HH:MM:SS.fff');
-tFnsh = tStrt + str2double(tokns{3})/86400 + tMod.datenum - tSyng;
+c = regexp(c, '"(.*?)" "(.*?)" (\d+) "(.*?)"', 'tokens', 'once');
+tStrt = datenum(c{1}, 'yyyy-mm-dd HH:MM:SS,fff');
+tSyng = datenum(c{4}, 'ddd mm/dd/yyyy HH:MM:SS.fff');
+tFnsh = tStrt + str2double(c{3})/86400 + tMod.datenum - tSyng;
 if tFnsh-now < 2/86400, return; end
 hs.countDown.UserData = tFnsh;
-hs.MMSS.String = {tokns{2} ''};
+if numel(c{2})>24, c{2} = [c{2}(1:12) '...' c{2}(end-3:end)]; end
+hs.MMSS.String = {c{2} ''};
 if hs.countDown.Running=="off", start(hs.countDown); end
 
 %% timer func to show scanning time
 function countDown(tObj, ~, hs)
-t = tObj.UserData - now;
-nam = [hs.rootDir 'StoppedByUser'];
-if exist(nam, 'file')
-    delete(nam);
-    if now-getfield(dir(nam), 'datenum') < 9/86400
+nam = dir([hs.rootDir 'StoppedByUser']);
+if ~isempty(nam)
+    delete([hs.rootDir nam.name]);
+    if now-nam.datenum < 9/86400 % file was within 9 seconds
         stop(tObj);
         hs.MMSS.String{2} = 'Stopped by operator';
         error('StoppedByUser');
     end
-elseif t<0, stop(tObj); hs.MMSS.String = {'' ''};
+end
+t = tObj.UserData - now;
+if t<0, stop(tObj); hs.MMSS.String = {'' ''};
 else, hs.MMSS.String{2} = ['Scanning ' datestr(t, 'MM:SS')];
 end
 
+%% get CLim for dicom img
+function mx = imgClim(img)
+im = double(img(:));
+im = im(im>max(im)/10);
+mx = mean(im) + 2*std(im);
 %%
