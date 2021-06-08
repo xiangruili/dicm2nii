@@ -765,7 +765,7 @@ if ~isempty(a)
     end
 end
 s.MRAcquisitionType = par_attr(ch, 'Scan mode', 0);
-s.ScanningSequence = par_attr(ch, 'Technique', 0); % ScanningTechnique
+s.SequenceName = par_attr(ch, 'Technique', 0); % ScanningTechnique
 typ = par_attr(ch, 'Series Type', 0); typ(isspace(typ)) = '';
 s.ImageType = ['PhilipsPAR\' typ '\' s.ScanningSequence];
 s.RepetitionTime = par_attr(ch, 'Repetition time');
