@@ -621,15 +621,7 @@ if bids
     end
 
     % Table: subject Name
-    try
-        asciiInds=[1:47 58:64 91:96 123:127];
-        for j=1:numel(asciiInds)
-            subj=strrep(subj,char(asciiInds(j)),'');
-        end
-        Subject = subj;
-    catch
-        Subject = {'01'};
-    end
+    Subject = regexprep(subj, '[^0-9a-zA-Z]', '');
     Session                = {'01'};
     AcquisitionDate = {[acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)]};
     Comment                = {'N/A'};
@@ -658,24 +650,75 @@ if bids
         'fmap','fieldmap'};
     Modality = categorical(repmat({'skip'},[length(fnames),1]),valueset(:,2));
     Type = categorical(repmat({'skip'},[length(fnames),1]),unique(valueset(:,1)));
-    Name = fnames';
+    Name = regexprep(fnames', '_s\d+$', '');
     T = table(Name,Type,Modality);
     
     ModalityTablePref = getpref('dicm2nii_gui_para', 'ModalityTable', T);
-    runIdentified = false(nRun,1);
+    [Lia, Locb] = ismember(T.Name, ModalityTablePref.Name);
     for i = 1:nRun
-        match = cellfun(@(Mod) strcmp(Mod,T{i,1}),table2cell(ModalityTablePref(:,1)));
-        if any(match)
-            runIdentified(i) = true;
-            T.Type(i) = ModalityTablePref.Type(find(match,1,'first'));
-            T.Modality(i) = ModalityTablePref.Modality(find(match,1,'first'));
+        if Lia(i)
+            T.Type(i) = ModalityTablePref.Type(Locb(i));
+            T.Modality(i) = ModalityTablePref.Modality(Locb(i));
+            continue;
+        end
+        seq = tryGetField(h{i}{1}, 'SequenceName', '');
+        seqContains = @(p)any(cellfun(@(c)~isempty(strfind(seq,c)), p));
+        if h{i}{1}.isDTI % do this first
+            T.Type(i) = {'dwi'}; T.Modality(i) = {'dwi'};
+        elseif seqContains({'epfid2d' 'EPI' 'epi'})
+            T.Type(i) = {'func'};
+            if ~isempty(regexpi(T.Name{i}, 'rest'))
+                T.Modality(i) = {'task-rest'};
+            else
+                try nam = h{i}{1}.ProtocolName; 
+                catch, nam = ProtocolName(h{i}{1});
+                end
+                c = regexpi(nam, '(.*)?run[-_]*(\d*)', 'tokens', 'once');
+                if isempty(c)
+                    c = regexprep(nam, '[^0-9a-zA-Z]', '');
+                else
+                    c = regexprep(c, '[^0-9a-zA-Z]', '');
+                    c = sprintf('%s_run-%s', c{:});
+                end
+                T.Modality(i) = {['task-' c]};
+            end
+            ec = regexp(T.Name{i}, '_e\d+', 'match', 'once');
+            if ~isempty(ec)
+                T.Modality(i) = {[T.Modality(i) '_echo-' ec(3:end)]};
+            end
+            if ~isempty(regexp(T.Name{i}, '_SBRef$', 'once'))
+                T.Modality(i) = {[T.Modality(i) '_sbref']};
+            else
+                T.Modality(i) = {[T.Modality(i) '_bold']};
+            end
+        elseif seqContains({'fm2d' 'FFE'})
+            T.Type(i) = {'fmap'};
+            if strcmp(T.Name{i}(end+(-2:0)), '_e1')
+                T.Modality(i) = {'magnitude1'};
+            elseif strcmp(T.Name{i}(end+(-2:0)), '_e2')
+                T.Modality(i) = {'magnitude2'};
+            elseif isType(h{i}{1}, '\P\')
+                T.Modality(i) = {'phasediff'};
+            else
+                T.Modality(i) = {'fieldmap'};
+            end
+        elseif seqContains({'epse'}) % after isDTI, is it safe?
+            T.Type(i) = {'fmap'}; T.Modality(i) = {'fieldmap'};
+        elseif seqContains({'tir2d'})
+            T.Type(i) = {'anat'}; T.Modality(i) = {'FLAIR'};
+        elseif seqContains({'tfl3d' 'T1' 'EFGRE3D' 'gre_fsp'})
+            T.Type(i) = {'anat'}; T.Modality(i) = {'T1w'};
+        elseif seqContains({'spc' 'T2'})
+            T.Type(i) = {'anat'}; T.Modality(i) = {'T2w'};
         end
     end
     setappdata(0,'ModalityTable',T)
     setappdata(0,'SubjectTable',S)
 
     % GUI
-    if ~all(runIdentified)
+    toSkip = T.Type == 'skip';
+    uniqueNames = unique(T.Modality(~toSkip));
+    if ~all(Lia) || all(toSkip) || numel(uniqueNames)<sum(~toSkip)
     setappdata(0,'Canceldicm2nii',false)
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
@@ -778,11 +821,11 @@ for i = 1:nRun
             session_id='01'; 
         else
             session_id=char(SubjectTable{1,2}); 
-            ses = ['ses-' session_id];
+            ses = ['ses-' session_id '_'];
         end
         % folder
         modalityfolder = fullfile(['sub-' char(SubjectTable{1,1})],...
-                                    ses,...
+                                    ses(1:end-1),...
                                     char(ModalityTable{i,2}));
         if ~exist(fullfile(niiFolder, modalityfolder),'dir')
             mkdir(fullfile(niiFolder, modalityfolder));
@@ -790,8 +833,7 @@ for i = 1:nRun
         
         % filename
         fnames{i} = fullfile(modalityfolder,...
-              ['sub-' char(SubjectTable{1,1}) '_' ses '_' char(ModalityTable{i,3})]);
-        fnames{i} = strrep(fnames{i},'__','_');
+              ['sub-' char(SubjectTable{1,1}) '_' ses char(ModalityTable{i,3})]);
                 
         % _session.tsv
         try
@@ -915,25 +957,28 @@ for i = 1:nRun
     if isnumeric(h{i}.PixelData), h{i} = rmfield(h{i}, 'PixelData'); end % BV
 end
 
-if ~bids
-    try % since 2014a 
-        fnames = matlab.lang.makeValidName(fnames);
-        fnames = matlab.lang.makeUniqueStrings(fnames, {}, namelengthmax);
-    catch
-        fnames = genvarname(fnames);
-    end
-    h = cell2struct(h, fnames, 2); % convert into struct
-    fname = fullfile(niiFolder, 'dcmHeaders.mat');
-    if exist(fname, 'file') % if file exists, we update fields only
-        S = load(fname);
-        for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
-        h = S.h;
-    end
-    save(fname, 'h', '-v7'); % -v7 better compatibility
-else
+[~, fnames] = cellfun(@fileparts, fnames, 'UniformOutput', false);
+try % since 2014a 
+    fnames = matlab.lang.makeValidName(fnames);
+    fnames = matlab.lang.makeUniqueStrings(fnames, {}, namelengthmax);
+catch
+    fnames = genvarname(fnames);
+end
+h = cell2struct(h, fnames, 2); % convert into struct
+if bids, fname = fullfile(niiFolder, ['sub-' Subject{1}], 'dcmHeaders.mat');
+else, fname = fullfile(niiFolder, 'dcmHeaders.mat');
+end
+if exist(fname, 'file') % if file exists, we update fields only
+    S = load(fname);
+    for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
+    h = S.h;
+end
+if bids
     rmappdata(0,'ModalityTable');
     rmappdata(0,'SubjectTable');
 end
+save(fname, 'h', '-v7'); % -v7 better compatibility
+
 fprintf('Elapsed time by dicm2nii is %.1f seconds\n\n', toc);
 return;
 
@@ -1313,7 +1358,7 @@ hdr.pixdim(5) = TR / 1000;
 hdr.xyzt_units = 8; % seconds
 if hdr.dim(5)<3 || tryGetField(s, 'isDTI', 0) || ...
         strncmp(tryGetField(s, 'MRAcquisitionType'), '3D', 2)
-    return; % skip 3D, DRI, fieldmap, short EPI etc
+    return; % skip 3D, DTI, fieldmap, short EPI etc
 end
 
 nSL = hdr.dim(4);
