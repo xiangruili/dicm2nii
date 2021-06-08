@@ -174,6 +174,7 @@ end
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
 if hs.SBRef.Checked=="on" && endsWith(s.SeriesDescription, '_SBRef'), return; end
 
+nTE = asc_header(s, 'lContrasts');
 isMoCo = contains(s.ImageType, '\MOCO');
 if ~isMoCo, hs.series.String = seriesInfo(s); end
 try 
@@ -185,7 +186,6 @@ catch % T1, T2, fieldmap etc: show info/img only
     nam = sprintf('%s%06u.dcm', f, iSL);
     if ~exist(nam, 'file'), pause(2); end % wait for dicom
     if ~exist(nam, 'file'), iSL = 1; nam = sprintf('%s%06u.dcm', f, iSL); end
-    nTE = asc_header(s, 'lContrasts');
     % fieldmap phase diff series: nTE=2, EchoNumber=2
     % if startsWith(s.SequenceName, '*fm2d') && contains(s.ImageType, '\P\')
     if isfield(s, 'EchoNumber') && s.EchoNumber>1, nTE = 1; end
@@ -228,7 +228,7 @@ hs.fd.YData(2:end) = nan; hs.dv.YData(2:end) = nan;
 
 nextSeries = sprintf('%s/%03u_%06u_000001.dcm', hs.subj.UserData, iRun+[0 1]);
 for i = 2:nIN
-    nam = sprintf('%s%06u.dcm', f, i);
+    nam = sprintf('%s%06u.dcm', f, (i-1)*nTE+1);
     tEnd = now + 1/1440; % 1 minute no mosaic coming, treat as stopped series
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
