@@ -236,6 +236,7 @@ for i = 2:nIN
         pause(0.2);
     end
     s = dicm_hdr_wait(nam, dict); iN = s.InstanceNumber;
+    if nTE>1, iN = i; end % fake InstanceNumber for special case
     mos = dicm_img(s);
     img = mos2vol(mos, nSL);
     hs.img.CData = mos; hs.instnc.String = num2str(iN);
