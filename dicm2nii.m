@@ -542,7 +542,9 @@ for i = 1:nRun
     sN = sNs(i);
     a = [ProtocolName(s) hSuf{i}];
     if isPhase(s), a = [a '_phase']; end % phase image
-    if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\'), a = [a '_MoCo']; end
+    if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\') && strncmp(a, rNames{i-1}, numel(a))
+        a = [a '_MoCo'];
+    end
     if multiSubj, a = [a '_' subjs{i}]; end
     if multiStudy(i), a = [a '_Study' studyIDs{i}]; end
     if ~isstrprop(a(1), 'alpha'), a = ['x' a]; end % genvarname behavior
