@@ -111,10 +111,6 @@ if any(strcmp(tsUID, {'1.2.840.10008.1.2.1' '1.2.840.10008.1.2.2' '1.2.840.10008
     end
     if xpose, img = permute(img, [2 1 3 4]); end
     if strcmp(tsUID, '1.2.840.10008.1.2.2'), img = swapbytes(img); end % BE
-    
-    if isfield(s, 'PixelRepresentation') && s.PixelRepresentation>0
-        img = reshape(typecast(img(:), fmt(3:end)), size(img)); % signed
-    end
 else % compressed dicom: rely on imread for decompression
     b = fread(fid, inf, '*uint8'); % read all as bytes
     del = uint8([254 255 0 224]); % delimeter in LE
@@ -154,6 +150,11 @@ else % compressed dicom: rely on imread for decompression
     end
     if j<nFrame, img(:,:,:,j+1:end) = []; end % truncate if less than nFrame
     if ~xpose, img = permute(img, [2 1 3 4]); end
+end
+    
+if isfield(s, 'PixelRepresentation') && s.PixelRepresentation>0
+    cls = regexprep(class(img), '^u', '');
+    img = reshape(typecast(img(:), cls), size(img)); % signed
 end
 
     function cleanup(fname)
