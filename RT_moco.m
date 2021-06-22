@@ -328,7 +328,7 @@ hImg.CData = img;
 %% get some series information
 function c = seriesInfo(s)
 c{1} = s.SeriesDescription;
-if numel(c{1})>24, c{1} = [c{1}(1:12) '...' c{1}(end-3:end)]; end
+if numel(c{1})>24, c{1} = [c{1}(1:16) '...' c{1}(end-3:end)]; end
 c{2} = sprintf('Series %g', s.SeriesNumber);
 if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
 c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
@@ -756,7 +756,7 @@ tSyng = datenum(c{4}, 'ddd mm/dd/yyyy HH:MM:SS.fff');
 tFnsh = tStrt + str2double(c{3})/86400 + tMod.datenum - tSyng;
 if tFnsh-now < 2/86400, return; end
 hs.countDown.UserData = tFnsh;
-if numel(c{2})>24, c{2} = [c{2}(1:12) '...' c{2}(end-3:end)]; end
+if numel(c{2})>24, c{2} = [c{2}(1:16) '...' c{2}(end-3:end)]; end
 hs.MMSS.String = {c{2} ''};
 if hs.countDown.Running=="off", start(hs.countDown); end
 
