@@ -129,6 +129,7 @@ else % compressed dicom: rely on imread for decompression
         % if ~isequal(b(i+(1:4))', del), error('Expect delimeter'); end
         i = i + 4; % skip delimeter (FFFE E000)
         n = double(typecast(b(i+(1:4)), 'uint32')); i = i+4;
+        if n<1, break; end % seen residual in OSIRIX_361 compressed img
         if isempty(mem) || numel(mem.Data)<n
             if isempty(cleanObj) % 1st time function call
                 mem.Filename = tempname;
