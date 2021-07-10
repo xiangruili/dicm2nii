@@ -767,7 +767,7 @@ end
 s.MRAcquisitionType = par_attr(ch, 'Scan mode', 0);
 s.SequenceName = par_attr(ch, 'Technique', 0); % ScanningTechnique
 typ = par_attr(ch, 'Series Type', 0); typ(isspace(typ)) = '';
-s.ImageType = ['PhilipsPAR\' typ '\' s.ScanningSequence];
+s.ImageType = ['PhilipsPAR\' typ '\' s.SequenceName];
 s.RepetitionTime = par_attr(ch, 'Repetition time');
 s.WaterFatShift = par_attr(ch, 'Water Fat shift');
 s.EPIFactor = par_attr(ch, 'EPI factor');
@@ -796,7 +796,7 @@ i2 = regexp(str(i1:end), '\n\s*#', 'once') + i1 - 1;
 para = eval(['[' str(i1:i2) ']']); % read all numbers
 nFrame = size(para, 1); 
 if size(para,2) ~= iColumn(end)-1
-    warning('dicm_hdr:badPAR', 'Inconsistent table rows to the definition');
+    warning('dicm_hdr:badPAR', 'Inconsistent table columns to the definition');
 end
 
 % SortFrames solves XYTZ, unusual slice order, incomplete volume etc
@@ -1019,7 +1019,7 @@ if ~isempty(i)
     s.AcquisitionDateTime = datestr(dat, 'yyyymmdd');
 end
 i = strfind(hist, 'Sequence:') + 9;
-if ~isempty(i), s.ScanningSequence = strtok(hist(i:end), ' '); end
+if ~isempty(i), s.SequenceName = strtok(hist(i:end), ' '); end
 i = strfind(hist, 'Studyid:') + 8;
 if ~isempty(i), s.StudyID = strtok(hist(i:end), ' '); end
 % i = strfind(hist, 'Dimensions:') + 11;
@@ -1383,9 +1383,9 @@ s.NumberOfEchoes = xml_attr(ch1, 'Max No Echoes', 1);
 s.LocationsInAcquisition = xml_attr(ch1, 'Max No Slices', 1);
 s.PatientPosition = xml_attr(ch1, 'Patient Position');
 s.MRAcquisitionType = xml_attr(ch1, 'Scan Mode');
-s.ScanningSequence = xml_attr(ch1, 'Technique'); % ScanningTechnique
+s.SequenceName = xml_attr(ch1, 'Technique'); % ScanningTechnique
 typ = xml_attr(ch1, 'Series Data Type'); typ(isspace(typ)) = '';
-s.ImageType = ['PhilipsXML\' typ '\' s.ScanningSequence];
+s.ImageType = ['PhilipsXML\' typ '\' s.SequenceName];
 s.RepetitionTime = xml_attr(ch1, 'Repetition Times?', 1);
 if numel(s.RepetitionTime)>1, s.RepetitionTime = s.RepetitionTime(1); end
 s.WaterFatShift = xml_attr(ch1, 'Water Fat Shift', 1);
