@@ -123,13 +123,13 @@ else % compressed dicom: rely on imread for decompression
         nFrame = numel(strfind(b(9:end)', del)); % may count false delimeters
     end
     i = 8 + double(len); % 8 for leading delimeter and len, skip offset table
-    j = 0; 
-    while i<nEnd
-        j = j + 1;
-        % if ~isequal(b(i+(1:4))', del), error('Expect delimeter'); end
+    for j = 1:nFrame
+        if ~isequal(b(i+(1:4))', del) % seen terminator + padding
+            img(:,:,:,j:end) = []; % truncate if less than nFrame
+            break;
+        end
         i = i + 4; % skip delimeter (FFFE E000)
         n = double(typecast(b(i+(1:4)), 'uint32')); i = i+4;
-        if n<1, break; end % seen residual in OSIRIX_361 compressed img
         if isempty(mem) || numel(mem.Data)<n
             if isempty(cleanObj) % 1st time function call
                 mem.Filename = tempname;
@@ -146,10 +146,9 @@ else % compressed dicom: rely on imread for decompression
             img = imread(mem.Filename); % init dim and data type
             img(:,:,:,2:nFrame) = 0; % pre-allocate
         else
-            img(:,:,:,j) = imread(mem.Filename); % expand if more than nFrame
+            img(:,:,:,j) = imread(mem.Filename);
         end
     end
-    if j<nFrame, img(:,:,:,j+1:end) = []; end % truncate if less than nFrame
     if ~xpose, img = permute(img, [2 1 3 4]); end
 end
     
@@ -173,3 +172,4 @@ end
 %   data % len-bytes for this frame (imread reads it)
 %   Repeat [delimeter, len, data] if +1 frames
 %  FFFE E0DD 0000 0000 % end with terminator and 0
+%  FFFC FFFC % may have DataSetTrailingPadding
