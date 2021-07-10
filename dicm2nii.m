@@ -2905,7 +2905,7 @@ if badVol % only seen in Philips
         for i = 1:nSL
             a = ind==i;
             if sum(a) <= nVol, continue; end % shoule be ==
-            ind(find(a, 'last')) = []; % remove last extra one
+            ind(find(a, 1, 'last')) = []; % remove last extra one
             if numel(ind) == nSL*nVol, break; end
         end
     end
