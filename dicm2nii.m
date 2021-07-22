@@ -967,7 +967,7 @@ catch
     fnames = genvarname(fnames);
 end
 h = cell2struct(h, fnames, 2); % convert into struct
-if bids, fname = fullfile(niiFolder, ['sub-' Subject{1}], 'dcmHeaders.mat');
+if bids, fname = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})], 'dcmHeaders.mat');
 else, fname = fullfile(niiFolder, 'dcmHeaders.mat');
 end
 if exist(fname, 'file') % if file exists, we update fields only
