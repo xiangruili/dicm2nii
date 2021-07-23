@@ -686,12 +686,12 @@ if bids
             end
             ec = regexp(T.Name{i}, '_e\d+', 'match', 'once');
             if ~isempty(ec)
-                T.Modality(i) = {[T.Modality(i) '_echo-' ec(3:end)]};
+                T.Modality(i) = {[char(T.Modality(i)) '_echo-' ec(3:end)]};
             end
             if ~isempty(regexp(T.Name{i}, '_SBRef$', 'once'))
-                T.Modality(i) = {[T.Modality(i) '_sbref']};
+                T.Modality(i) = {[char(T.Modality(i)) '_sbref']};
             else
-                T.Modality(i) = {[T.Modality(i) '_bold']};
+                T.Modality(i) = {[char(T.Modality(i)) '_bold']};
             end
         elseif seqContains({'fm2d' 'FFE'})
             T.Type(i) = {'fmap'};
