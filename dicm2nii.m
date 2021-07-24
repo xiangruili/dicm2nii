@@ -820,7 +820,7 @@ for i = 1:nRun
         if any(ismember(ModalityTable(i,2:3),'skip')), continue; end
         if isempty(char(SubjectTable{1,2})) % no session
             ses = '';
-            session_id='01'; 
+            session_id=''; 
         else
             session_id=char(SubjectTable{1,2}); 
             ses = ['ses-' session_id '_'];
