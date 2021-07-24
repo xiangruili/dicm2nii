@@ -624,7 +624,7 @@ if bids
 
     % Table: subject Name
     Subject = regexprep(subj, '[^0-9a-zA-Z]', '');
-    Session                = {'01'};
+    Session                = {''};
     AcquisitionDate = {[acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)]};
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
@@ -815,12 +815,13 @@ if bids
 end
 
 %% Convert
+ptsvSaved=false; % has the participants.tsv been saved yet for this subject?
 for i = 1:nRun
     if bids
         if any(ismember(ModalityTable(i,2:3),'skip')), continue; end
         if isempty(char(SubjectTable{1,2})) % no session
             ses = '';
-            session_id='01'; 
+            session_id=''; 
         else
             session_id=char(SubjectTable{1,2}); 
             ses = ['ses-' session_id '_'];
@@ -838,23 +839,25 @@ for i = 1:nRun
               ['sub-' char(SubjectTable{1,1}) '_' ses char(ModalityTable{i,3})]);
                 
         % _session.tsv
-        try
-            tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-            if verLessThanOctave
-                write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
-            else
-                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+        if ~isempty(ses)
+            try
+                tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+                if verLessThanOctave
+                    write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
+                else
+                    write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
+                end
+            catch ME
+                fprintf(1, '\n')
+                warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
+                errorMessage = sprintf('Error in function %s() at line %d.\nError Message: %s\n\n', ...
+                    ME.stack(1).name, ME.stack(1).line, ME.message);
+                fprintf(1, '%s\n', errorMessage);
             end
-        catch ME
-            fprintf(1, '\n')
-            warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-            errorMessage = sprintf('Error in function %s() at line %d.\nError Message: %s\n\n', ...
-                ME.stack(1).name, ME.stack(1).line, ME.message);
-            fprintf(1, '%s\n', errorMessage);
         end
         
         % participants.tsv
-        if i==1 % same participant for all Run
+        if ptsvSaved==false % same participant for all Run
             try
                 tsvfile = fullfile(niiFolder, 'participants.tsv');
                 participant_id = SubjectTable{1,1};
@@ -867,6 +870,7 @@ for i = 1:nRun
             catch
                 warning('Could not save participants.tsv');
             end
+            ptsvSaved=true;
         end
     end
     
