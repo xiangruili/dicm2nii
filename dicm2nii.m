@@ -815,6 +815,7 @@ if bids
 end
 
 %% Convert
+ptsvSaved=false; % has the participants.tsv been saved yet for this subject?
 for i = 1:nRun
     if bids
         if any(ismember(ModalityTable(i,2:3),'skip')), continue; end
@@ -856,7 +857,7 @@ for i = 1:nRun
         end
         
         % participants.tsv
-        if i==1 % same participant for all Run
+        if ptsvSaved==false % same participant for all Run
             try
                 tsvfile = fullfile(niiFolder, 'participants.tsv');
                 participant_id = SubjectTable{1,1};
@@ -869,6 +870,7 @@ for i = 1:nRun
             catch
                 warning('Could not save participants.tsv');
             end
+            ptsvSaved=true;
         end
     end
     
