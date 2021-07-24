@@ -1094,7 +1094,7 @@ s = h{1};
 
 % set TaskName if present in filename (using bids labels convention)
 if bids % parse filename: _task-label
-    task = regexp(s.NiftiName, '(?<=_task_).*?(?=_)', 'match', 'once'); 
+    task = regexp(s.NiftiName, '(?<=_task-).*?(?=_)', 'match', 'once'); 
     if ~isempty(task), s.TaskName = task; end
 end
 
@@ -1225,8 +1225,6 @@ nii.hdr.intent_name = seq; % char[16], meaning of the data
 
 foo = tryGetField(s, 'AcquisitionDateTime');
 descrip = sprintf('time=%s;', foo(1:min(18,end))); 
-TE0 = tryGetField(s, 'EchoTime');
-if ~isempty(TE0), descrip = sprintf('TE=%.4g;%s', TE0, descrip); end
 if strncmpi(tryGetField(s, 'SequenceName', ''), '*fm2d2r', 3) % Siemens fieldmap
     TE0 = asc_header(s, 'alTE[0]')/1000; % s.EchoTime stores only 1 TE
     TE1 = asc_header(s, 'alTE[1]')/1000;
@@ -1235,7 +1233,13 @@ if strncmpi(tryGetField(s, 'SequenceName', ''), '*fm2d2r', 3) % Siemens fieldmap
         descrip = sprintf('dTE=%.4g;%s', dTE, descrip);
         s.deltaTE = dTE;
     end
+    if isType(s, '\P\')
+        s.EchoTime = TE0; % overwrite EchoTime for json etc.
+        s.SecondEchoTime = TE1;
+    end
 end
+TE0 = tryGetField(s, 'EchoTime');
+if ~isempty(TE0), descrip = sprintf('TE=%.4g;%s', TE0, descrip); end
 
 % Get dwell time
 if ~strcmp(tryGetField(s, 'MRAcquisitionType'), '3D') && ~isempty(iPhase)
