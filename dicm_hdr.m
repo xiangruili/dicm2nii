@@ -760,7 +760,7 @@ s.NumberOfEchoes = par_attr(ch, 'Max. number of echoes');
 a = par_attr(ch, 'Patient position', 0);
 if isempty(a), a = par_attr(ch, 'Patient Position', 0); end
 if ~isempty(a)
-    if numel(a)>4, s.PatientPosition = a(regexp(a, '\<.')); 
+    if numel(a)>4, s.PatientPosition = a(regexp(a, '\<.'));
     else, s.PatientPosition = a; 
     end
 end
