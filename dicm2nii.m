@@ -282,7 +282,8 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'PlanarConfiguration' 'EchoTime' 'RescaleIntercept' 'RescaleSlope' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
     'TriggerTime' 'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber' ...
-    'CoilString'};
+    'CoilString' 'TemporalPositionIdentifier' ...
+    'MRImageLabelType' 'SliceNumberMR' 'PhaseNumber'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
 % read header for all files, use parpool if available and worthy
@@ -479,37 +480,11 @@ for i = 1:nRun
     if ~keep(i) || nFile<2 || ~isfield(s, 'ImagePositionPatient'), continue; end
     if tryGetField(s, 'NumberOfFrames', 1) > 1, continue; end % Siemens Vida
     
-    ipp = zeros(nFile, 1);
-    iSL = xform_mat(s); iSL = iSL(3);
-    for j = 1:nFile, ipp(j,:) = h{i}{j}.ImagePositionPatient(iSL); end
-    gantryTilt = abs(tryGetField(s, 'GantryDetectorTilt', 0)) > 0.1;
-    [err, nSL, sliceN, isTZ] = checkImagePosition(ipp, gantryTilt);
+    [err, h{1}] = checkImagePosition(h{i});
     if ~isempty(err)
         errorLog([err ' for ' series '. Series skipped.']);
         keep(i) = 0; continue; % skip
     end    
-    h{i}{1}.LocationsInAcquisition = uint16(nSL); % best way for nSL?
-
-    nVol = nFile / nSL;
-    if isTZ % Philips
-        ind = reshape(1:nFile, [nVol nSL])';
-        h{i} = h{i}(ind(:));
-    end
-       
-    % re-order slices within vol. No SliceNumber since files are organized
-    if all(diff(sliceN, 2) == 0), continue; end % either 1:nSL or nSL:-1:1
-    if sliceN(end) == 1, sliceN = sliceN(nSL:-1:1); end % not important
-    inc = repmat((0:nVol-1)*nSL, nSL, 1);
-    ind = repmat(sliceN(:), nVol, 1) + inc(:);
-    h{i} = h{i}(ind); % sorted by slice locations
-    
-    if sliceN(1) == 1, continue; end % first file kept: following update h{i}{1}
-    h{i}{1} = dicm_hdr(h{i}{1}.Filename); % read full hdr
-    s = h{i}{sliceN==1}; % original first file
-    fldsCp = {'AcquisitionDateTime' 'isDTI' 'LocationsInAcquisition'};
-    for j = 1:numel(fldsCp)
-        if isfield(h{i}{1}, fldsCk{k}), h{i}{1}.(fldsCp{j}) = s.(fldsCp{j}); end
-    end
 end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); hSuf = hSuf(keep);
 subjs = subjs(keep); vendor = vendor(keep);
@@ -1216,9 +1191,16 @@ nii.hdr.aux_file = str; % char[24], info only
 seq = asc_header(s, 'tSequenceFileName'); % like '%SiemensSeq%\ep2d_bold'
 if isempty(seq)
     seq = tryGetField(s, 'ScanningSequence'); 
-else
+else % also add Siemens extra for json
     ind = strfind(seq, '\');
     if ~isempty(ind), seq = seq(ind(end)+1:end); end % like 'ep2d_bold'
+    if ~isfield(s, 'ParallelReductionFactorInPlane')
+        s.ParallelReductionFactorInPlane = asc_header(s, 'sPat.lAccelFactPE');
+    end
+    if ~isfield(s, 'ParallelAcquisitionTechnique')
+        modes = {'none' 'GRAPPA' 'SliceAccel' 'mSENSE'}; % first 2 verified
+        s.ParallelAcquisitionTechnique = modes{asc_header(s, 'sPat.ucPATMode')};
+    end
 end
 if pf.save_patientName, nii.hdr.db_name = PatientName(s); end % char[18]
 nii.hdr.intent_name = seq; % char[16], meaning of the data
@@ -1330,6 +1312,7 @@ flds = { % store for nii.ext and json
   'ConversionSoftware' 'SeriesNumber' 'SeriesDescription' 'ImageType' 'Modality' ...
   'AcquisitionDateTime' 'TaskName' 'bval' 'bvec' 'VolumeTiming' ...
   'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
+  'ParallelReductionFactorInPlane' 'ParallelAcquisitionTechnique' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'EchoTimes' ...
   'SecondEchoTime' 'InversionTime' 'CardiacTriggerDelayTimes' ...
   'PatientName' 'PatientSex' 'PatientAge' 'PatientSize' 'PatientWeight' ...
@@ -2630,29 +2613,43 @@ end
 if csa_header(s, 'ProtocolSliceNumber')>0, t = t(nSL:-1:1); end % rev-num
 
 %% subfunction: check ImagePostionPatient from multiple slices/volumes
-function [err, nSL, sliceN, isTZ] = checkImagePosition(ipp, gantryTilt)
+function [err, h] = checkImagePosition(h)
+nFile = numel(h);
+ipp = zeros(nFile, 1);
+iSL = xform_mat(h{1}); iSL = iSL(3);
+for j = 1:nFile, ipp(j,:) = h{j}.ImagePositionPatient(iSL); end
+
 a = diff(sort(ipp));
 tol = max(a)/100; % max(a) close to SliceThichness. 1% arbituary
-if nargin>1 && gantryTilt, tol = tol * 10; end % arbituary
+if abs(tryGetField(h{1}, 'GantryDetectorTilt', 0)) > 0.1, tol = tol * 10; end % arbituary
 nSL = sum(a > tol) + 1;
-err = ''; sliceN = []; isTZ = false;
+err = '';
 nVol = numel(ipp) / nSL;
 if mod(nVol,1), err = 'Missing file(s) detected'; return; end
-if nSL<2, return; end
+if nSL<2 || ~strncmp(h{1}.Manufacturer, 'Philips', 7), return; end
 
-isTZ = nVol>1 && all(abs(diff(ipp(1:nVol))) < tol);
-if isTZ % Philips XYTZ
-    a = ipp(1:nVol:end);
-    b = reshape(ipp, nVol, nSL);
-else
-    a = ipp(1:nSL);
-    b = reshape(ipp, nSL, nVol)';
+s = h{1};
+rows = [];
+if isfield(s, 'TemporalPositionIdentifier')
+    rows = [rows cellfun(@(c)c.TemporalPositionIdentifier, h')];
 end
-[~, sliceN] = sort(a); % no descend since wrong for PAR/singleDicom
-if any(abs(diff(a,2))>tol), warning('Inconsistent slice spacing'); end
-if nVol>1
-    b = diff(b);
-    if any(abs(b(:))>tol), err = 'Irregular slice order'; return; end
+if isfield(s, 'MRImageLabelType')
+    rows = [rows cellfun(@(c)~strcmpi(c.MRImageLabelType,'CONTROL'), h')];
+end
+if isfield(s, 'PhaseNumber')
+    rows = [rows cellfun(@(c)c.PhaseNumber, h')];
+end
+if isfield(s, 'SliceNumberMR')
+    rows = [rows cellfun(@(c)c.SliceNumberMR, h')];
+end
+[~, ind] = sortrows(rows);
+h = h(ind);
+h{1}.LocationsInAcquisition = uint16(nSL); % best way for nSL?
+if ind(1) == 1, return; end % first file kept
+h{1} = dicm_hdr(h{1}.Filename); % read full hdr
+fldsCp = {'AcquisitionDateTime' 'isDTI'};
+for j = 1:numel(fldsCp)
+    if isfield(s, fldsCp{j}), h{1}.(fldsCp{j}) = s.(fldsCp{j}); end
 end
 
 %% Save JSON file, proposed by Chris G
