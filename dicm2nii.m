@@ -480,7 +480,7 @@ for i = 1:nRun
     if ~keep(i) || nFile<2 || ~isfield(s, 'ImagePositionPatient'), continue; end
     if tryGetField(s, 'NumberOfFrames', 1) > 1, continue; end % Siemens Vida
     
-    [err, h{1}] = checkImagePosition(h{i});
+    [err, h{i}] = checkImagePosition(h{i}); % may re-oder h{i} for Philips
     if ~isempty(err)
         errorLog([err ' for ' series '. Series skipped.']);
         keep(i) = 0; continue; % skip
