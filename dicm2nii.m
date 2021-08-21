@@ -283,7 +283,7 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
     'TriggerTime' 'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber' ...
     'CoilString' 'TemporalPositionIdentifier' ...
-    'MRImageLabelType' 'SliceNumberMR' 'PhaseNumber'};
+    'MRImageGradientOrientationNumber' 'MRImageLabelType' 'SliceNumberMR' 'PhaseNumber'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
 % read header for all files, use parpool if available and worthy
@@ -2630,6 +2630,9 @@ if nSL<2 || ~strncmp(h{1}.Manufacturer, 'Philips', 7), return; end
 
 s = h{1};
 rows = [];
+if isfield(s, 'MRImageGradientOrientationNumber')
+    rows = [rows cellfun(@(c)c.MRImageGradientOrientationNumber, h')];
+end
 if isfield(s, 'TemporalPositionIdentifier')
     rows = [rows cellfun(@(c)c.TemporalPositionIdentifier, h')];
 end
