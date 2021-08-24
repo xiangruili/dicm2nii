@@ -2178,27 +2178,36 @@ try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 
 % check slice ordering (Philips often needs SortFrames)
 n = numel(MF_val('DimensionIndexValues', s, 1));
-if n>0 && nFrame>1
-    na = nan(1, nFrame);
-    s2 = struct('InStackPositionNumber', na, 'TemporalPositionIndex', na, ...
-                'DimensionIndexValues', nan(n,nFrame), 'B_value', zeros(1, nFrame));
-    s2 = dicm_hdr(s, s2, 1:nFrame);
-    if ~isnan(s2.InStackPositionNumber(1))
-        SL = s2.InStackPositionNumber';
-        VL = [s2.TemporalPositionIndex' s2.DimensionIndexValues([3:end 1],:)'];
-    else % use DimensionIndexValues as backup (seen in GE)
-        SL = s2.DimensionIndexValues(2,:)'; % Bruker slice dim in (3,:)?
-        VL = s2.DimensionIndexValues([3:end 1],:)';
-    end
-    [ind, nSL] = sort_frames([SL s2.B_value'], VL);
-    if isempty(ind), s = []; return; end
-    if ~isequal(ind, 1:nFrame) % && strncmpi(s.Manufacturer, 'Philips', 7)
-        if ind(1) ~= 1 || ind(end) ~= nFrame 
-            s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read new frames [1 end]
+if nFrame>1 
+    if strncmpi(s.Manufacturer, 'Philips', 7)
+        ids = tag2sortFrames();
+        s2 = [ids; repmat({zeros(1, nFrame)}, 1, numel(ids))]; s2 = struct(s2{:});
+        s2.MRImageLabelType = repmat({''},1,nFrame);
+        s2.ComplexImageComponent = repmat({''},1,nFrame);
+        s2 = dicm_hdr(s, s2, 1:nFrame);
+        rows = [];
+        for i = 1:numel(ids)
+            [v, ~, a] = unique(s2.(ids{i}));
+            if numel(v)<2, continue, end
+            rows = [rows a];
         end
-        s.SortFrames = ind; % will use to sort img and get iVol/iSL for PerFrameSQ
+    elseif n>0
+        s2 = struct('InStackPositionNumber', nan(1, nFrame), ...
+              'DimensionIndexValues', nan(n,nFrame), 'B_value', zeros(1, nFrame));
+        s2 = dicm_hdr(s, s2, 1:nFrame);
+        rows = [s2.B_value' s2.DimensionIndexValues([3:end 1 2],:)'];
+        if ~isnan(s2.InStackPositionNumber(1))
+            rows(:,end) = s2.InStackPositionNumber'; % not necessary
+        end
     end
-    if ~isfield(s, 'LocationsInAcquisition'), s.LocationsInAcquisition = nSL; end
+    [~, ind] = sortrows(rows);
+    if ~isequal(ind, 1:nFrame)
+        if ind(1) ~= 1 || ind(end) ~= nFrame 
+            s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read frames [1 end]
+        end
+        s.SortFrames = ind; % to sort img and get iVol/iSL for PerFrameSQ
+    end
+    s.LocationsInAcquisition = max(rows(:,end));
 end
 
 % copy important fields into s
@@ -2277,7 +2286,7 @@ switch fld
         sq = 'MRFOVGeometrySequence';
     case 'CardiacTriggerDelayTime'
         sq = 'CardiacTriggerSequence';
-    case {'SliceNumberMR' 'EchoTime' 'MRScaleSlope'}
+    case {'SliceNumberMR' 'EchoTime' 'MRScaleSlope' 'PhaseNumber' 'MRImageLabelType'}
         sq = 'PrivatePerFrameSq'; % Philips
     case 'DiffusionGradientDirection' % 
         sq = 'MRDiffusionSequence';
@@ -2626,33 +2635,24 @@ nSL = sum(a > tol) + 1;
 err = '';
 nVol = numel(ipp) / nSL;
 if mod(nVol,1), err = 'Missing file(s) detected'; return; end
+h{1}.LocationsInAcquisition = uint16(nSL); % best way for nSL?
 if nSL<2 || ~strncmp(h{1}.Manufacturer, 'Philips', 7), return; end
 
 s = h{1};
-rows = [];
-if isfield(s, 'MRImageGradientOrientationNumber')
-    rows = [rows cellfun(@(c)c.MRImageGradientOrientationNumber, h')];
-end
-if isfield(s, 'TemporalPositionIdentifier')
-    rows = [rows cellfun(@(c)c.TemporalPositionIdentifier, h')];
-end
-if isfield(s, 'MRImageLabelType')
-    rows = [rows cellfun(@(c)~strcmpi(c.MRImageLabelType,'CONTROL'), h')];
-end
-if isfield(s, 'PhaseNumber')
-    rows = [rows cellfun(@(c)c.PhaseNumber, h')];
-end
-if isfield(s, 'SliceNumberMR')
-    rows = [rows cellfun(@(c)c.SliceNumberMR, h')];
+rows = {};
+ids = tag2sortFrames();
+for i = 1:numel(ids)
+    if ~isfield(s, ids{i}), continue; end
+    rows = [rows cellfun(@(c)c.(ids{i}), h', 'UniformOutput', false)];
 end
 [~, ind] = sortrows(rows);
 h = h(ind);
-h{1}.LocationsInAcquisition = uint16(nSL); % best way for nSL?
 if ind(1) == 1, return; end % first file kept
 h{1} = dicm_hdr(h{1}.Filename); % read full hdr
-fldsCp = {'AcquisitionDateTime' 'isDTI'};
-for j = 1:numel(fldsCp)
-    if isfield(s, fldsCp{j}), h{1}.(fldsCp{j}) = s.(fldsCp{j}); end
+flds = fieldnames(s);
+[~, i] = ismember('PixelData', flds);
+for j = i+1:numel(flds)
+    if isfield(s, flds{j}), h{1}.(flds{j}) = s.(flds{j}); end
 end
 
 %% Save JSON file, proposed by Chris G
@@ -2875,51 +2875,6 @@ while 1
     if any(a(:)), break; end
     nMos = nMos - 1;
 end
-
-%% Get sorting index for multi-frame and PAR/XML (also called by dicm_hdr)
-function [ind, nSL] = sort_frames(sl, ic)
-% sl is for slice index, and has B_value as 2nd column for DTI.
-% ic contains other possible identifiers which will be converted into index. 
-% The ic column order is important. 
-nSL = max(sl(:, 1));
-nFrame = size(sl, 1);
-if nSL==nFrame, ind = 1:nSL; ind(sl(:,1)) = ind; return; end % single vol
-nVol = floor(nFrame / nSL);
-badVol = nVol*nSL < nFrame; % incomplete volume
-ic(isnan(ic)) = 0;
-id = zeros(size(ic));
-for i = 1:size(ic,2)
-    [~, ~, id(:,i)] = unique(ic(:,i)); % entries to index
-end
-n = max(id); id = id(:, n>1); n = n(n>1);
-i = find(n == nVol+badVol, 1);
-if ~isempty(i) % most fMRI/DTI
-    id = id(:, i); % use a single column for sorting
-elseif ~badVol && numel(n)>1
-    [j, i] = find(tril(n' * n, -1) == nVol, 1); % need to ignore diag
-    if ~isempty(i)
-        id = id(:, [i j]); % 2 columns make nVol        
-    elseif numel(n)>2
-        i = find(cumprod(n) == nVol, 1);
-        if ~isempty(i), id = id(:, 1:i); end % first i columns make nVol
-    end
-end
-[~, ind] = sortrows([sl id]); % this sort idea is from julienbesle
-if badVol % only seen in Philips
-    try lastV = id(ind,1) > nVol; catch, lastV = []; end
-    if sum(lastV) == nFrame-nSL*nVol
-        ind(lastV) = []; % remove incomplete volume
-    else % suppose extra later slices are from bad volume
-        for i = 1:nSL
-            a = ind==i;
-            if sum(a) <= nVol, continue; end % shoule be ==
-            ind(find(a, 1, 'last')) = []; % remove last extra one
-            if numel(ind) == nSL*nVol, break; end
-        end
-    end
-end
-ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
-ind = ind(:)';
 
 %% return all file names in a folder, including in sub-folders
 function files = filesInDir(folder)
@@ -3148,4 +3103,10 @@ function tf = ischar(A)
 tf = builtin('ischar', A);
 if tf, return; end
 if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
+
+%% Return tags to sort frames for Philips: last must be slice IDs
+function tags = tag2sortFrames()
+tags = {'ComplexImageComponent' 'B_value' 'TemporalPositionIdentifier' ...
+    'EchoTime' 'MRImageGradientOrientationNumber' 'MRImageLabelType' ...
+    'PhaseNumber' 'SliceNumberMR'};
 %%
