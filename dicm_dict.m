@@ -1200,7 +1200,7 @@ elseif strncmpi(vendor, 'Philips', 7)
     '2005' '141D' 'IS' 'MRVersionNumberDeletedBlobsets'
     '2005' '1426' 'CS' 'ViewingHardcopyOnly'
     '2005' '1428' 'SL' 'MRSeriesNrOfLabelTypes'
-    '2005' '1429' 'SL' 'MRImageLabelType'
+    '2005' '1429' 'CS' 'MRImageLabelType'
     '2005' '142A' 'CS' 'ExamPrintStatus'
     '2005' '142B' 'CS' 'ExamExportStatus'
     '2005' '142C' 'CS' 'ExamStorageCommitStatus'
