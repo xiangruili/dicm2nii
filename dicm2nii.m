@@ -695,7 +695,11 @@ if bids
     % GUI
     toSkip = T.Type == 'skip';
     uniqueNames = unique(T.Modality(~toSkip));
-    if ~all(Lia) || all(toSkip) || numel(uniqueNames)<sum(~toSkip)
+    guiOn = getpref('dicm2nii_gui_para', 'bidsForceGUI', []);
+    if isempty(guiOn)
+        guiOn = ~all(Lia) || all(toSkip) || numel(uniqueNames)<sum(~toSkip);
+    end
+    if guiOn
     setappdata(0,'Canceldicm2nii',false)
     scrSz = get(0, 'ScreenSize');
     clr = [1 1 1]*206/256;
@@ -1198,8 +1202,9 @@ else % also add Siemens extra for json
         s.ParallelReductionFactorInPlane = asc_header(s, 'sPat.lAccelFactPE');
     end
     if ~isfield(s, 'ParallelAcquisitionTechnique')
-        modes = {'none' 'GRAPPA' 'SliceAccel' 'mSENSE'}; % first 2 verified
-        s.ParallelAcquisitionTechnique = modes{asc_header(s, 'sPat.ucPATMode')};
+        modes = {'none' 'GRAPPA' 'mSENSE' '' '' 'SliceAccel' '' ''};
+        patMode = logical(bitget(asc_header(s, 'sPat.ucPATMode'), 1:8)); % guess
+        s.ParallelAcquisitionTechnique = strjoin(modes(patMode), ';');
     end
 end
 if pf.save_patientName, nii.hdr.db_name = PatientName(s); end % char[18]
@@ -2159,6 +2164,7 @@ if     any(d == 'LPH'), phPos = false; % in dicom ref
 elseif any(d == 'RAF'), phPos = true;
 end
 if R(ixy(iPhase), iPhase)<0, phPos = ~phPos; end % tricky! in image ref
+if strncmpi(s.Manufacturer, 'Philips', 7), phPos = []; end % invalidate for now
 
 %% subfunction: extract useful fields for multiframe dicom
 function s = multiFrameFields(s)
@@ -2642,7 +2648,7 @@ s = h{1};
 rows = {};
 ids = tag2sortFrames();
 for i = 1:numel(ids)
-    if ~isfield(s, ids{i}), continue; end
+    if ~all(cellfun(@(c) isfield(c,ids{i}),h)), continue; end % by JonD
     rows = [rows cellfun(@(c)c.(ids{i}), h', 'UniformOutput', false)];
 end
 [~, ind] = sortrows(rows);
