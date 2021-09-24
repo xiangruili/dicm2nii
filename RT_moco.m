@@ -570,6 +570,7 @@ dirs(~v) = [];
 new = false;
 for i = numel(dirs):-1:1
     subj = regexp(dirs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
+    subj = regexprep(subj, '[_\s]', '');
     if exist([hs.logDir subj '.mat'], 'file'), continue; end
     hs.subj.UserData = [hs.rootDir dirs(i).name]; 
     hs.series.UserData = [1 1];
