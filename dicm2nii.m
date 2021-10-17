@@ -1498,7 +1498,7 @@ ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
 % With this method, the code will get correct ref if bvec ref scheme changes 
 % some day, e.g. if GE saves (0018,9089) in the future.
 % ref = 0: IMG, UIH for now; PE='ROW" not tested 
-% ref = 1: PCS, Siemens/Philips or unknown vendor, this is default
+% ref = 1: PCS, Siemens/Philips/lateCanon or unknown vendor, this is default
 % ref = 2: FPS, Bruker for now (need to verify)
 % ref = 3: FPS_GE, confusing signs
 % ref = 4: PFS, CANON (ImageComments) by ChrisR
@@ -2182,38 +2182,41 @@ sfgs = 'SharedFunctionalGroupsSequence';
 if any(~isfield(s, {sfgs pffgs})), return; end
 try nFrame = s.NumberOfFrames; catch, nFrame = numel(s.(pffgs).FrameStart); end
 
-% check slice ordering (Philips often needs SortFrames)
+% check frame ordering (Philips often needs SortFrames)
 n = numel(MF_val('DimensionIndexValues', s, 1));
-if nFrame>1 
-    if strncmpi(s.Manufacturer, 'Philips', 7)
-        ids = tag2sortFrames();
-        s2 = [ids; repmat({zeros(1, nFrame)}, 1, numel(ids))]; s2 = struct(s2{:});
-        s2.MRImageLabelType = repmat({''},1,nFrame);
-        s2.ComplexImageComponent = repmat({''},1,nFrame);
-        s2 = dicm_hdr(s, s2, 1:nFrame);
-        rows = [];
-        for i = 1:numel(ids)
-            [v, ~, a] = unique(s2.(ids{i}));
-            if numel(v)<2, continue, end
-            rows = [rows a];
-        end
-    elseif n>0
-        s2 = struct('InStackPositionNumber', nan(1, nFrame), ...
-              'DimensionIndexValues', nan(n,nFrame), 'B_value', zeros(1, nFrame));
-        s2 = dicm_hdr(s, s2, 1:nFrame);
-        rows = [s2.B_value' s2.DimensionIndexValues([3:end 1 2],:)'];
-        if ~isnan(s2.InStackPositionNumber(1))
-            rows(:,end) = s2.InStackPositionNumber'; % not necessary
+if n>0 && isfield(s, 'DimensionIndexSequence')
+    % 2 Seq pamameters seen in Bruker (no sense to use Seq)
+    ids = {'StackID' 'DataType' 'MRImageTypeMR' 'MRImageLabelType' ...
+        'MRImageScanningSequencePrivate' 'CardiacTriggerDelayTime' ...
+        'ContrastBolusAgentPhase' 'LUTLabel' ...
+        'EffectiveEchoTime' 'MeasurementUnitsCodeSequence' 'PhaseNumber' ...
+        'B_value' 'MRDiffusionSequence' 'DiffusionGradientDirection' ...
+        'TemporalPositionTimeOffset' 'TemporalPositionIndex' ...
+        'ImagePositionVolume' 'InStackPositionNumber'}; % last for slice
+    dict = dicm_dict(s.Manufacturer, ids);
+    [~, j] = ismember(ids, dict.name);
+    tags = dict.tag(j(j>0)); % ids = dict.name(j(j>0))
+    iPointer = zeros(1, n); % unknown pointers stay at beginning
+    for i = 1:n
+        a = s.DimensionIndexSequence.(sprintf('Item_%i',i)).DimensionIndexPointer;
+        tag = [65536 1] * double(a);
+        [tf, j] = ismember(tag, tags);
+        if tf, iPointer(i) = j;
+        else, fprintf(2, ' Unknown DimensionIndexPointer (%04x %04x).\n', a);
         end
     end
-    [~, ind] = sortrows(rows);
-    if ~isequal(ind, 1:nFrame)
+    [~, iPointer] = sort(iPointer); % sorted in order of ids
+    s2 = struct('DimensionIndexValues', nan(n,nFrame));
+    s2 = dicm_hdr(s, s2, 1:nFrame);
+    [sorted, ind] = sortrows(s2.DimensionIndexValues(iPointer,:)');
+    if ~isequal(ind', 1:nFrame)
         if ind(1) ~= 1 || ind(end) ~= nFrame 
             s = dicm_hdr(s.Filename, [], ind([1 end])); % re-read frames [1 end]
         end
         s.SortFrames = ind; % to sort img and get iVol/iSL for PerFrameSQ
     end
-    s.LocationsInAcquisition = max(rows(:,end));
+    s.LocationsInAcquisition = max(sorted(:,end));
+    if mod(nFrame, s.LocationsInAcquisition), s = []; return; end
 end
 
 % copy important fields into s
@@ -2646,7 +2649,9 @@ if nSL<2 || ~strncmp(h{1}.Manufacturer, 'Philips', 7), return; end
 
 s = h{1};
 rows = {};
-ids = tag2sortFrames();
+ids = {'ComplexImageComponent' 'B_value' 'TemporalPositionIdentifier' ...
+    'EchoTime' 'MRImageGradientOrientationNumber' 'MRImageLabelType' ...
+    'PhaseNumber' 'SliceNumberMR'}; % for Philips par
 for i = 1:numel(ids)
     if ~all(cellfun(@(c) isfield(c,ids{i}),h)), continue; end % by JonD
     rows = [rows cellfun(@(c)c.(ids{i}), h', 'UniformOutput', false)];
@@ -3110,9 +3115,4 @@ tf = builtin('ischar', A);
 if tf, return; end
 if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
 
-%% Return tags to sort frames for Philips: last must be slice IDs
-function tags = tag2sortFrames()
-tags = {'ComplexImageComponent' 'B_value' 'TemporalPositionIdentifier' ...
-    'EchoTime' 'MRImageGradientOrientationNumber' 'MRImageLabelType' ...
-    'PhaseNumber' 'SliceNumberMR'};
 %%
