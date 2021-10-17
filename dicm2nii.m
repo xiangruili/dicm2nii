@@ -696,6 +696,7 @@ if bids
     toSkip = T.Type == 'skip';
     uniqueNames = unique(T.Modality(~toSkip));
     guiOn = getpref('dicm2nii_gui_para', 'bidsForceGUI', []);
+    if ~isempty(guiOn), setpref('dicm2nii_gui_para', 'bidsForceGUI', []); end
     if isempty(guiOn)
         guiOn = ~all(Lia) || all(toSkip) || numel(uniqueNames)<sum(~toSkip);
     end
