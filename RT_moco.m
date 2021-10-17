@@ -20,7 +20,7 @@ fh = figure('mc'*[256 1]'); clf(fh);
 set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ... 
 	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', [1 1 1]*0.94, ...
     'Name', 'Real Time Image Monitor ', 'Tag', 'RT_moco', 'Visible', 'off', ...
-    'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}}));
+    'UserData', struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}}, 'GM', {{}}));
 try fh.WindowState = 'maximized'; catch, fh.Position = [1 60 res(3) res(4)-80]; end
 hs.fig = fh;
 hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
@@ -110,7 +110,7 @@ vars = {'Description' 'Series' 'Instances' '<font color="#00cc00">Green</font>' 
 hs.table = uitable(pa2, 'Units', 'normalized', 'Position', [0.02 0.01 0.96 0.42], ...
     'FontSize', 14, 'RowName', [], 'CellSelectionCallback', @tableCB, ...
     'ColumnName', strcat('<html><h2>', vars, '</h2></html>'));
-try hs.table.Multiselect = 'off'; catch, end % R2020a+
+try hs.table.Multiselect = 'off'; end %#ok<*TRYNC> R2020a+
 
 ax = axes(pa1, 'Position', axPos, 'YDir', 'reverse', 'Visible', 'off', 'CLim', [0 1]);
 hs.img = image(ax, 'CData', ones(2)*0.94, 'CDataMapping', 'scaled');
@@ -207,7 +207,9 @@ if nIN>5 && hs.countDown.Running == "off" % work for mosaic without tricks
     hs.countDown.UserData = (nIN-1) * s.RepetitionTime/86400000 + dn.datenum;
     start(hs.countDown);
 end
-
+try stopAt = str2double(regexp(s.ImageComments, '(?<=stopAt:)\d*', 'match', 'once')); 
+catch, stopAt = inf;
+end
 mos = dicm_img(s); s.PixelData = mos;
 img = mos2vol(mos, nSL);
 p = refVol(img, [s.PixelSpacing' s.SpacingBetweenSlices]);
@@ -219,6 +221,7 @@ mn = mean(img0(ind));
 s.CLim = imgClim(img0);
 set_img(hs.img, mos, s.CLim);
 init_series(hs, s, nIN);
+hs.img.UserData(1) = mean(img(:));
 viewer = findall(0, 'Type', 'figure', 'Tag', 'nii_viewer');
 if nIN<6 && isempty(viewer), overlay(hs.fig); end
 
@@ -259,6 +262,7 @@ for i = 2:nIN
     hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: head radius
     
     img = double(mos);
+    hs.img.UserData(iN) = mean(img(:)); 
     a = img(ind) - img0(ind); % use only edge voxles: faster & more sensitive
     hs.dv.YData(iN) = sqrt(a*a' / numel(a)) / mn;
     img0 = img;
@@ -271,6 +275,7 @@ for i = 2:nIN
     N = {numel(a) sum(a<dy(2)) sum(a<dy(3))};
     hs.table.Data(1,3:6) = [N mean(fd(~isnan(fd)))];
     for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', N{j+1}/N{1}*100); end
+    if N{2}>=stopAt, [~, ~] = system(['echo 1 > ' hs.rootDir 'StopScan']); end
     if iN>=nIN, return; end % ISSS alike
     % drawnow; % update instance for offline test
 end
@@ -296,7 +301,7 @@ fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
 fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), tim);
 fclose(fid);
 
-hs.dv.YData = zeros(nIN,1); hs.fd.YData = zeros(nIN,1);
+hs.dv.YData = zeros(nIN,1); hs.fd.YData = zeros(nIN,1); hs.img.UserData = nan(nIN,1);
 set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
 if nIN==1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
@@ -434,7 +439,7 @@ hs = guidata(h);
 hs.table.Data = {};
 hs.img.CData = ones(2)*0.94;
 hs.fd.YData = 0; hs.dv.YData = 0;
-hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}});
+hs.fig.UserData = struct('FD', {{}}, 'DV', {{}}, 'hdr', {{}}, 'resp', {{}}, 'GM', {{}});
 set([hs.subj hs.series hs.instnc hs.pct], 'String', '');
 
 %% Re-do current subj: useful in case of error during a session
@@ -554,6 +559,7 @@ out = F(I);
 % First is study, second is series and third is instance.
 function new = new_series(hs)
 try setCountDown(hs); catch, end
+try QC_report(hs.rootDir); catch me, assignin('base', 'me', me); end
 f = hs.subj.UserData;
 if ~isempty(f) % check new run for current subj
     iR = hs.series.UserData;
@@ -629,7 +635,7 @@ function s = dicm_hdr_wait(varargin)
 tEnd = now + 1/86400; % wait up to 1 second
 while 1
     s = dicm_hdr(varargin{:});
-    try %#ok, maybe too strict to be equal? Test indicates always equal 
+    try % maybe too strict to be equal? Test indicates always equal 
         if s.PixelData.Start+s.PixelData.Bytes == s.FileSize, return; end
     end
     if now>tEnd, s = []; return; end % give up
@@ -708,6 +714,7 @@ set([hs.menu hs.table hs.slider], 'Enable', 'on');
 if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
     hs.fig.UserData.FD{end+1} = hs.fd.YData;
     hs.fig.UserData.DV{end+1} = hs.dv.YData;
+    hs.fig.UserData.GM{end+1} = hs.img.UserData;
     hs.fig.UserData.resp{end+1} = {hs.resp.XData};
     T3 = cell2table(flip(hs.table.Data(:,[1 2 6]), 1), ...
         'VariableNames', {'Description' 'SeriesNumber' 'MeanFD'});
@@ -726,6 +733,8 @@ if     b == '?', fwrite(s, uint8('RTMM')); return; % identity
 elseif b == 'P', fwrite(s, uint8(hs.subj.String)); return; % PatientName
 elseif b == 'T', fwrite(s, uint8(strjoin(hs.MMSS.String))); return; % count down
 elseif b == 'M', s.UserData.send = true; return; % start to send motion info
+elseif b == 'Q' % stim computer asks to stop scan
+    [~, ~] = system(['echo 1 > ' hs.rootDir 'StopScan']); return;
 elseif b<1 || b>3, return; % ignore for now
 end
 if hs.timer.StartDelay>1, return; end % not during a series
@@ -768,8 +777,8 @@ if ~isempty(nam)
     delete([hs.rootDir nam.name]);
     if now-nam.datenum < 9/86400 % file was within 9 seconds
         stop(tObj);
-        hs.MMSS.String{2} = 'Stopped by operator';
-        error('StoppedByUser');
+        hs.MMSS.String{2} = 'Stopped by Console';
+        error('StoppedByConsole');
     end
 end
 t = tObj.UserData - now;
@@ -782,4 +791,113 @@ function mx = imgClim(img)
 im = double(img(:));
 im = im(im>max(im)/10);
 mx = mean(im) + 2*std(im);
+
+%% Create QC report
+function QC_report(rootDir)
+nam = dir([rootDir 'closed_*']);
+if isempty(nam), return; end
+nam = [rootDir nam(1).name];
+done = onCleanup(@()movefile(nam, strrep(nam, 'closed_', 'done_'))); 
+rmQC = onCleanup(@()delete('./tmp_QC_*.pdf'));
+subj = regexp(nam, '(?<=closed_)\d{4}\w{2}$', 'match', 'once');
+if isempty(subj), return; end
+load([rootDir 'RTMM_log/' subj '.mat'], 'T3');
+s = T3.Properties.UserData.hdr{1};
+if contains(s.ImageComments, 'NoPDF'), return; end
+
+close all; delete('./tmp_QC_*.pdf');
+fig = figure('Position', [10 30 [8.5 11]*96], 'Units', 'normalized');
+set(fig, 'Color', 'w', 'PaperUnits', 'normalized', 'PaperPosition', [0 0 1 1]);
+ax = axes(fig, 'Position', [0.01 0.955 0.98 0.045], 'Visible', 'off');
+try imshow('./logo.png', 'Parent', ax); ax.HandleVisibility = 'off'; end
+
+layout = getpref('nii_viewer_para', 'layout');
+if layout ~= 1
+    setpref('nii_viewer_para', 'layout', 1);
+    cln = onCleanup(@()setpref('nii_viewer_para', 'layout', layout));
+end
+
+ax = axes(fig, 'Position', [0.1 0.92 0.8 0.03], 'Visible', 'off');
+text(ax, 0.5, 1, subj, 'FontSize', 18, 'HorizontalAlignment', 'center');
+dat = datestr(datenum(s.AcquisitionDate, 'yyyymmdd'), 'dddd mmm dd, yyyy');
+text(ax, 0.5, 0, dat, 'FontSize', 12, 'HorizontalAlignment', 'center');
+tbl = cell(1, 5);
+dict = dicm_dict('', {'AcquisitionTime' 'SeriesNumber' 'SeriesDescription'});
+for i = 1:99
+    nams = dir([s.Filename(1:end-17) sprintf('%06i',i) '*.dcm']);
+    if isempty(nams), break; end
+    s = dicm_hdr([nams(1).folder '/' nams(1).name], dict);
+    d = s.AcquisitionTime; d = [d(1:2) ':' d(3:4) ':' d(5:6)];
+    tbl(i,:) = {s.SeriesNumber d numel(nams) s.SeriesDescription 0};
+    a = T3.MeanFD(T3.SeriesNumber == s.SeriesNumber);
+    if ~isempty(a), tbl{i,5} = a; end
+end
+tbl = cellfun(@num2str, tbl, 'UniformOutput', false); % for left-align
+vName = {'SeriesNumber' 'Time' 'TotalInstances' 'Description' 'meanFD'};
+uitable(fig, 'Units', 'normalized', 'Position', [0.04 0.1 0.9 0.8], ...
+    'FontSize', 12, 'RowName', [], 'ColumnName', vName, 'Data', tbl, ...
+    'ColumnWidth', {96 96 108 342 82});
+newPage(fig); y = 0.95;
+
+for i = 1:numel(T3.Properties.UserData.hdr)
+    s = T3.Properties.UserData.hdr{i};
+    series = sprintf('%s (Series %g)', s.ProtocolName, s.SeriesNumber);
+    if contains(s.SequenceName, {'epfid2d' 'mbPCASL'}) % EPI/ASL
+        fd = T3.Properties.UserData.FD{i};
+        if numel(fd)<6, continue; end % skip slice check etc
+        if y<0.95, newPage(fig); y = 0.95; end
+        y = y - 0.3;
+        ax = axes(fig, 'Position', [0.1 y+0.19 0.8 0.08]);
+        gm = T3.Properties.UserData.GM{i};
+        gm = (gm/mean(gm) - 1)*100; % global mean
+        % gm = [0; diff(gm)]/mean(gm) * 100; % delta GM
+        plot(ax, gm, '.-m');
+        set(ax, 'YTick', 0:1, 'YLim', [-1 1], 'XLim', [0 numel(fd)+1], 'XTick', []);
+        ylabel(ax, 'GM (%)', 'Color', 'm');
+        % ylabel(ax, [char(916) 'GM (%)']);
+        title(ax, series, 'Interpreter', 'none', 'FontSize', 12);
+        ax = axes(fig, 'Position', [0.1 y+0.03 0.8 0.16]);
+        yyaxis right; plot(ax, fd, '.-');
+        ylabel(ax, 'FD (mm)'); xlabel(ax, 'Volume Number');
+        set(ax, 'YTick', 0:0.6:1.8, 'YLim', [0 1.8], 'XLim', [0 numel(fd)+1]);
+        str = sprintf('meanFD=%.2g', nanmean(fd));
+        text(ax, 0.8, 0.9, str, 'Units', 'normalized', 'Color', [0.85 0.32 0.1]);
+        
+        yyaxis left; plot(ax, T3.Properties.UserData.DV{i}, '.-');
+        ylabel(ax, 'DVARS'); set(ax, 'YTick', 0:0.12:0.36, 'YLim', [0 0.36]);
+        
+        img = uint8(double(dicm_img(s)) / s.CLim * 256);
+    elseif contains(s.SequenceName, {'tfl3d' 'spc' 'tse2d' 'fm2d'}) % T1/T2/fmap
+        nams = dir([s.Filename(1:end-10) '*.dcm']);
+        nams = strcat(nams(1).folder, '/', {nams.name});
+        fh = nii_viewer( dicm2nii(nams, ' ', 'no_save'));
+        nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh);
+        hs = guidata(fh);
+        drawnow; F = getframe(fh, hs.frame.Position); close(fh); img = F.cdata;
+    elseif contains(s.SequenceName, 'ep_b0') % Diff
+        if asc_header(s, 'sDiffusion.lDiffDirections')<7, continue; end
+        img = uint8(double(dicm_img(s)) / s.CLim * 256);
+    else, continue;
+    end
+    sz = size(img); sz = sz([2 1]) ./ [8.5 11]/96;
+    if sz(1)>0.94, sz = sz / sz(1) * 0.94; end
+    y = y - sz(2) - 0.08;
+    if y<0.02 && y+sz(2)*0.2>0.02, sz = sz * 0.8; y = y + 0.2*sz(2); end
+    if y<0.02, newPage(fig); y = 0.92-sz(2); end
+    ax = axes(fig, 'Position', [(1-sz(1))/2 y+0.02 sz], 'Visible', 'off');
+    imshow(img, 'Parent', ax);
+    title(ax, series, 'Interpreter', 'none', 'FontSize', 12);
+end
+newPage(fig); close(fig);
+
+pdfNam = rootDir+"RTMM_log/"+subj+"_"+s.AcquisitionDate(3:8)+"_QC.pdf";
+setenv('LD_LIBRARY_PATH', getenv('PATH'));
+[~, ~] = system("pdfunite ./tmp_QC_*.pdf "+pdfNam); % for Linux 
+
+%% print fig to a new PDF, called by QC_report()
+function newPage(fig)
+nam = dir('./tmp_QC_*.pdf');
+if isempty(nam), i = 1; else, i = str2double(nam(end).name(8:10)) + 1; end
+print(fig, sprintf('./tmp_QC_%03i.pdf', i), '-dpdf');
+clf(fig);
 %%
