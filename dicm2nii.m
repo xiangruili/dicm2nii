@@ -1796,16 +1796,18 @@ csa = 'CSASeriesHeaderInfo';
 if ~isfield(s, csa) % in case of multiframe
     try s.(csa) = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1; end
 end
+if isfield(s, 'Private_0029_1020'), s.(csa) = s.Private_0029_1020; end
 if ~isfield(s, csa), return; end
 if isfield(s.(csa), 'MrPhoenixProtocol')
     str = s.(csa).MrPhoenixProtocol;
 elseif isfield(s.(csa), 'MrProtocol') % older version dicom
     str = s.(csa).MrProtocol;
-else % in case of failure to decode CSA header
+elseif isa(s.(csa), 'uint8') % in case of failure to decode CSA header
     str = char(s.(csa)(:)');
     str = regexp(str, 'ASCCONV BEGIN(.*)ASCCONV END', 'tokens', 'once');
     if isempty(str), return; end
     str = str{1};
+else, return;
 end
 
 % tSequenceFileName  = ""%SiemensSeq%\gre_field_mapping""
@@ -2657,6 +2659,7 @@ for i = 1:numel(ids)
     if ~all(cellfun(@(c) isfield(c,ids{i}),h)), continue; end % by JonD
     rows = [rows cellfun(@(c)c.(ids{i}), h', 'UniformOutput', false)];
 end
+if isempty(rows), return; end
 [~, ind] = sortrows(rows);
 h = h(ind);
 if ind(1) == 1, return; end % first file kept
