@@ -242,6 +242,7 @@ for i = 2:nIN
     if nTE>1, iN = i; end % fake InstanceNumber for special case
     mos = dicm_img(s);
     img = mos2vol(mos, nSL);
+    hs.img.UserData(iN) = mean(img(:)); 
     hs.img.CData = mos; hs.instnc.String = num2str(iN);
     hs.slider.Value = iN; % show progress
     if isDTI
@@ -262,7 +263,6 @@ for i = 2:nIN
     hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: head radius
     
     img = double(mos);
-    hs.img.UserData(iN) = mean(img(:)); 
     a = img(ind) - img0(ind); % use only edge voxles: faster & more sensitive
     hs.dv.YData(iN) = sqrt(a*a' / numel(a)) / mn;
     img0 = img;
@@ -809,7 +809,7 @@ close all; delete('./tmp_QC_*.pdf');
 fig = figure('Position', [10 30 [8.5 11]*96], 'Units', 'normalized');
 set(fig, 'Color', 'w', 'PaperUnits', 'normalized', 'PaperPosition', [0 0 1 1]);
 ax = axes(fig, 'Position', [0.01 0.955 0.98 0.045], 'Visible', 'off');
-try imshow('./logo.png', 'Parent', ax); ax.HandleVisibility = 'off'; end
+try imshow('./logo.png', 'Parent', ax); ax.HandleVisibility = 'off'; catch, end
 
 layout = getpref('nii_viewer_para', 'layout');
 if layout ~= 1
@@ -834,59 +834,54 @@ for i = 1:99
 end
 tbl = cellfun(@num2str, tbl, 'UniformOutput', false); % for left-align
 vName = {'SeriesNumber' 'Time' 'TotalInstances' 'Description' 'meanFD'};
-uitable(fig, 'Units', 'normalized', 'Position', [0.04 0.1 0.9 0.8], ...
+h = uitable(fig, 'Units', 'normalized', 'Position', [0.04 0.1 0.9 0.8], ...
     'FontSize', 12, 'RowName', [], 'ColumnName', vName, 'Data', tbl, ...
     'ColumnWidth', {96 96 108 342 82});
+if i>40, h.FontSize = max(8, fix(450/i)); end
 newPage(fig); y = 0.95;
 
 for i = 1:numel(T3.Properties.UserData.hdr)
     s = T3.Properties.UserData.hdr{i};
     series = sprintf('%s (Series %g)', s.ProtocolName, s.SeriesNumber);
-    if contains(s.SequenceName, {'epfid2d' 'mbPCASL'}) % EPI/ASL
+    if contains(s.SequenceName, {'epfid2d' 'mbPCASL' 'ep_b0'}) % EPI/ASL/Diff
         fd = T3.Properties.UserData.FD{i};
-        if numel(fd)<6, continue; end % skip slice check etc
-        if y<0.95, newPage(fig); y = 0.95; end
-        y = y - 0.3;
+        N = find(~isnan(fd), 1, 'last');
+        if isempty(N) || N<6 || all(fd==0), continue; end % skip slice check etc
+        if y<0.35, newPage(fig); y = 0.95; end
+        y = y - 0.32;
         ax = axes(fig, 'Position', [0.1 y+0.19 0.8 0.08]);
-        gm = T3.Properties.UserData.GM{i};
-        gm = (gm/mean(gm) - 1)*100; % global mean
+        gm = T3.Properties.UserData.GM{i}(1:N);
+        gm = (gm/mean(gm) - 1)*100; rg = ceil(std(gm)); % global mean
         % gm = [0; diff(gm)]/mean(gm) * 100; % delta GM
         plot(ax, gm, '.-m');
-        set(ax, 'YTick', 0:1, 'YLim', [-1 1], 'XLim', [0 numel(fd)+1], 'XTick', []);
+        set(ax, 'YTick', [0 rg], 'YLim', [-rg rg], 'XLim', [0 N+1], 'XTick', []);
         ylabel(ax, 'GM (%)', 'Color', 'm');
         % ylabel(ax, [char(916) 'GM (%)']);
         title(ax, series, 'Interpreter', 'none', 'FontSize', 12);
         ax = axes(fig, 'Position', [0.1 y+0.03 0.8 0.16]);
-        yyaxis right; plot(ax, fd, '.-');
+        yyaxis right; plot(ax, fd(1:N), '.-');
         ylabel(ax, 'FD (mm)'); xlabel(ax, 'Volume Number');
-        set(ax, 'YTick', 0:0.6:1.8, 'YLim', [0 1.8], 'XLim', [0 numel(fd)+1]);
-        str = sprintf('meanFD=%.2g', nanmean(fd));
+        set(ax, 'YTick', 0:0.6:1.8, 'YLim', [0 1.8], 'XLim', [0 N+1]);
+        str = sprintf('meanFD=%.2g', mean(fd(1:N)));
         text(ax, 0.8, 0.9, str, 'Units', 'normalized', 'Color', [0.85 0.32 0.1]);
-        
-        yyaxis left; plot(ax, T3.Properties.UserData.DV{i}, '.-');
+        yyaxis left; plot(ax, T3.Properties.UserData.DV{i}(1:N), '.-');
         ylabel(ax, 'DVARS'); set(ax, 'YTick', 0:0.12:0.36, 'YLim', [0 0.36]);
-        
-        img = uint8(double(dicm_img(s)) / s.CLim * 256);
     elseif contains(s.SequenceName, {'tfl3d' 'spc' 'tse2d' 'fm2d'}) % T1/T2/fmap
         nams = dir([s.Filename(1:end-10) '*.dcm']);
         nams = strcat(nams(1).folder, '/', {nams.name});
-        fh = nii_viewer( dicm2nii(nams, ' ', 'no_save'));
+        fh = nii_viewer(dicm2nii(nams, ' ', 'no_save'));
         nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh);
         hs = guidata(fh);
         drawnow; F = getframe(fh, hs.frame.Position); close(fh); img = F.cdata;
-    elseif contains(s.SequenceName, 'ep_b0') % Diff
-        if asc_header(s, 'sDiffusion.lDiffDirections')<7, continue; end
-        img = uint8(double(dicm_img(s)) / s.CLim * 256);
-    else, continue;
+        sz = size(img); sz = sz([2 1]) ./ [8.5 11]/96;
+        if sz(1)>0.8, sz = sz / sz(1) * 0.8; end
+        y = y - sz(2) - 0.08;
+        if y<0.02 && y+sz(2)*0.2>0.02, sz = sz * 0.8; y = y + 0.2*sz(2); end
+        if y<0.02, newPage(fig); y = 0.92-sz(2); end
+        ax = axes(fig, 'Position', [(1-sz(1))/2 y+0.02 sz], 'Visible', 'off');
+        imshow(img, 'Parent', ax);
+        title(ax, series, 'Interpreter', 'none', 'FontSize', 12);
     end
-    sz = size(img); sz = sz([2 1]) ./ [8.5 11]/96;
-    if sz(1)>0.94, sz = sz / sz(1) * 0.94; end
-    y = y - sz(2) - 0.08;
-    if y<0.02 && y+sz(2)*0.2>0.02, sz = sz * 0.8; y = y + 0.2*sz(2); end
-    if y<0.02, newPage(fig); y = 0.92-sz(2); end
-    ax = axes(fig, 'Position', [(1-sz(1))/2 y+0.02 sz], 'Visible', 'off');
-    imshow(img, 'Parent', ax);
-    title(ax, series, 'Interpreter', 'none', 'FontSize', 12);
 end
 newPage(fig); close(fig);
 
