@@ -173,23 +173,28 @@ end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
 if hs.SBRef.Checked=="on" && endsWith(s.SeriesDescription, '_SBRef'), return; end
+if startsWith(s.SequenceName, 'ABCD3d1'), return; end
 
-nTE = asc_header(s, 'lContrasts');
+nTE = asc_header(s, 'lContrasts', 1);
 isMoCo = contains(s.ImageType, '\MOCO');
 if ~isMoCo, hs.series.String = seriesInfo(s); end
 try 
     nSL = s.CSAImageHeaderInfo.NumberOfImagesInMosaic; % EPI | DTI mosaic
 catch % T1, T2, fieldmap etc: show info/img only
-    nIN = asc_header(s, 'sSliceArray.lSize'); % 2D
-    if nIN==1, nIN = asc_header(s, 'sKSpace.lImagesPerSlab'); end % 3D
+    if s.MRAcquisitionType == "3D", nIN = asc_header(s, 'sKSpace.lImagesPerSlab');
+    else, nIN = asc_header(s, 'sSliceArray.lSize'); % 2D
+    end
     iSL = ceil(nIN/2); % try middle slice for better view
     nam = sprintf('%s%06u.dcm', f, iSL);
     if ~exist(nam, 'file'), pause(2); end % wait for dicom
     if ~exist(nam, 'file'), iSL = 1; nam = sprintf('%s%06u.dcm', f, iSL); end
     % fieldmap phase diff series: nTE=2, EchoNumber=2
-    % if startsWith(s.SequenceName, '*fm2d') && contains(s.ImageType, '\P\')
-    if isfield(s, 'EchoNumber') && s.EchoNumber>1, nTE = 1; end
-    nIN = max(nIN*nTE, numel(dir([f '*.dcm']))); % just in case nTE unreliable
+    if (contains(s.ImageType, '\P\') && contains(s.SequenceName, 'fm2d')) || ...
+       (contains(s.ImageType, '\MEAN') && s.NumberOfAverages>1) % vNAV RMS
+        nTE = 1;
+    end
+    nRep = asc_header(s, 'lRepetitions', 0) + 1;
+    nIN = max(nIN*nTE*nRep, numel(dir([f '*.dcm']))); % in case nTE unreliable
     init_series(hs, s, nIN);
     set_img(hs.img, dicm_img(nam));
     hs.slider.Value = iSL;
@@ -236,6 +241,7 @@ for i = 2:nIN
     while ~exist(nam, 'file')
         if ~isempty(dir(nextSeries)) || now>tEnd, return; end
         if hs.countDown.Running=="on", countDown(hs.countDown, 0, hs); end
+        if hs.serial.Status=="open", serialRead(hs.serial); end
         pause(0.2);
     end
     s = dicm_hdr_wait(nam, dict); iN = s.InstanceNumber;
@@ -316,7 +322,7 @@ hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN 0 0 0}; hs.table.Data];
 try hs.table.Selection = [1 1]; catch, end % R2020a+
 hs.fig.UserData.hdr{end+1} = s; % 1st instance with CLim and maybe image
 
-pat = asc_header(s,'sPat.lAccelFactPE');
+pat = asc_header(s,'sPat.lAccelFactPE', 1);
 if pat==1, thr = 0.12; else, thr = 0.15; end % arbitrary
 h = findobj(hs.fig, 'Type', 'uimenu', 'Label', '&DVARS Threshold');
 thrs = str2double(get(h.Children, 'Label'));
@@ -597,8 +603,8 @@ for i = 1:numel(dirs)
 end
 
 %% Subfunction: get a parameter in CSA series ASC header: MrPhoenixProtocol
-function val = asc_header(s, key)
-val = []; 
+function val = asc_header(s, key, dft)
+if nargin>2, val = dft; else, val = []; end
 csa = 'CSASeriesHeaderInfo';
 if ~isfield(s, csa) % in case of multiframe
     try s.(csa) = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1; catch,end
@@ -727,6 +733,7 @@ start(obj);
 
 %% Serial BytesAvail callback: update response: 1=missed, 2=incorrect, 3=correct 
 function serialRead(s, ~)
+if s.BytesAvailable<1, return; end
 b = fread(s, 1);
 hs = guidata(s.UserData.fig);
 if     b == '?', fwrite(s, uint8('RTMM')); return; % identity
