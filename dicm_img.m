@@ -124,7 +124,7 @@ else % compressed dicom: rely on imread for decompression
     end
     i = 8 + double(len); % 8 for leading delimeter and len, skip offset table
     for j = 1:nFrame
-        if ~isequal(b(i+(1:4))', del) % seen terminator + padding
+        if i>=nEnd || ~isequal(b(i+(1:4))', del) % seen terminator + padding
             img(:,:,:,j:end) = []; % truncate if less than nFrame
             break;
         end
