@@ -1361,10 +1361,8 @@ if hdr.dim(5)<3 || tryGetField(s, 'isDTI', 0) || ...
 end
 
 nSL = hdr.dim(4);
-delay = asc_header(s, 'lDelayTimeInTR')/1000; % in ms now
-if isempty(delay), delay = 0;
-else, h{1}.DelayTimeInTR = delay;
-end
+delay = asc_header(s, 'lDelayTimeInTR', 0)/1000; % in ms now
+if delay ~= 0, h{1}.DelayTimeInTR = delay; end
 TA = TR - delay;
 
 % Siemens mosaic
@@ -1790,23 +1788,24 @@ elseif sign(pos-R(iSL,4)) ~= signSL % same direction?
 end
 
 %% Subfunction: get a parameter in CSA series ASC header: MrPhoenixProtocol
-function val = asc_header(s, key)
-val = []; 
+function val = asc_header(s, key, dft)
+if nargin>2, val = dft; else, val = []; end
 csa = 'CSASeriesHeaderInfo';
 if ~isfield(s, csa) % in case of multiframe
     try s.(csa) = s.SharedFunctionalGroupsSequence.Item_1.(csa).Item_1; end
 end
-if isfield(s, 'Private_0029_1020'), s.(csa) = s.Private_0029_1020; end
-if ~isfield(s, csa), return; end
-if isfield(s.(csa), 'MrPhoenixProtocol')
-    str = s.(csa).MrPhoenixProtocol;
-elseif isfield(s.(csa), 'MrProtocol') % older version dicom
-    str = s.(csa).MrProtocol;
-elseif isa(s.(csa), 'uint8') % in case of failure to decode CSA header
-    str = char(s.(csa)(:)');
+if isfield(s, 'Private_0029_1020') && isa(s.Private_0029_1020, 'uint8')
+    str = char(s.Private_0029_1020(:)');
     str = regexp(str, 'ASCCONV BEGIN(.*)ASCCONV END', 'tokens', 'once');
     if isempty(str), return; end
     str = str{1};
+elseif isfield(s, 'MrPhoenixProtocol') % X20A
+    str = s.MrPhoenixProtocol;
+elseif ~isfield(s, csa), return; % non-siemens
+elseif isfield(s.(csa), 'MrPhoenixProtocol') % most Siemens dicom
+    str = s.(csa).MrPhoenixProtocol;
+elseif isfield(s.(csa), 'MrProtocol') % older version dicom
+    str = s.(csa).MrProtocol;
 else, return;
 end
 
@@ -2400,13 +2399,12 @@ function s = csa2pos(s, nSL)
 ori = {'Sag' 'Cor' 'Tra'}; % 1/2/3
 sNormal = zeros(3,1);
 for i = 1:3
-    a = asc_header(s, ['sSliceArray.asSlice[0].sNormal.d' ori{i}]);
-    if ~isempty(a), sNormal(i) = a; end
+    sNormal(i) = asc_header(s, ['sSliceArray.asSlice[0].sNormal.d' ori{i}], 0);
 end
 if all(sNormal==0); return; end % likely no useful info, give up
 
 isMos = tryGetField(s, 'isMos', false);
-revNum = ~isempty(asc_header(s, 'sSliceArray.ucImageNumb'));
+revNum = asc_header(s, 'sSliceArray.ucImageNumb', 0);
 [cosSL, iSL] = max(abs(sNormal));
 if isMos && (~isfield(s, 'CSAImageHeaderInfo') || ...
         ~isfield(s.CSAImageHeaderInfo, 'SliceNormalVector'))
@@ -2419,8 +2417,7 @@ sl = [0 nSL-1];
 for j = 1:2
     key = sprintf('sSliceArray.asSlice[%g].sPosition.d', sl(j));
     for i = 1:3
-        a = asc_header(s, [key ori{i}]);
-        if ~isempty(a), pos(i,j) = a; end
+        pos(i,j) = asc_header(s, [key ori{i}], 0);
     end
 end
 
@@ -2456,8 +2453,7 @@ else
         R(:,2) = cross(R(:,1), R(:,3));
     end
 
-    rot = asc_header(s, 'sSliceArray.asSlice[0].dInPlaneRot');
-    if isempty(rot), rot = 0; end
+    rot = asc_header(s, 'sSliceArray.asSlice[0].dInPlaneRot', 0);
     rot = rot - round(rot/pi*2)*pi/2; % -45 to 45 deg, is this right?
     ca = cos(rot); sa = sin(rot);
     R = R * [ca sa 0; -sa ca 0; 0 0 1];
@@ -2832,9 +2828,8 @@ if ~isempty(nMos), return; end % seen 0 for GLM Design file and others
 % NumberOfImagesInMosaic exists, seen in syngo MR 2004A 4VA25A phase image.
 res = csa_header(s, 'EchoColumnPosition'); % half or full of slice dim
 if ~isempty(res)
-    dim = max([s.Columns s.Rows]);
-    interp = asc_header(s, 'sKSpace.uc2DInterpolation');
-    if ~isempty(interp) && interp, dim = dim / 2; end
+    dim = double(max([s.Columns s.Rows]));
+    if asc_header(s, 'sKSpace.uc2DInterpolation', 0), dim = dim / 2; end
     if dim/res/2 >= 2 % nTiles>=2
         nMos = asc_header(s, 'sSliceArray.lSize'); % mprage lSize=1
     end
