@@ -2111,7 +2111,7 @@ gui_callback([], [], 'set_src', fh);
 
 %% subfunction: return phase positive and phase axis (1/2) in image reference
 function [phPos, iPhase] = phaseDirection(s)
-phPos = []; iPhase = [];
+iPhase = [];
 fld = 'InPlanePhaseEncodingDirection';
 if isfield(s, fld)
     if     strncmpi(s.(fld), 'COL', 3), iPhase = 2; % based on dicm_img(s,0)
@@ -2120,10 +2120,9 @@ if isfield(s, fld)
     end
 end
 
-if isfield(s, 'CSAImageHeaderInfo') % SIEMENS
-    phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % image ref
-    return;
-elseif isfield(s, 'RectilinearPhaseEncodeReordering') % GE
+phPos = csa_header(s, 'PhaseEncodingDirectionPositive'); % SIEMENS, image ref
+if ~isempty(phPos), return; end
+if isfield(s, 'RectilinearPhaseEncodeReordering') % GE
     phPos = ~isempty(regexpi(s.RectilinearPhaseEncodeReordering, 'REVERSE', 'once'));
     return;
 elseif isfield(s, 'UserDefineData') % earlier GE
