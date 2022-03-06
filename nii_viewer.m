@@ -1835,6 +1835,8 @@ end
 mi = min(img); ma = max(img);
 if nii.hdr.intent_code > 1000 || (nargin>1 && isLabel)
     rg = [mi ma]; return;
+elseif nii.hdr.intent_code == 2 % correlation
+    rg = [0.3 1]; return;
 end
 
 ind = abs(img)>50;
@@ -2310,9 +2312,9 @@ switch code
 end
 
 %% Get a mask based on image intensity, but with inside brain filled
-function r = img2mask(img)
-mn = mean(img(img(:)>0));
-r = smooth23(img, 'box', 5) > mn/8; % smooth, binarize
+function r = img2mask(img, thr)
+if nargin<2 || isempty(thr), thr = mean(img(img(:)>0)) / 8; end
+r = smooth23(img, 'box', 5) > thr; % smooth, binarize
 if sum(r(:))==0, return; end
 
 try
