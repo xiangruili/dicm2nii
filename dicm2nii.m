@@ -920,7 +920,6 @@ for i = 1:nRun
         nii(1).hdr.file_name = strcat(fnames{i}, '.nii');
         nii(1).hdr.magic = 'n+1';
         varargout{1} = nii_tool('update', nii(1));
-        if nRun>1, fprintf(2, 'Only one series is converted.\n'); end
         return;
     end
     
@@ -1810,7 +1809,7 @@ else, return;
 end
 
 % tSequenceFileName  = ""%SiemensSeq%\gre_field_mapping""
-expr = ['\n' regexptranslate('escape', key) '.*?=\s*(.*?)\n'];
+expr = ['\n' regexptranslate('escape', key) '\s*=\s*(.*?)\n'];
 str = regexp(str, expr, 'tokens', 'once');
 if isempty(str), return; end
 str = strtrim(str{1});
