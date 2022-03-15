@@ -520,6 +520,9 @@ for i = 1:nRun
     if i>1 && sN-sNs(i-1)==1 && isType(s, '\MOCO\') && strncmp(a, rNames{i-1}, numel(a))
         a = [a '_MoCo'];
     end
+    if asc_header(s, 'sPreScanNormalizeFilter.ucSaveUnfiltered', 0) && isType(s, '\NORM')
+        a = [a '_NORM'];
+    end
     if multiSubj, a = [a '_' subjs{i}]; end
     if multiStudy(i), a = [a '_Study' studyIDs{i}]; end
     if ~isstrprop(a(1), 'alpha'), a = ['x' a]; end % genvarname behavior
