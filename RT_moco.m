@@ -189,14 +189,14 @@ if isDTI
         if isempty(a), break; else, nA(i) = a; end %#ok
     end
     nIN = nA(1) + sum(nA(2:end))*asc_header(s, 'sDiffusion.lDiffDirections');
-elseif contains(s.SequenceName, {'epfid2d' 'mbPCASL'}) % EPI/ASL
+elseif contains(s.SequenceName, {'epfid2d' 'epse2d' 'mbPCASL'}) % EPI/ASL
     nIN = asc_header(s, 'lRepetitions', 0) + 1;
 else % T1, T2, fieldmap etc: show info/img only
     isEnh = isfield(s, 'NumberOfFrames') && s.NumberOfFrames>1;
-    if isEnh, nIN = 1;
-    elseif s.MRAcquisitionType == "3D", nIN = asc_header(s, 'sKSpace.lImagesPerSlab');
+    if s.MRAcquisitionType == "3D", nIN = asc_header(s, 'sKSpace.lImagesPerSlab');
     else, nIN = asc_header(s, 'sSliceArray.lSize'); % 2D
     end
+    if isEnh, nIN = nIN / s.NumberOfFrames; end
     % fieldmap phase diff series: nTE=2, EchoNumber=2
     if (contains(s.ImageType, '\P\') && contains(s.SequenceName, 'fm2d')) || ...
        (contains(s.ImageType, '\MEAN') && s.NumberOfAverages>1) % vNAV RMS
