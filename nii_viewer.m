@@ -1658,7 +1658,7 @@ function [R, perm, flp] = reorient(R, dim, leftHand)
 % left-handed matrix, where R(1,1) will be negative. 
 % The second input is the img space dimension (1x3). 
 % The perm output, like [1 2 3] or a permutation of it, indicates if input R was
-% permuted for 3 axis. The third output, flip (1x3 logical), indicates an axis 
+% permuted for 3 axis. The third output, flp (1x3 logical), indicates an axis 
 % (AFTER perm) is flipped if true.
 a = abs(R(1:3,1:3));
 [~, ixyz] = max(a);
@@ -1666,7 +1666,7 @@ if ixyz(2) == ixyz(1), a(ixyz(2),2) = 0; [~, ixyz(2)] = max(a(:,2)); end
 if any(ixyz(3) == ixyz(1:2)), ixyz(3) = setdiff(1:3, ixyz(1:2)); end
 [~, perm] = sort(ixyz);
 R(:,1:3) = R(:,perm);
-flp = R([1 6 11]) < 0; % diag(R(1:3, 1:3))
+flp = diag(R(1:3, 1:3))' < 0;
 if nargin>2 && leftHand, flp(1) = ~flp(1); end
 rotM = diag([1-flp*2 1]);
 rotM(1:3, 4) = (dim(perm)-1) .* flp; % 0 or dim-1
