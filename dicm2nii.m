@@ -606,30 +606,13 @@ if bids
     AcquisitionDate = {[acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)]};
     Comment                = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
-    
-    % Table: Type/Modality
-    valueset = {'skip','skip';
-        'anat','T1w';
-        'anat','T2w';
-        'anat','T1rho';
-        'anat','T1map';
-        'anat','T2map';
-        'anat','T2star';
-        'anat','FLAIR';
-        'anat','FLASH';
-        'anat','PD';
-        'anat','PDmap';
-        'dwi' ,'dwi';
-        'func','task-motor_bold';
-        'func','task-rest_bold';
-        'fmap','phasediff';
-        'fmap','phase1';
-        'fmap','phase2';
-        'fmap','magnitude1';
-        'fmap','magnitude2';
-        'fmap','fieldmap'};
-    Modality = categorical(repmat({'skip'},[length(fnames),1]),valueset(:,2));
-    Type = categorical(repmat({'skip'},[length(fnames),1]),unique(valueset(:,1)));
+
+    types = {'skip' 'anat' 'dwi' 'fmap' 'func' 'perf'};
+    modalities = {'skip' 'FLAIR' 'FLASH' 'PD' 'PDmap' 'T1map' 'T1rho' 'T1w' 'T2map'  ...
+        'T2star''T2w' 'asl' 'dwi'  'fieldmap' 'm0scan' 'magnitude1' 'magnitude2' ...
+        'phase1' 'phase2' 'phasediff' 'task-motor_bold' 'task-rest_bold'};
+    Modality = categorical(repmat({'skip'}, [length(fnames) 1]), modalities);
+    Type = categorical(repmat({'skip'},[length(fnames),1]), types);
     Name = regexprep(fnames', '_s\d+$', '');
     T = table(Name,Type,Modality);
     
@@ -692,11 +675,9 @@ if bids
             T.Type(i) = {'anat'}; T.Modality(i) = {'T2w'};
         end
     end
-    setappdata(0,'ModalityTable',T)
-    setappdata(0,'SubjectTable',S)
-
+    
     % GUI
-    toSkip = T.Type == 'skip';
+    toSkip = any(ismember(cellfun(@char,table2cell(T(:,2:3)),'uni',0), 'skip'), 2);
     uniqueNames = unique(T.Modality(~toSkip));
     guiOn = getpref('dicm2nii_gui_para', 'bidsForceGUI', []);
     if ~isempty(guiOn), setpref('dicm2nii_gui_para', 'bidsForceGUI', []); end
@@ -704,157 +685,137 @@ if bids
         guiOn = ~all(Lia) || all(toSkip) || numel(uniqueNames)<sum(~toSkip);
     end
     if guiOn
-    setappdata(0,'Canceldicm2nii',false)
-    scrSz = get(0, 'ScreenSize');
-    clr = [1 1 1]*206/256;
-    figargs = {'bids' * 256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 800 400],...
-               'Color', clr,...
-               'CloseRequestFcn',@my_closereq};
-    if verLessThanOctave
-        hf = figure(figargs{1});
-        set(hf,figargs{2:end});
-        % add help
-        set(hf,'ToolBar','none')
-        set(hf,'MenuBar','none')
+        setappdata(0,'Canceldicm2nii',false);
+        scrSz = get(0, 'ScreenSize');
+        figargs = {'bids'*256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 800 400],...
+            'Color', [1 1 1]*206/256, 'CloseRequestFcn', @my_closereq};
+        if verLessThanOctave
+            hf = figure(figargs{1});
+            set(hf,figargs{2:end});
+            % add help
+            set(hf,'ToolBar','none')
+            set(hf,'MenuBar','none')
+        else
+            hf = uifigure(figargs{:});
+        end
+        uimenu(hf,'Label','help','Callback',@(src,evnt)showHelp(types,modalities))
+        set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
+        
+        % tables
+        if verLessThanOctave
+            SCN = S.Properties.VariableNames;
+            S   = table2cell(S);
+            TCN = T.Properties.VariableNames;
+            T   = cellfun(@char,table2cell(T),'uni',0);
+        end
+        TS = uitable(hf,'Data',S);
+        TT = uitable(hf,'Data',T);
+        TSpos = [20 hf.Position(4)-110 hf.Position(3)-160 90];
+        TTpos = [20 20 hf.Position(3)-160 hf.Position(4)-120];
+        if verLessThanOctave
+            setpixelposition(TS,TSpos);
+            set(TS,'Units','Normalized')
+            setpixelposition(TT,TTpos);
+            set(TT,'Units','Normalized')
+        else
+            TS.Position = TSpos;
+            TT.Position = TTpos;
+        end
+        TS.ColumnEditable = [true true true true];
+        if verLessThanOctave
+            TS.ColumnName = SCN;
+            TT.ColumnName = TCN;
+        end
+        TT.ColumnEditable = [false true true];
+        
+        % button
+        Bpos = [hf.Position(3)-120 20 100 30];
+        BCB  = @(btn,event) BtnModalityTable(hf,TT, TS);
+        if verLessThanOctave
+            B = uicontrol(hf,'Style','pushbutton','String','OK');
+            set(B,'Callback',BCB);
+            setpixelposition(B,Bpos)
+            set(B,'Units','Normalized')
+        else
+            B = uibutton(hf,'Position',Bpos);
+            B.Text = 'OK';
+            B.ButtonPushedFcn = BCB;
+        end
+        
+        % preview panel
+        axesArgs = {hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90], 'Colormap',gray(64)};
+        ax = previewDicom([],h{1},axesArgs);
+        ax.YTickLabel = [];
+        ax.XTickLabel = [];
+        TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)},axesArgs);
+        
+        waitfor(hf);
+        if getappdata(0,'Canceldicm2nii'), return; end
+        ModalityTable = getappdata(0,'ModalityTable');
+        SubjectTable = getappdata(0,'SubjectTable');
+        rmappdata(0,'ModalityTable'); rmappdata(0,'SubjectTable');
+        
+        % setpref
+        ModalityTablePref = [ModalityTable; ModalityTablePref];
+        [~, a] = unique(ModalityTablePref.Name, 'stable');
+        setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref(a,:));
     else
-        hf = uifigure(figargs{:});
+        ModalityTable = cellfun(@char, table2cell(T),'uni',0);
+        SubjectTable = S{1,:};
     end
-    uimenu(hf,'Label','help','Callback',@(src,evnt) showHelp(valueset))
-    set(hf,'Name', 'dicm2nii - BIDS Converter', 'NumberTitle', 'off')
-
-    % tables
-    if verLessThanOctave
-        SCN = S.Properties.VariableNames;
-        S   = table2cell(S); 
-        TCN = T.Properties.VariableNames;
-        T   = cellfun(@char,table2cell(T),'uni',0);
-    end
-    TS = uitable(hf,'Data',S);
-    TT = uitable(hf,'Data',T);
-    TSpos = [20 hf.Position(4)-110 hf.Position(3)-160 90];
-    TTpos = [20 20 hf.Position(3)-160 hf.Position(4)-120];
-    if verLessThanOctave
-        setpixelposition(TS,TSpos);
-        set(TS,'Units','Normalized')
-        setpixelposition(TT,TTpos);
-        set(TT,'Units','Normalized')
-    else
-        TS.Position = TSpos;
-        TT.Position = TTpos;
-    end
-    TS.ColumnEditable = [true true true true];
-    if verLessThanOctave
-        TS.ColumnName = SCN;
-        TT.ColumnName = TCN;
-    end
-    TT.ColumnEditable = [false true true];
-
-    % button
-   	Bpos = [hf.Position(3)-120 20 100 30];
-    BCB  = @(btn,event) BtnModalityTable(hf,TT, TS);
-    if verLessThanOctave
-        B = uicontrol(hf,'Style','pushbutton','String','OK');
-        set(B,'Callback',BCB);
-        setpixelposition(B,Bpos)
-        set(B,'Units','Normalized')
-    else
-        B = uibutton(hf,'Position',Bpos);
-        B.Text = 'OK';
-        B.ButtonPushedFcn = BCB;
+        
+    % participants.tsv
+    try
+        tsvfile = fullfile(niiFolder, 'participants.tsv');
+        participant_id = SubjectTable{1,1};
+        Sex = tryGetField(h{i}{1}, 'PatientSex');
+        Age = tryGetField(h{i}{1}, 'PatientAge');
+        if ischar(Age), Age = sscanf(Age, '%f'); end
+        Size = tryGetField(h{i}{1}, 'PatientSize');
+        Weight = tryGetField(h{i}{1}, 'PatientWeight');
+        write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight,'Size',Size)
+    catch
+        warning('Could not save participants.tsv');
     end
     
-    % preview panel
-    axesArgs = {hf,'Position',[hf.Position(3)-120 70 100 hf.Position(4)-90],...
-                   'Colormap',gray(64)};
-    ax = previewDicom([],h{1},axesArgs);
-    ax.YTickLabel = [];
-    ax.XTickLabel = [];
-    TT.CellSelectionCallback = @(src,event) previewDicom(ax,h{event.Indices(1)},axesArgs);
-    
-    waitfor(hf);
-    if getappdata(0,'Canceldicm2nii')
-        return;
-    end
+    if isempty(SubjectTable{2}) % no session
+        ses = '';
+        session_id='';
+    else
+        session_id=SubjectTable{2};
+        ses = ['ses-' session_id '_'];
     end
     
-    % get results
-    ModalityTable = getappdata(0,'ModalityTable');
-    SubjectTable = getappdata(0,'SubjectTable');
-    % setpref
-    if istable(ModalityTable)
-        ModalityTable = cellfun(@char,table2cell(ModalityTable),'uni',0);
-    end
-    ModalityTableSavePref = ModalityTable(~any(ismember(ModalityTable(:,2:3),'skip'),2),:);
-    for imod = 1:size(ModalityTableSavePref,1)
-        match = cellfun(@(Mod) strcmp(Mod,ModalityTableSavePref{imod,1}),table2cell(ModalityTablePref(:,1)));
-        if any(match) % replace old pref
-            ModalityTablePref.Type(match) = ModalityTableSavePref{imod,2};
-            ModalityTablePref.Modality(match) = ModalityTableSavePref{imod,3};
-        else % append new pref
-            ModalityTablePref = [ModalityTablePref;ModalityTableSavePref(imod,:)];
+    % _session.tsv
+    if ~isempty(ses)
+        try
+            tsvfile = fullfile(niiFolder, ['sub-' SubjectTable{1}],['sub-' SubjectTable{1} '_sessions.tsv']);
+            if verLessThanOctave
+                write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
+            else
+                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
+            end
+        catch ME
+            fprintf(1, '\n')
+            warning(['Could not save sub-' SubjectTable{1} '_sessions.tsv']);
+            errorMessage = sprintf('Error in function %s() at line %d.\nError Message: %s\n\n', ...
+                ME.stack(1).name, ME.stack(1).line, ME.message);
+            fprintf(1, '%s\n', errorMessage);
         end
     end
-    setpref('dicm2nii_gui_para', 'ModalityTable', ModalityTablePref);
 end
 
 %% Convert
-ptsvSaved=false; % has the participants.tsv been saved yet for this subject?
 for i = 1:nRun
     if bids
         if any(ismember(ModalityTable(i,2:3),'skip')), continue; end
-        if isempty(char(SubjectTable{1,2})) % no session
-            ses = '';
-            session_id=''; 
-        else
-            session_id=char(SubjectTable{1,2}); 
-            ses = ['ses-' session_id '_'];
-        end
-        % folder
-        modalityfolder = fullfile(['sub-' char(SubjectTable{1,1})],...
-                                    ses(1:end-1),...
-                                    char(ModalityTable{i,2}));
+        modalityfolder = fullfile(['sub-' SubjectTable{1}],...
+                                    ses(1:end-1), ModalityTable{i,2});
         if ~exist(fullfile(niiFolder, modalityfolder),'dir')
             mkdir(fullfile(niiFolder, modalityfolder));
         end
-        
-        % filename
         fnames{i} = fullfile(modalityfolder,...
-              ['sub-' char(SubjectTable{1,1}) '_' ses char(ModalityTable{i,3})]);
-                
-        % _session.tsv
-        if ~isempty(ses)
-            try
-                tsvfile = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})],['sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-                if verLessThanOctave
-                    write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
-                else
-                    write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable.AcquisitionDate,'yyyy-mm-dd'),'Comment',SubjectTable.Comment)
-                end
-            catch ME
-                fprintf(1, '\n')
-                warning(['Could not save sub-' char(SubjectTable{1,1}) '_sessions.tsv']);
-                errorMessage = sprintf('Error in function %s() at line %d.\nError Message: %s\n\n', ...
-                    ME.stack(1).name, ME.stack(1).line, ME.message);
-                fprintf(1, '%s\n', errorMessage);
-            end
-        end
-        
-        % participants.tsv
-        if ptsvSaved==false % same participant for all Run
-            try
-                tsvfile = fullfile(niiFolder, 'participants.tsv');
-                participant_id = SubjectTable{1,1};
-                Sex                    = tryGetField(h{i}{1}, 'PatientSex');
-                Age                    = tryGetField(h{i}{1}, 'PatientAge');
-                if ischar(Age), Age = sscanf(Age, '%f'); end
-                Size                   = tryGetField(h{i}{1}, 'PatientSize');
-                Weight                 = tryGetField(h{i}{1}, 'PatientWeight');
-                write_tsv(participant_id,tsvfile,'Age',Age,'Sex',Sex,'Weight',Weight,'Size',Size)
-            catch
-                warning('Could not save participants.tsv');
-            end
-            ptsvSaved=true;
-        end
+              ['sub-' SubjectTable{1} '_' ses ModalityTable{i,3}]);
     end
     
     nFile = numel(h{i});
@@ -953,17 +914,13 @@ catch
     fnames = genvarname(fnames);
 end
 h = cell2struct(h, fnames, 2); % convert into struct
-if bids, fname = fullfile(niiFolder, ['sub-' char(SubjectTable{1,1})], 'dcmHeaders.mat');
+if bids, fname = fullfile(niiFolder, ['sub-' SubjectTable{1,1}], 'dcmHeaders.mat');
 else, fname = fullfile(niiFolder, 'dcmHeaders.mat');
 end
 if exist(fname, 'file') % if file exists, we update fields only
     S = load(fname);
     for i = 1:numel(fnames), S.h.(fnames{i}) = h.(fnames{i}); end
     h = S.h;
-end
-if bids
-    rmappdata(0,'ModalityTable');
-    rmappdata(0,'SubjectTable');
 end
 save(fname, 'h', '-v7'); % -v7 better compatibility
 
@@ -2942,14 +2899,24 @@ if verLessThanOctave
 else
     dat = cellfun(@char,table2cell(TT.Data),'uni',0);
 end
-if all(any(ismember(dat(:,2:3),'skip'),2))
+toSkip = any(ismember(dat(:,2:3),'skip'),2);
+if all(toSkip)
     warndlg('All images are skipped... Please select the type and modality for all scans','No scan selected');
     return;
 end
-setappdata(0,'ModalityTable',TT.Data)
-setappdata(0,'SubjectTable',TS.Data)
+a = dat(~toSkip, 2:3);
+a = strcat(a(:,1), filesep, a(:,2));
+if numel(a) ~= numel(unique(a))
+    [~, ind] = unique(a);
+    ind = setdiff(1:9, ind);
+    warndlg(['Need to fix the non-unique name "' a{ind(1)} '".'], 'File name conflict');
+    return;
+end
+setappdata(0,'ModalityTable', dat)
+setappdata(0,'SubjectTable', cellfun(@char,table2cell(TS.Data),'uni',0))
 delete(h)
 
+%%
 function my_closereq(src,~)
 % Close request function 
 % to display a question dialog box
@@ -3021,19 +2988,19 @@ catch err
 end
 
 %%
-function showHelp(valueset)
+function showHelp(types, modalities)
 msg = {'BIDS Converter module for dicm2nii',...
     'tanguy.duval@inserm.fr',...
     'http://bids.neuroimaging.io',...
     '------------------------------------------',...
     'Info Table',...
-    '  Subject:            subject id. 1rst layer in directory structure',...
+    '  Subject:            subject id. 1st layer in directory structure',...
     '                       ex: John',...
     '                       No space, no dash, no underscore!',...
     '  Session:            session id. 2nd  layer in directory structure',...
     '                       ex: 01',...
     '                       No space, no dash, no underscore!',...
-    '  AcquisitionDate:    Session date. 1rst Column in the session',...
+    '  AcquisitionDate:    Session date. 1st Column in the session',...
     '                        description file (sub-Subject_sessions.tsv).',...
     '  Comment:            Comments.     2nd  Column in the session',...
     '                        description file (sub-Subject_sessions.tsv).',...
@@ -3041,10 +3008,10 @@ msg = {'BIDS Converter module for dicm2nii',...
     'Sequence Table',...
     '  Name:                 SerieDescription extracted from the dicom field.',...
     '  Type:                 type of imaging modality. 3rd layer in directory structure.',...
-    ['                        ex: ' strjoin(unique(valueset(:,1)),', ')],...
+    ['                        ex: ' strjoin(types,', ')],...
     '                         ''skip'' to skip conversion',...
     '  Modality:             Modality. suffix of filename. ',...
-    ['                        ex: ' strjoin(unique(valueset(:,2)),', ')],...
+    ['                        ex: ' strjoin(modalities,', ')],...
     '                         ''skip'' to skip conversion',...
     ''};
 h = msgbox(msg,'Help on BIDS converter');
