@@ -894,7 +894,6 @@ rmQC = onCleanup(@()delete('./tmp_QC_*.pdf'));
 subj = regexp(nam, '(?<=closed_)\d{4}\w{2}$', 'match', 'once');
 if isempty(subj), return; end
 load([rootDir 'RTMM_log/' subj '.mat'], 'T3');
-wakeupScreen();
 
 close all; delete('./tmp_QC_*.pdf');
 fig = figure('Position', [10 30 [8.5 11]*96], 'Units', 'normalized');
