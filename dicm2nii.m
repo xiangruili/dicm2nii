@@ -489,12 +489,13 @@ end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); hSuf = hSuf(keep);
 subjs = subjs(keep); vendor = vendor(keep);
 subj = unique(subjs);
-acq = unique(acqs(keep));
+acqs = acqs(keep);
+acq = unique(acqs);
 
 % sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
 [~, ind] = sortrows([subjs' studyIDs' num2cell(sNs')]);
-h = h(ind); subjs = subjs(ind); studyIDs = studyIDs(ind); sNs = sNs(ind); hSuf = hSuf(ind);
+h = h(ind); subjs = subjs(ind); studyIDs = studyIDs(ind); sNs = sNs(ind); hSuf = hSuf(ind); acqs = acqs(ind);
 multiStudy = cellfun(@(c)numel(unique(studyIDs(strcmp(subjs,c))))>1, subjs);
 
 %% Generate unique result file names
@@ -593,7 +594,7 @@ if bids
         fprintf('Multiple acquitisition detected!!!!! \n')
         for iacq = 1:length(acq)
             fprintf('Converting sessions one by one...  %s\n',acq{iacq})
-            iacqlist = strcmp(acqs(keep),acq{iacq});
+            iacqlist = strcmp(acqs,acq{iacq});
             FileNames = cellfun(@(y) cellfun(@(x) x.Filename,y,'uni',0),h(iacqlist),'uni',0);
             dicm2nii([FileNames{:}],niiFolder,'bids')
         end
