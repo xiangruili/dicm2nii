@@ -441,7 +441,7 @@ elseif strcmpi(cmd, 'save')
     for i = 1:nExt % nExt may be 0
         fwrite(fid, nii.ext(i).esize, 'int32');
         fwrite(fid, nii.ext(i).ecode, 'int32');
-        fwrite(fid, nii.ext(i).edata, 'uint8');
+        fwrite(fid, uint8(nii.ext(i).edata)); % maybe +1 byte without conversion
     end
     
     if ~isNii
