@@ -2605,7 +2605,6 @@ if isempty(pName), pName = pwd; end
 try nii = nii_tool('load', nam); % re-load to be safe
 catch % restore reoriented img
     nii = p.nii;
-    for k = 1:3, if p.flip(k), nii.img = flip(nii.img, k); end; end
     nii.img = permute(nii.img, [p.perm 4:8]); % all vol in dim(4)
     slope = nii.hdr.scl_slope; if slope==0, slope = 1; end
     nii.img = (single(nii.img) - nii.hdr.scl_inter) / slope; % undo scale
