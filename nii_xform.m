@@ -14,14 +14,14 @@ function varargout = nii_xform(src, target, rst, intrp, missVal)
 % 
 % Input (first two mandatory):
 %  1. source file (nii, hdr/img or gz versions) or nii struct to be transformed.
-%  2. The second input determines how to transform the source file:
+%  2. The second input determines how to transform the source:
 %    (1) If it is numeric and length is 1 or 3, [2 2 2] for example, it will be
 %         treated as requested resolution in millimeter. The result will be in
-%         the same coordinate system as the source file.
+%         the same coordinate system as the source.
 %    (2) If it is a nii file name, a nii struct, or nii hdr struct, it will be
 %        used as the template. The result will have the same dimension and
-%        resolution as the template. The source file and the template must have
-%        at least one common coordinate system, otherwise the transformation
+%        resolution as the template. The source and the template must have at
+%        least one common coordinate system, otherwise the transformation
 %        doesn't make sense, and it will err out. With different coordinate
 %        systems, a transformation to align the two dataset is needed, which is
 %        the next case.
