@@ -422,7 +422,7 @@ elseif strcmpi(cmd, 'save')
             val = C0{i,4};
         end
         fmt0 = C0{i,3};
-        if strcmp(C0{i,3}, 'char')
+        if strcmp(C0{i,3}, 'char') && ~isempty(val)
             if ~ischar(val), val = char(val); end % avoid val=[] error etc
             val = unicode2native(val); % may have more bytes than numel(val)
             fmt0 = 'uint8';
@@ -441,10 +441,17 @@ elseif strcmpi(cmd, 'save')
     for i = 1:nExt % nExt may be 0
         fwrite(fid, nii.ext(i).esize, 'int32');
         fwrite(fid, nii.ext(i).ecode, 'int32');
-        fwrite(fid, uint8(nii.ext(i).edata)); % maybe +1 byte without conversion
+        fwrite(fid, nii.ext(i).edata, 'uint8');
     end
     
-    if ~isNii
+    if isNii
+        n = nii.hdr.vox_offset - ftell(fid);
+        if n<0 % seen n=-1 for unknown reason
+            fseek(fid, n, 'cof');
+        elseif n>0
+            fwrite(fid, zeros(n,1), 'uint8');
+        end
+    else
         fclose(fid); % done with .hdr
         fid = fopen(strcat(fname, '.img'), 'W');
     end
