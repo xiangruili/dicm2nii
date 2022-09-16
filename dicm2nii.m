@@ -1676,9 +1676,9 @@ if haveIOP, R = reshape(s.ImageOrientationPatient, 3, 2);
 else, R = [1 0 0; 0 1 0]';
 end
 R(:,3) = cross(R(:,1), R(:,2)); % right handed, but sign may be wrong
-foo = abs(R);
-[~, ixyz] = max(foo); % orientation info: perm of 1:3
-if ixyz(2) == ixyz(1), foo(ixyz(2),2) = 0; [~, ixyz(2)] = max(foo(:,2)); end
+a = abs(R);
+[~, ixyz] = max(a); % orientation info: perm of 1:3
+if ixyz(2) == ixyz(1), a(ixyz(2),2) = 0; [~, ixyz(2)] = max(a(:,2)); end
 if any(ixyz(3) == ixyz(1:2)), ixyz(3) = setdiff(1:3, ixyz(1:2)); end
 if nargout<2, return; end
 iSL = ixyz(3); % 1/2/3 for Sag/Cor/Tra slice
@@ -2935,8 +2935,8 @@ switch selection
         return
 end
 
+%%
 function ax = previewDicom(ax,s,axesArgs)
-
 try
     nSL = double(tryGetField(s{1}, 'LocationsInAcquisition'));
     if isempty(nSL)
@@ -3082,5 +3082,9 @@ function tf = ischar(A)
 tf = builtin('ischar', A);
 if tf, return; end
 if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
+
+%% Take precedence over some 3rd party function
+function c = cross(a, b)
+c = a([2 3 1]).*b([3 1 2]) - a([3 1 2]).*b([2 3 1]);
 
 %%
