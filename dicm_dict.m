@@ -534,53 +534,56 @@ if strncmpi(vendor, 'SIEMENS', 7)
     '0019' '1027' 'FD' 'B_matrix'
     '0019' '1028' 'FD' 'BandwidthPerPixelPhaseEncode'
     '0019' '1029' 'FD' 'MosaicRefAcqTimes'
-% group 0021 from here by guess
+% group 0021 some by guess
 	'0021' '1001' 'IS' 'UsedPatientWeight' % 76 
 	'0021' '1004' 'DS' 'NumberOfPrescans' % 1 ??
 	'0021' '1005' 'IS' 'RelTablePosition' % 0 0 0 ?
 	'0021' '1006' 'LO' 'CoilForGradient' % void ? VR not right
 	'0021' '1008' 'SH' 'GradientMode' % Fast/Normal ?
 	'0021' '1009' 'LO' 'PATModeText' % p2
-% 	'0021' '100A' 'DS' 'Private_0021_100a' % 1 
-% 	'0021' '100D' 'US' 'Private_0021_100d' % 0 
+% 	'0021' '100A' 'DS' '' % 1 
+	'0021' '100C' 'SH' 'PositivePCSDirections' % verifed
+% 	'0021' '100D' 'US' '' % 0 
 	'0021' '100F' 'DS' 'Stim_lim' % 30.312 28.138 29.305 ?
 	'0021' '1010' 'IS' 'MrProtocolVersion' % 61010002 ?
-% 	'0021' '1011' 'DS' 'Private_0021_1011' % 0 
+% 	'0021' '1011' 'DS' '' % 0 
 	'0021' '1012' 'FD' 'ReadoutOS' % 2 ?
-% 	'0021' '1013' 'DS' 'Private_0021_1013' % 0 
-% 	'0021' '1014' 'IS' 'Private_0021_1014' % 0 
-% 	'0021' '1016' 'DS' 'Private_0021_1016' % 0 
-% 	'0021' '1017' 'DS' 'Private_0021_1017' % 0 
+% 	'0021' '1013' 'DS' '' % 0 
+% 	'0021' '1014' 'IS' '' % 0 
+% 	'0021' '1016' 'DS' '' % 0 
+% 	'0021' '1017' 'DS' '' % 0 
 	'0021' '1018' 'SH' 'RFSWDMostCriticalAspect' % Head ?
 	'0021' '1019' 'UT' 'MrPhoenixProtocol' % OB changed to UT to force char
-% 	'0021' '101B' 'DS' 'Private_0021_101b' % 1 
+% 	'0021' '101B' 'DS' '' % 1 
 	'0021' '101C' 'DS' 'Stim_max_online' % 17.0793 2.73105 1.00829 ?
-% 	'0021' '101D' 'IS' 'Private_0021_101d' % 0 
+% 	'0021' '101D' 'IS' '' % 0/2
 	'0021' '1022' 'SH' 'SequenceFileOwner' % SIEMENS
-% 	'0021' '1023' 'IS' 'Private_0021_1023' % 0 
+% 	'0021' '1023' 'IS' '' % 0 
 	'0021' '1025' 'SL' 'TablePositionOrigin' 
 	'0021' '1026' 'IS' 'MiscSequenceParam'
-% 	'0021' '1027' 'US' 'Private_0021_1027' % 1 
+% 	'0021' '1027' 'US' '' % 1 
 	'0021' '102A' 'IS' 'CoilId' 
 	'0021' '102B' 'ST' 'PatReinPattern'
 	'0021' '102C' 'DS' 'Sed' % 14400 367.175 365.369 ?
 	'0021' '102D' 'DS' 'SARMostCriticalAspect' % 3.2 0.618899 0.38146 ?
 	'0021' '102E' 'IS' 'Stim_mon_mode' % 2 ? or Operation_mode_flag
 	'0021' '102F' 'DS' 'GradientDelayTime' % 35 33 29 ??
-% 	'0021' '1030' 'DS' 'Private_0021_1030' % 0 
+% 	'0021' '1030' 'DS' '' % 0 
 	'0021' '1031' 'IS' 'AbsTablePosition' % -1129 
-% 	'0021' '1032' 'SS' 'Private_0021_1032' % 0 
-	'0021' '1033' 'SH' 'CoilForGradient2' % GC25 / GC99?
-% 	'0021' '1034' 'DS' 'Private_0021_1034' % 1 
+% 	'0021' '1032' 'SS' '' % 0 
+	'0021' '1033' 'SH' 'CoilForGradient2' % GC25 / AS82 / GC99? 
+% 	'0021' '1034' 'DS' '' % 1 
 	'0021' '1035' 'DS' 'Stim_max_ges_norm_online' % 0.572783 ?
-% 	'0021' '1036' 'DS' 'Private_0021_1036' % 0 
+% 	'0021' '1036' 'DS' '' % 0 
 	'0021' '1037' 'SH' 'FlowCompensation' % No ?
 	'0021' '1038' 'DS' 'TransmitterCalibration' % 378.488 ?
-% 	'0021' '103B' 'DS' 'Private_0021_103b' % 0 
+% 	'0021' '103B' 'DS' '' % 0 
 	'0021' '103D' 'CS' 'PhaseSliceOversampling' % NONE / 3D ?
 	'0021' '1044' 'DS' 'B1rms' % 100 1.09702 ?
 	'0021' '1045' 'CS' 'B1rmsSupervision' % YES ?
 	'0021' '1046' 'DS' 'TalesReferencePower' % 2333.36 ?
+% 	'0021' '1047' 'CS' '' % 'IEC'
+% 	'0021' '1048' 'CS' '' % 'FMRI'
 	'0021' '1049' 'CS' 'AcquisitionContrast' % DIFFUSION ?
 	'0021' '1050' 'US' 'RFEchoTrainLength' % 1 
 	'0021' '1051' 'US' 'EchoTrainLength' % 71 ?
@@ -588,7 +591,12 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '105A' 'CS' 'ScanningSequence' % EP
 	'0021' '105B' 'CS' 'SequenceVariant' % SK\SP
 	'0021' '105C' 'CS' 'ScanOptions' % PFP\FS
-% 	'0021' '105D' 'SL' 'Private_0021_105d' % -31 / -63
+% 	'0021' '105D' 'SL' '' % -31 / -63
+	'0021' '105E' 'LO' 'FieldOfViewText' % verifed
+	'0021' '105F' 'SH' 'RelativeTablePositionText' % verifed
+% 	'0021' '1060' 'DT' 'SeriesDateTime' % '20220106103315.624990'
+% 	'0021' '1061' 'SH' '' % '0'
+% 	'0021' '1062' 'FL' '' % [60.7110 124.4780 286.5030]'
 	'0021' '10FE' 'SQ' 'CSASeriesHeaderInfo'
 	'0021' '1103' 'DS' 'SliceMeasurementDuration' % 90000 ? 
 	'0021' '1104' 'DS' 'TimeAfterStart'
@@ -603,26 +611,29 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '1148' 'IS' 'EchoPartitionPosition' % 32?
 	'0021' '1149' 'IS' 'EchoColumnPosition' % 96 ?
 	'0021' '114E' 'IS' 'Actual3DImaPartNumber' % 0 ?
-	'0021' '114F' 'LO' 'CoilString' % HE1-4
+	'0021' '114F' 'LO' 'CoilString' % verifed
 	'0021' '1151' 'UL' 'SequenceMask' % 134217734
 	'0021' '1153' 'FD' 'BandwidthPerPixelPhaseEncode'
-	'0021' '1156' 'LO' 'PATModeText' % p2
-	'0021' '1158' 'SH' 'AcquisitionMatrixText' % 384p*384 I
+	'0021' '1156' 'LO' 'PATModeText' % verifed
+	'0021' '1158' 'SH' 'AcquisitionMatrixText' % verifed
 	'0021' '1159' 'IS' 'RelTablePosition' % 0 0 0 ?
 	'0021' '115B' 'FD' 'SlicePosition_PCS'
-% 	'0021' '115E' 'IS' 'MeasuredFourierLines' % 0 or MultistepIndex?
+% 	'0021' '115D' 'IS' 'MeasuredFourierLines' % 17
+	'0021' '115E' 'IS' 'MultistepIndex' % 0-based FrameNumberInSeries
 	'0021' '1171' 'UT' 'UsedChannelString'
 	'0021' '1175' 'CS' 'ImageTypeText'
 	'0021' '1176' 'LO' 'ImageHistory'
 	'0021' '1177' 'LO' 'SequenceName' % *ep_b1000#12
-% 	'0021' '1178' 'CS' 'Private_0021_1178' % ND / DIS2D
-% 	'0021' '1179' 'CS' 'Private_0021_1179' % ND / DIS2D
+% 	'0021' '1178' 'CS' '' % ND / DIS2D
+% 	'0021' '1179' 'CS' '' % ND / DIS2D
 	'0021' '1188' 'DS' 'SliceLocation'
-	'0021' '1189' 'FD' 'InversionTimes' % 900 ?
+% 	'0021' '1189' 'FD' 'InversionTimes' % 900 ?
 	'0021' '118A' 'IS' 'FrameNumberInSeries' % ? xiangrui names it
+    '0021' '118B' 'SH' 'SlicePositionText' %'SP F49.0'
+%   '0021' '118E' 'ST' 'ICE_DimsLong' %'X_1_1_1_1_1_1_25_1_1_1_1_74_1_1_1_1_475_2_1_48_1_1'
 	'0021' '11FE' 'SQ' 'CSAImageHeaderInfo'
-% 	'0021' '1201' 'LO' 'Private_0021_1201' % ACQUISITION
-% 	'0021' '1202' 'LO' 'Private_0021_1202' % ACQUISITION
+% 	'0021' '1201' 'LO' '' % ACQUISITION
+% 	'0021' '1202' 'LO' '' % ACQUISITION
     '0029' '1008' 'CS' 'CSAImageHeaderType'
     '0029' '1009' 'LO' 'CSAImageHeaderVersion'
     '0029' '1010' 'OB' 'CSAImageHeaderInfo'
@@ -641,7 +652,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
     '0051' '1009' 'LO' 'Private_0051_10xx_Version'
     '0051' '100A' 'LO' 'TimeOfAcquisition'
     '0051' '100B' 'LO' 'AcquisitionMatrixText'
-    '0051' '100C' 'LO' 'FieldOfView'
+    '0051' '100C' 'LO' 'FieldOfViewText'
     '0051' '100D' 'SH' 'SlicePositionText'
     '0051' '100E' 'LO' 'ImageOrientationText'
     '0051' '100F' 'LO' 'CoilString'
@@ -664,6 +675,7 @@ elseif strncmpi(vendor, 'GE', 2)
     '0009' '10E3' 'UI' 'EquipmentUID'
     '0009' '10E7' 'UL' 'ExamRecordChecksum'
     '0009' '10E9' 'SL' 'ActualSeriesDataTimeStamp'
+    '0011' '1030' 'DS' 'PatientWeightAtScan'
     '0019' '100F' 'DS' 'HorizFrameOfRef'
     '0019' '1011' 'SS' 'SeriesContrast'
     '0019' '1012' 'SS' 'LastPseq'
@@ -896,11 +908,12 @@ elseif strncmpi(vendor, 'GE', 2)
     '0043' '10C0' 'DS' 'RxDualDrive'
     '0043' '10C1' 'LO' 'FullCoilModeREGs'
     '0043' '10C2' 'LO' 'LocalCoilModeREGs'
-%     '0043' '10C5' 'LO' ''
-%     '0043' '10C6' 'DS' ''
-%     '0043' '10C7' 'DS' ''
-%     '0043' '10C8' 'UL' ''
-%     '0043' '10C9' 'IS' '' 
+    '0043' '10C5' 'LO' 'AGRxMarkerAndPlane'
+    '0043' '10C6' 'DS' 'AGRxComputedVolume'
+    '0043' '10C7' 'DS' 'ScannedVolume'
+    '0043' '10C8' 'UL' 'AGRxLocalizerSeriesNumber'
+    '0043' '10C9' 'IS' 'NumberOfBins' 
+    '0043' '10CA' 'LO' 'ReconDLStrength' 
     }];
 
     % SlopInt:
