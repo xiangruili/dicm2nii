@@ -605,12 +605,12 @@ if bids
     Subject = regexprep(subj, '[^0-9a-zA-Z]', '');
     Session                = {''};
     AcquisitionDate = {[acq{1}(1:4) '-' acq{1}(5:6) '-' acq{1}(7:8)]};
-    Comment                = {'N/A'};
+    Comment = {'N/A'};
     S = table(Subject,Session,AcquisitionDate,Comment);
 
     types = {'skip' 'anat' 'dwi' 'fmap' 'func' 'perf'};
     modalities = {'skip' 'FLAIR' 'FLASH' 'PD' 'PDmap' 'T1map' 'T1rho' 'T1w' 'T2map'  ...
-        'T2star''T2w' 'asl' 'dwi'  'fieldmap' 'm0scan' 'magnitude1' 'magnitude2' ...
+        'T2star' 'T2w' 'asl' 'dwi'  'fieldmap' 'm0scan' 'magnitude1' 'magnitude2' ...
         'phase1' 'phase2' 'phasediff' 'task-motor_bold' 'task-rest_bold'};
     Modality = categorical(repmat({'skip'}, [length(fnames) 1]), modalities);
     Type = categorical(repmat({'skip'},[length(fnames),1]), types);
@@ -1279,6 +1279,8 @@ flds = { % store for nii.ext and json
   'AcquisitionDateTime' 'TaskName' 'bval' 'bvec' 'VolumeTiming' ...
   'ReadoutSeconds' 'DelayTimeInTR' 'SliceTiming' 'RepetitionTime' ...
   'ParallelReductionFactorInPlane' 'ParallelAcquisitionTechnique' ...
+  'CompressedSensingParameters' 'ReconDLStrength' ...
+  'ImageTypeText' 'ImageHistory' ...
   'UnwarpDirection' 'EffectiveEPIEchoSpacing' 'EchoTime' 'deltaTE' 'EchoTimes' ...
   'SecondEchoTime' 'InversionTime' 'CardiacTriggerDelayTimes' ...
   'PatientName' 'PatientSex' 'PatientAge' 'PatientSize' 'PatientWeight' ...
@@ -1458,7 +1460,7 @@ ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
 % some day, e.g. if GE saves (0018,9089) in the future.
 % ref = 0: IMG, UIH for now; PE='ROW" not tested 
 % ref = 1: PCS, Siemens/Philips/lateCanon or unknown vendor, this is default
-% ref = 2: FPS, Bruker for now (need to verify)
+% ref = 2: FPS, Bruker (need to verify)
 % ref = 3: FPS_GE, confusing signs
 % ref = 4: PFS, CANON (ImageComments) by ChrisR
 %  Since some dicom do not save bval or bvec for bval=0 case, it is better to
@@ -1484,13 +1486,13 @@ elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
             if ~all(isnan(bvec(:))), ref = 0; end % UIH
         end
         if isfield(s, 'Private_0177_1100') && all(isnan(bvec(:))) % Bruker
-            str = char(s.Private_0177_1100');
-            expr = 'DwGradVec\s*=\s*\(\s*(\d+),\s*(\d+)\s*\)\s+'; % DwDir incomplete            
-            [C, ind] = regexp(str, expr, 'tokens', 'end', 'once');
-            if isequal(str2double(C), [nDir 3])
+            % Is DwGradVec in image ref? DwGradRead/Phase/Slice should be
+            expr = ['\s*=\s*\(\s*' num2str(nDir) '\s*\)\s+([\d\.-\s]*)'];
+            fn = @(k)regexp(char(s.Private_0177_1100'), [k expr], 'tokens', 'once');
+            C3 = [fn('DwGradRead') fn('DwGradPhase') fn('DwGradSlice')];
+            if ~any(cellfun(@(c)isempty(c), C3))
                 ref = 2;
-                bvec = sscanf(str(ind:end), '%f', nDir*3);
-                bvec = normc(reshape(bvec, 3, []))';
+                bvec = reshape(sscanf([C3{:}], '%f'), nDir, []);
                 [~, i] = sort(iDir); bvec(i,:) = bvec;
             end
         end
@@ -2184,6 +2186,7 @@ end
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
         'RepetitionTime' 'FlipAngle' 'RescaleIntercept' 'RescaleSlope' ...
         'ImageOrientationPatient' 'ImagePositionPatient' ...
+        'ImageTypeText' 'ImageHistory' ...
         'InPlanePhaseEncodingDirection' 'MRScaleSlope' 'CardiacTriggerDelayTime'};
 iF = 1; if isfield(s, 'SortFrames'), iF = s.SortFrames(1); end
 for i = 1:numel(flds)
@@ -2266,6 +2269,8 @@ switch fld
         catch, val = [0 0 0]';
         end
         if nargin>1, return; end
+    case {'ImageTypeText' 'ImageHistory'}
+        sq = 'CSAImageHeaderInfo';
     otherwise
         error('Sequence for %s not set.', fld);
 end
@@ -2541,6 +2546,7 @@ s2 = dicm_hdr(s.LastFile.Filename, dict);
 t = csa_header(s2, 'MosaicRefAcqTimes'); % try last volume first
 
 % No SL acc factor. Not even multiband flag. This is UGLY
+% sSliceAcceleration.lMultiBandFactor may be faked to 1 in VE11E
 nSL = double(s.LocationsInAcquisition);
 mb = ceil((max(t) - min(t)) ./ TA); % based on the wrong timing pattern
 if isempty(mb) || mb==1 || mod(nSL,mb)>0, return; end % not MB or wrong mb guess
@@ -2628,6 +2634,14 @@ end
 %% Save JSON file, proposed by Chris G
 % matlab.internal.webservices.toJSON(s)
 function save_json(s, fname)
+% see https://github.com/bids-standard/bids-specification/issues/1407
+if ~isempty(regexp(tryGetField(s, 'ImageTypeText', ''), '\\DR\w\\', 'once')) || ...
+        isfield(s, 'ReconDLStrength')
+    flds = fieldnames(s); N = numel(flds);
+    [~, i] = ismember({'ImageTypeText' 'ReconDLStrength'}, flds); i = max(i);
+    s.DeepLearning = true;
+    s = orderfields(s, [1:i-1 N+1 i:N]);
+end
 flds = fieldnames(s);
 fid = fopen(strcat(fname, '.json'), 'w'); % overwrite silently if exist
 fprintf(fid, '{\n');
@@ -2671,6 +2685,11 @@ for i = 1:numel(flds)
         val = val / 1000; % secs 
     elseif strcmp(nam, 'ImageType')
         val = regexp(val, '\\', 'split');
+    elseif strcmp(nam, 'CompressedSensingParameters')
+        nam = 'CompressedSensingFactor';
+        val = str2double(strtok(val, '\\'));
+    elseif any(strcmp(nam, {'ReconDLStrength' 'ImageHistory'}))
+        nam = 'DeepLearningDetails';
     end
     
     fprintf(fid, '\t"%s": ', nam);
