@@ -398,14 +398,14 @@ if strcmp(vr, 'SQ')
 else
     [dat, info] = read_val(b8(i+(0:n-1)), vr, swap); i=i+n;
 end
-% if group==33
-%     fprintf('\t''%04X'' ''%04X'' ''%s'' ''%s'' ', group, elmnt, vr, name);
-%     if numel(dat)>99, fprintf('''%s ...''', dat(1:9));
-%     elseif ischar(dat), fprintf('''%s''', dat);
+% if group==0x21
+%     fprintf('\t''%04X'' ''%04X'' ''%s'' ''%s'' ''', group, elmnt, vr, name);
+%     if numel(dat)>99, fprintf('%s ...', dat(1:9));
+%     elseif ischar(dat), fprintf('%s', dat);
 %     elseif isnumeric(dat), fprintf('%g ', dat);
-%     else, fprintf('''SQ''');
+%     else, fprintf('SQ');
 %     end
-%     fprintf('\n');
+%     fprintf('''\n');
 % end
 end
 
