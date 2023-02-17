@@ -1,7 +1,7 @@
 function RT_moco()
 % Display and save motion information at real time. It also shows images and the
-% progress of EPI/DTI while scanning, and allows to check motion information for
-% previous series/patients.
+% progress of scanning, and allows to check motion information for previous
+% series/patients.
 %
 % To make this work, you will need:
 %  1. Set up shared folder at the computer running RT_moco. 
@@ -151,13 +151,12 @@ guidata(fh, hs); closeSubj(fh);
 start(hs.timer);
 
 %% Log error for debugging
-function errorLog(obj, ~)
+function errorLog(obj, evt) %#ok
 hs = guidata(obj.UserData);
 vnam = "err_"+hs.subj.String+"_"+hs.series.String{1};
-assignin('caller', vnam, MException.last);
-% eval(vnam+" = MException.last;");
-nam = hs.logDir+"errorLog.mat";
-if exist(nam, 'file'), save(nam, vnam, '-append'); else, save(nam, vnam); end
+eval(vnam+" = evt.Data;");
+fnam = hs.logDir+"errorLog.mat";
+if isfile(fnam), save(fnam, vnam, '-append'); else, save(fnam, vnam); end
 
 %% TimerFunc: do a series if avail, then call stopFunc to save result
 function doSeries(obj, ~)
@@ -257,7 +256,8 @@ end
 
 if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
 if nIN>5 && hs.countDown.Running == "off" % work for mosaic without tricks
-    hs.countDown.UserData = (nIN-1) * s.RepetitionTime/864e5 + fileTime(s.Filename);
+    a = dir(s.Filename);
+    hs.countDown.UserData = (nIN-1) * asc_header(s,'alTR[0]')/864e8 + a.datenum;
     start(hs.countDown);
 end
 try stopAt = str2double(regexp(s.ImageComments, '(?<=stopAt:)\d*', 'match', 'once')); 
@@ -268,6 +268,10 @@ mos = dicm_img(s);
 if isMOS, img = mos2vol(mos, nSL);
 else, img = permute(mos, [1 2 4 3]); mos = vol2mos(img);
 end
+if isEnh
+    multiFrameFields = dicm2nii('', 'multiFrameFields', 'func_handle');
+    s = multiFrameFields(s);
+end
 img = brainMask(img, s);
 try thk = s.SpacingBetweenSlices; catch, thk = s.SliceThickness; end
 p = refVol(img, [s.PixelSpacing' thk]);
@@ -276,7 +280,7 @@ if isDTI
 end
 img0 = double(img);
 set_img(hs.img, mos);
-init_series(hs, s, nIN, nV);
+init_series(hs, s, nIN, nIN);
 hs.img.UserData(1) = mean(img(:));
 viewer = findall(0, 'Type', 'figure', 'Tag', 'nii_viewer');
 if nIN<6 && isempty(viewer), overlay(hs.fig); end
@@ -306,9 +310,14 @@ for i = 2:nIN
     img = brainMask(img);
     
     if isMoCo % FD from dicom hdr, DV uses MoCo img for now
-        s1 = dicm_hdr(nam, dicm_dict('Siemens', 'CSAImageHeaderInfo'));
-        m6(2,:) = [s1.CSAImageHeaderInfo.RBMoCoTrans; ...
-                   s1.CSAImageHeaderInfo.RBMoCoRot];
+        if isEnh
+            s1 = dicm_hdr(nam, dicm_dict('Siemens', {'RBMoCoTrans' 'RBMoCoRot'}));
+            m6(2,:) = [s1.RBMoCoTrans; s1.RBMoCoRot];
+        else
+            s1 = dicm_hdr(nam, dicm_dict('Siemens', 'CSAImageHeaderInfo'));
+            m6(2,:) = [s1.CSAImageHeaderInfo.RBMoCoTrans; ...
+                s1.CSAImageHeaderInfo.RBMoCoRot];
+        end
     else
         p.F.Values = smooth_mc(img, p.sz);
         [m6(2,:), R1] = moco_estim(p, R1);
@@ -350,9 +359,8 @@ end
 %% Initialize GUI for a new series
 function init_series(hs, s, nIN, nV)
 if size(hs.table.Data,1)>0 && hs.table.Data{1,2}==s.SeriesNumber, return; end
-tim = [s.AcquisitionDate(3:end) s.AcquisitionTime(1:6)];
 fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
-fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), tim);
+fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), dicmTime(s));
 fclose(fid);
 
 set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', s.Filename(1:end-10));
@@ -394,9 +402,10 @@ c{1} = s.SeriesDescription;
 if numel(c{1})>24, c{1} = [c{1}(1:16) '...' c{1}(end-3:end)]; end
 c{2} = sprintf('Series %g', s.SeriesNumber);
 if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
-c{3} = datestr(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 'HH:MM:SS AM');
-c{4} = datestr(datenum(s.AcquisitionDate, 'yyyymmdd'), 'ddd, mmm dd, yyyy');
-try c{5} = sprintf('TR = %g', s.RepetitionTime); catch, end
+dcmT = dicmTime(s);
+c{3} = datestr(datenum(dcmT, 'yymmddHHMMSS.fff'), 'HH:MM:SS AM');
+c{4} = datestr(datenum(dcmT, 'yymmdd'), 'ddd, mmm dd, yyyy');
+try c{5} = sprintf('TR = %g', asc_header(s, 'alTR[0]')/1000); catch, end
 
 %% toggle FD display on/off
 function toggleFD(h, ~)
@@ -681,7 +690,7 @@ end
 % First is study, second is series and third is instance.
 function new = new_series(hs)
 try setCountDown(hs); catch, end
-try QC_report(hs.rootDir); catch me, assignin('base', 'me', me); disp(me); end
+QC_report(hs.rootDir);
 f = hs.subj.UserData;
 if ~isempty(f) % check new run for current subj
     iR = hs.series.UserData;
@@ -707,13 +716,9 @@ end
 if ~isfile([hs.rootDir 'host.txt']) || mod(now,1) > 10/86400; return; end
 dirs(now-[dirs.datenum]<2) = []; % keep for 2 days
 for i = 1:numel(dirs)
-    try 
-        src = [hs.rootDir dirs(i).name];
-        if ~isfolder(hs.backupDir), rmdir(src, 's');
-        else, system(['cp -p -r ' src ' ' hs.backupDir ';rm -rf ' src]);
-        end
-    catch me
-        disp(me.message); assignin('base', 'me', me);
+    src = [hs.rootDir dirs(i).name];
+    if ~isfolder(hs.backupDir), rmdir(src, 's');
+    else, system(['cp -p -r ' src ' ' hs.backupDir ';rm -rf ' src]);
     end
 end
 
@@ -886,15 +891,14 @@ nam = [hs.rootDir 'SyngoMeas'];
 if ~isfile(nam), return; end
 c0 = fileread(nam); pause(0.2); c = fileread(nam);
 if ~isequal(c0, c), pause(1); c = fileread(nam); end
-tRTMM = fileTime(nam); delete(nam); 
-% From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec "CurrentTime"
-c = regexp(c, '"(.*?)" "(.*?)" (\d+) "(.*?)"', 'tokens', 'once');
+delete(nam); 
+% From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec
+c = regexp(c, '"(.*?)" "(.*?)" (\d+)', 'tokens', 'once');
 if isempty(c), return; end % MeasFinished?
 tStart = datenum(c{1}, 'yyyy-mm-dd HH:MM:SS,fff');
-dClock = datenum(c{4}, 'ddd mm/dd/yyyy HH:MM:SS.fff') - tRTMM;
+dClock = str2double(fileread([hs.rootDir 'dClock']))/86400;
 tFnsh = tStart - dClock + str2double(c{3})/86400;
 if tFnsh-now < 2/86400, return; end
-hs.fig.UserData.tSyng_RTMM = dClock; % for eyelink
 hs.countDown.UserData = tFnsh;
 if numel(c{2})>24, c{2} = [c{2}(1:16) '...' c{2}(end-3:end)]; end
 hs.MMSS.String = {c{2} ''};
@@ -945,15 +949,16 @@ end
 ax = axes(fig, 'Position', [0.1 0.92 0.8 0.03], 'Visible', 'off');
 text(ax, 0.5, 1, subj, 'FontSize', 18, 'HorizontalAlignment', 'center');
 s = uDat.hdr{1};
-dat = datestr(datenum(s.AcquisitionDate, 'yyyymmdd'), 'dddd mmm dd, yyyy');
+dat = datestr(datenum(dicmTime(s,1), 'yymmdd'), 'dddd mmm dd, yyyy');
 text(ax, 0.5, 0, dat, 'FontSize', 12, 'HorizontalAlignment', 'center');
 tbl = cell(1, 5);
-dict = dicm_dict('', {'AcquisitionTime' 'SeriesNumber' 'SeriesDescription'});
+dict = dicm_dict('', {'AcquisitionDateTime' 'AcquisitionDate' ...
+    'AcquisitionTime' 'SeriesNumber' 'SeriesDescription'});
 for i = 1:99
     nams = dir([s.Filename(1:end-17) sprintf('%06i_',i) '*.dcm']);
     if isempty(nams), break; end
     s = dicm_hdr([nams(1).folder '/' nams(1).name], dict);
-    d = s.AcquisitionTime; d = d(1:2)+":"+d(3:4)+":"+d(5:6);
+    d = dicmTime(s); d = d(7:8)+":"+d(9:10)+":"+d(11:12);
     try a = T3.MeanFD{T3.SeriesNumber == s.SeriesNumber}; catch, a = []; end
     tbl(i,:) = {s.SeriesNumber d numel(nams) s.SeriesDescription a};
 end
@@ -967,21 +972,26 @@ newPage(fig); y = 0.95;
 
 el = {}; clear EL;
 nam = dir([rootDir 'RTMM_log/' subj '_*.edf']);
-if ~isempty(nam)
+while ~isempty(nam)
     tm = []; tg = []; pa = [];
     for i = numel(nam):-1:1 % in case of multiple files
         [~, a] = evalc("edfmex('"+nam(i).folder+"/"+nam(i).name+"')");
         tm = [a.FSAMPLE.time tm]; %#ok
         tg = [a.FSAMPLE.buttons tg]; %#ok
-        pa = [a.FSAMPLE.pa(2,:) pa]; %#ok
+        pa = [a.FSAMPLE.pa pa]; %#ok
     end
-    i = find(arrayfun(@(c)startsWith(char(c.message), 'RTMM_'), a.FEVENT), 1, 'last');
+    if numel(unique(pa(1,:)))>9, pa = pa(1, :);
+    elseif numel(unique(pa(2,:)))>9, pa = pa(2, :);
+    else, break;
+    end
+    i = find(arrayfun(@(c)startsWith(char(c.message), 'DICM_'), a.FEVENT), 1, 'last');
     a = double(tm)/1000 - double(a.FEVENT(i).sttime)/1000 + ...
-        sscanf(a.FEVENT(i).message, 'RTMM_secs=%g') + uDat.tSyng_RTMM*86400;
+        sscanf(a.FEVENT(i).message, 'DICM_secs=%g');
     EL.Hz = 100; % resample pa to 100 Hz
     EL.t0 = a(1); % recording start time in Syngo secs of the day
     EL.tg = a(diff([0 bitget(tg, 5)])>0); % trigger time
     EL.pa = interp1(a, pa/55^2, a(1):1/EL.Hz:a(end)); % convert roughly to degree
+    break;
 end
 
 for i = 1:numel(uDat.hdr)
@@ -993,19 +1003,21 @@ for i = 1:numel(uDat.hdr)
         if isempty(N) || N<11 || all(fd==0), continue; end % skip slice check etc
         if y<0.35, newPage(fig); y = 0.95; end
         if exist('EL', 'var') && contains(s.SequenceName, 'epfid2d')
-            t0 = mod(datenum(s.AcquisitionTime, 'HHMMSS.fff'), 1) * 86400;
-            [~, j] = min(abs(EL.tg - t0));
-            TR = s.RepetitionTime / 1000;
-            while j>1 && abs(diff(EL.tg([j-1 j]))-TR)<0.1, j = j-1; end
-            % fprintf('%4.2f\n', EL.tg(j)-t0); % normally <1
-            j = floor((EL.tg(j)-EL.t0) * EL.Hz);
-            nP = round(N * TR * EL.Hz);
-            el{end+1} = {EL.pa(j+(1:nP)) series}; %#ok save for users
-            y = y - 0.4;
-            ax0 = axes(fig, 'Position', [0.1 y+0.27 0.8 0.08]);
-            plot(ax0, el{end}{1}, 'b');
-            set(ax0, 'XLim', [1 nP], 'XTick', []);
-            ylabel(ax0, 'Pupil Size', 'Color', 'b');
+            t0 = mod(datenum(dicmTime(s), 'yymmddHHMMSS.fff'), 1) * 86400;
+            [mi, j] = min(abs(EL.tg - t0));
+            if mi<5 % recording started late if mi too large
+                TR = asc_header(s, 'alTR[0]')*1e-6;
+                while j>1 && abs(diff(EL.tg([j-1 j]))-TR)<0.1, j = j-1; end
+                % fprintf('%4.2f\n', EL.tg(j)-t0); % normally <1
+                j = floor((EL.tg(j)-EL.t0) * EL.Hz);
+                nP = round(N * TR * EL.Hz);
+                el{end+1} = {EL.pa(j+(1:nP)) series}; %#ok save for users
+                y = y - 0.4;
+                ax0 = axes(fig, 'Position', [0.1 y+0.27 0.8 0.08]);
+                plot(ax0, el{end}{1}, 'b');
+                set(ax0, 'XLim', [1 nP], 'XTick', []);
+                ylabel(ax0, 'Pupil Size', 'Color', 'b');
+            end
         else, y = y - 0.32; clear ax0;
         end
         ax = axes(fig, 'Position', [0.1 y+0.19 0.8 0.08]);
@@ -1046,7 +1058,7 @@ end
 newPage(fig); close(fig);
 
 if ~isempty(el), save([rootDir 'RTMM_log/' subj '_eye.mat'], 'el'); end
-pdfNam = rootDir+"RTMM_log/"+subj+"_"+s.AcquisitionDate(3:8)+"_QC.pdf";
+pdfNam = rootDir+"RTMM_log/"+subj+"_"+dicmTime(s,1)+"_QC.pdf";
 setenv('LD_LIBRARY_PATH', getenv('PATH'));
 [~, ~] = system("pdfunite ./tmp_QC_*.pdf "+pdfNam); % for Linux 
 
@@ -1072,14 +1084,14 @@ for i = 0:nMos-1
     end
 end
 
-%% Return file modify datenum, like dir(fname).datenum, but try ms precision
-function dn = fileTime(fname)
-if ispc || ismac % work for all OS, but only give ms for Windows. Java issue?
-    ms = java.io.File(fname).lastModified; % ms since 00:00 1/1/1970 GMT
-    dn = datenum(1970,1,1,0, -java.util.Date().getTimezoneOffset, ms/1000);
-else % work for Windows too, but need stat.exe and is slow
-    [~, c] = system(['stat "' fname '"']); % ls --full-time
-    c = regexp(c, 'Modify:\s*(.{23})', 'tokens', 'once');
-    dn = datenum(c{1}, 'yyyy-mm-dd HH:MM:SS.fff');
+%% return dicm dateTime in yymmddHHMMSS.fff
+function dt = dicmTime(s, dateOnly)
+if isfield(s, 'AcquisitionDateTime')
+    dt = s.AcquisitionDateTime(3:end);
+elseif isfield(s, 'AcquisitionDate')
+    dt = [s.AcquisitionDate(3:8) s.AcquisitionTime];
+else
+    a = dir(s.Filename); dt = datestr(a.datenum, 'yymmddHHMMSS.fff');
 end
+if nargin>1 && dateOnly, dt = dt(1:6); end
 %%
