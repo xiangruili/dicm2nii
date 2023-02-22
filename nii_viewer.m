@@ -499,6 +499,7 @@ uimenu(h, 'Label', 'Apply modulation', 'Callback', @addMask);
 h_savefig = uimenu(h, 'Label', 'Save figure as');
 h_saveas = uimenu(h, 'Label', 'Save NIfTI as');
 uimenu(h, 'Label', 'Save volume as ...', 'Callback', cb('saveVolume'));
+uimenu(h, 'Label', 'Export as movie ...', 'Callback', cb('MP4'));
 uimenu(h, 'Label', 'Crop below crosshair', 'Callback', cb('cropNeck'));
 uimenu(h, 'Label', 'Create ROI file ...', 'Callback', cb('ROI'));
 uimenu(h, 'Label', 'Close window', 'Accelerator', 'W', 'Callback', 'close gcf');
@@ -1254,6 +1255,31 @@ switch cmd
         catch me
             errordlg(me.message);
         end
+    case 'MP4' % save slices as movie
+        str = {'Which view to slide? 1:Sag; 2:Cor; 3:Tra'};
+        a = inputdlg(str, 'Export Movie', 1);
+        if isempty(a), return; end
+        d = str2double(strtrim(a));
+        if ~any(d==1:3), errordlg('Input must be 1, 2 or 3'); return; end
+        str = {'Slice range (default all)' 'Movie frames per second'};
+        a = inputdlg(str, 'Export Movie', 1, {['1:' num2str(hs.dim(d))] '4'});
+        if isempty(a), return; end
+        rg = eval(['[' a{1} ']']);
+        fps = str2double(a{2});
+        p = get_para(hs);
+        pName = fileparts(p.nii.hdr.file_name);
+        [fname, pName] = uiputfile([pName '/*.mp4'], ...
+            'Input file name to save the movie');
+        if ~ischar(fname), return; end
+        fname = fullfile(pName, fname);
+        
+        rect = [2 2 fh.Position(3:4)-[3 hs.params.Position(4)+1]];
+        vw = mp4_video(fname, fps, fix(rect/2)*2);
+        for i = rg
+            hs.ijk(d).Value = i;
+            vw.addFrame(fh);
+        end
+        vw.save();
     otherwise
         error('Unknown Callback: %s', cmd);
 end
