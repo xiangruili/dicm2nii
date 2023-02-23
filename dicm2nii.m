@@ -272,6 +272,7 @@ pf.use_parfor       = getpref('dicm2nii_gui_para', 'use_parfor', true);
 pf.use_seriesUID    = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
 pf.lefthand         = getpref('dicm2nii_gui_para', 'lefthand', true);
 pf.scale_16bit      = getpref('dicm2nii_gui_para', 'scale_16bit', false);
+pf.reorient         = getpref('dicm2nii_gui_para', 'reorient', true);
 
 %% Check each file, store partial header in cell array hh
 % first 2 fields are must. First 10 indexed in code
@@ -1066,6 +1067,7 @@ if isfield(s, 'FrameReferenceTime') && nVol>1
 end
 
 % dim_info byte: freq_dim, phase_dim, slice_dim low to high, each 2 bits
+iSL = 3;
 [phPos, iPhase] = phaseDirection(s); % phPos relative to image in FSL feat!
 if     iPhase == 2, fps_bits = [1 4 16];
 elseif iPhase == 1, fps_bits = [4 1 16]; 
@@ -1074,40 +1076,42 @@ end
 
 % Reorient if MRAcquisitionType==3D && nSL>1
 % If FSL etc can read dim_info for STC, we can always reorient.
-[~, perm] = sort(ixyz); % may permute 3 dimensions in this order
-if strcmp(tryGetField(s, 'MRAcquisitionType', ''), '3D') && ...
-        dim(3)>1 && (~isequal(perm, 1:3)) % skip if already XYZ order
-    R(:, 1:3) = R(:, perm); % xform matrix after perm
-    fps_bits = fps_bits(perm);
-    ixyz = ixyz(perm); % 1:3 after perm
-    dim = dim(perm);
-    pixdim = pixdim(perm);
-    nii.hdr.dim(2:4) = dim;
-    nii.img = permute(nii.img, [perm 4:8]);
-    if isfield(s, 'bvec'), s.bvec = s.bvec(:, perm); end
+if pf.reorient
+    [~, perm] = sort(ixyz); % may permute 3 dimensions in this order
+    if strcmp(tryGetField(s, 'MRAcquisitionType', ''), '3D') && ...
+            dim(3)>1 && (~isequal(perm, 1:3)) % skip if already XYZ order
+        R(:, 1:3) = R(:, perm); % xform matrix after perm
+        fps_bits = fps_bits(perm);
+        ixyz = ixyz(perm); % 1:3 after perm
+        dim = dim(perm);
+        pixdim = pixdim(perm);
+        nii.hdr.dim(2:4) = dim;
+        nii.img = permute(nii.img, [perm 4:8]);
+        if isfield(s, 'bvec'), s.bvec = s.bvec(:, perm); end
+    end
+    iSL = find(fps_bits==16);
+    iPhase = find(fps_bits==4); % axis index for phase_dim in re-oriented img
+    
+    flp = R(ixyz+[0 3 6])<0; % flip an axis if true
+    d = det(R(:,1:3)) * prod(1-flp*2); % det after all 3 axis positive
+    if (d>0 && pf.lefthand) || (d<0 && ~pf.lefthand)
+        flp(1) = ~flp(1); % left or right storage
+    end
+    rotM = diag([1-flp*2 1]); % 1 or -1 on diagnal
+    rotM(1:3, 4) = (dim-1) .* flp; % 0 or dim-1
+    R = R / rotM; % xform matrix after flip
+    for k = 1:3, if flp(k), nii.img = flip(nii.img, k); end; end
+    if flp(iPhase), phPos = ~phPos; end
+    if isfield(s, 'bvec'), s.bvec(:, flp) = -s.bvec(:, flp); end
+    if flp(iSL) && isfield(s, 'SliceTiming') % slices flipped
+        s.SliceTiming = flip(s.SliceTiming);
+        sc = nii.hdr.slice_code;
+        if sc>0, nii.hdr.slice_code = sc+mod(sc,2)*2-1; end % 1<->2, 3<->4, 5<->6
+    end
 end
-iSL = find(fps_bits==16);
-iPhase = find(fps_bits==4); % axis index for phase_dim in re-oriented img
 
 nii.hdr.dim_info = (1:3) * fps_bits'; % useful for EPI only
 nii.hdr.pixdim(2:4) = pixdim; % voxel zize
-
-flp = R(ixyz+[0 3 6])<0; % flip an axis if true
-d = det(R(:,1:3)) * prod(1-flp*2); % det after all 3 axis positive
-if (d>0 && pf.lefthand) || (d<0 && ~pf.lefthand)
-    flp(1) = ~flp(1); % left or right storage
-end
-rotM = diag([1-flp*2 1]); % 1 or -1 on diagnal
-rotM(1:3, 4) = (dim-1) .* flp; % 0 or dim-1
-R = R / rotM; % xform matrix after flip
-for k = 1:3, if flp(k), nii.img = flip(nii.img, k); end; end
-if flp(iPhase), phPos = ~phPos; end
-if isfield(s, 'bvec'), s.bvec(:, flp) = -s.bvec(:, flp); end
-if flp(iSL) && isfield(s, 'SliceTiming') % slices flipped
-    s.SliceTiming = flip(s.SliceTiming);
-    sc = nii.hdr.slice_code;
-    if sc>0, nii.hdr.slice_code = sc+mod(sc,2)*2-1; end % 1<->2, 3<->4, 5<->6
-end
 
 % sform
 frmCode = all(isfield(s, {'ImageOrientationPatient' 'ImagePositionPatient'}));
@@ -1968,20 +1972,20 @@ chkbox = @(parent,val,str,cbk,tip) uicontrol(parent, 'Style', 'checkbox', ...
     'Value', val, 'String', str, 'Callback', cbk, 'TooltipString', tip);
 
 set(fh, 'Toolbar', 'none', 'Menubar', 'none', 'Resize', 'off', 'Color', clr, ...
-    'Tag', 'dicm2nii_fig', 'Position', [200 scrSz(4)-600 420 300], 'Visible', 'off', ...
+    'Tag', 'dicm2nii_fig', 'Position', [200 scrSz(4)-600 420 324], 'Visible', 'off', ...
     'Name', 'dicm2nii - DICOM to NIfTI Converter', 'NumberTitle', 'off');
 
-uitxt('Move mouse onto button, text box or check box for help', [8 274 400 16]);
+uitxt('Move mouse onto button, text box or check box for help', [8 298 400 16]);
 str = sprintf(['Browse convertible files or folders (can have subfolders) ' ...
     'containing files.\nConvertible files can be dicom, Philips PAR,' ...
     ' AFNI HEAD, BrainVoyager files, or a zip file containing those files']);
-uicontrol('Style', 'Pushbutton', 'Position', [6 235 112 24], ...
+uicontrol('Style', 'Pushbutton', 'Position', [6 259 112 24], ...
     'FontSize', fSz, 'String', 'DICOM folder/files', 'Background', clrButton, ...
     'TooltipString', str, 'Callback', cb('srcDir'));
 
 jSrc = javaObjectEDT('javax.swing.JTextField');
 warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
-hs.src = javacomponent(jSrc, [118 234 294 24], fh); %#ok<*JAVCM>
+hs.src = javacomponent(jSrc, [118 258 294 24], fh); %#ok<*JAVCM>
 hs.src.FocusLostCallback = cb('set_src');
 hs.src.Text = getpf('src', pwd);
 % hs.src.ActionPerformedCallback = cb('set_src'); % fire when pressing ENTER
@@ -1990,11 +1994,11 @@ hs.src.ToolTipText = ['<html>This is the source folder or file(s). You can<br>' 
     'Click DICOM folder/files button to browse, or<br>' ...
     'Drag and drop a folder or file(s) into the box'];
 
-uicontrol('Style', 'Pushbutton', 'Position', [6 199 112 24], ...
+uicontrol('Style', 'Pushbutton', 'Position', [6 223 112 24], ...
     'FontSize', fSz, 'String', 'Result folder', 'Background', clrButton, ...
     'TooltipString', 'Browse result folder', 'Callback', cb('dstDialog'));
 jDst = javaObjectEDT('javax.swing.JTextField');
-hs.dst = javacomponent(jDst, [118 198 294 24], fh);
+hs.dst = javacomponent(jDst, [118 222 294 24], fh);
 hs.dst.FocusLostCallback = cb('set_dst');
 hs.dst.Text = getpf('dst', pwd);
 hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
@@ -2002,20 +2006,20 @@ hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
     'Click Result folder button to set the value, or<br>' ...
     'Drag and drop a folder into the box'];
 
-uitxt('Output format', [8 166 82 16]);
+uitxt('Output format', [8 190 82 16]);
 hs.rstFmt = uicontrol('Style', 'popup', 'Background', 'white', 'FontSize', fSz, ...
-    'Value', getpf('rstFmt',1), 'Position', [92 162 82 24], ...
+    'Value', getpf('rstFmt',1), 'Position', [92 186 82 24], ...
     'String', {' .nii' ' .hdr/.img' ' BIDS (http://bids.neuroimaging.io)'}, ...
     'TooltipString', 'Choose output file format');
 
 hs.gzip = chkbox(fh, getpf('gzip',true), 'Compress', '', 'Compress into .gz files');
-sz = get(hs.gzip, 'Extent'); set(hs.gzip, 'Position', [220 166 sz(3)+24 sz(4)]);
+sz = get(hs.gzip, 'Extent'); set(hs.gzip, 'Position', [220 190 sz(3)+24 sz(4)]);
 
 hs.rst3D = chkbox(fh, getpf('rst3D',false), 'SPM 3D', cb('SPMStyle'), ...
     'Save one file for each volume (SPM style)');
-sz = get(hs.rst3D, 'Extent'); set(hs.rst3D, 'Position', [330 166 sz(3)+24 sz(4)]);
+sz = get(hs.rst3D, 'Extent'); set(hs.rst3D, 'Position', [330 190 sz(3)+24 sz(4)]);
            
-hs.convert = uicontrol('Style', 'pushbutton', 'Position', [104 8 200 30], ...
+hs.convert = uicontrol('Style', 'Pushbutton', 'Position', [104 8 200 30], ...
     'FontSize', fSz, 'String', 'Start conversion', ...
     'Background', clrButton, 'Callback', cb('do_convert'), ...
     'TooltipString', 'Dicom source and Result folder needed before start');
@@ -2024,39 +2028,45 @@ hs.about = uicontrol('Style', 'popup',  'String', ...
     {'About' 'License' 'Help text' 'Check update' 'A paper about conversion'}, ...
     'Position', [326 12 88 20], 'Callback', cb('about'));
 
-ph = uipanel(fh, 'Units', 'Pixels', 'Position', [4 50 410 102], 'FontSize', fSz, ...
+ph = uipanel(fh, 'Units', 'Pixels', 'Position', [4 50 410 126], 'FontSize', fSz, ...
     'BackgroundColor', clr, 'Title', 'Preferences (also apply to command line and future sessions)');
 setpf = @(p)['setpref(''dicm2nii_gui_para'',''' p ''',get(gcbo,''Value''));'];
-
-p = 'lefthand';
-h = chkbox(ph, getpf(p,true), 'Left-hand storage', setpf(p), ...
-    'Left hand storage works well for FSL, and likely doesn''t matter for others');
-sz = get(h, 'Extent'); set(h, 'Position', [4 60 sz(3)+24 sz(4)]);
-
-p = 'save_patientName';
-h = chkbox(ph, getpf(p,true), 'Store PatientName', setpf(p), ...
-    'Store PatientName in NIfTI hdr, ext and json');
-sz = get(h, 'Extent'); set(h, 'Position', [180 60 sz(3)+24 sz(4)]);
 
 p = 'use_parfor';
 h = chkbox(ph, getpf(p,true), 'Use parfor if needed', setpf(p), ...
     'Converter will start parallel tool if necessary');
-sz = get(h, 'Extent'); set(h, 'Position', [4 36 sz(3)+24 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [4 84 sz(3)+24 sz(4)]);
 
 p = 'use_seriesUID';
 h = chkbox(ph, getpf(p,true), 'Use SeriesInstanceUID if exists', setpf(p), ...
     'Only uncheck this if SeriesInstanceUID is messed up by some third party archive software');
-sz = get(h, 'Extent'); set(h, 'Position', [180 36 sz(3)+24 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [4 60 sz(3)+24 sz(4)]);
 
 p = 'save_json';
 h = chkbox(ph, getpf(p,false), 'Save json file', setpf(p), ...
     'Save json file for BIDS (http://bids.neuroimaging.io/)');
-sz = get(h, 'Extent'); set(h, 'Position', [4 12 sz(3)+24 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [4 36 sz(3)+24 sz(4)]);
+
+p = 'save_patientName';
+h = chkbox(ph, getpf(p,true), 'Store PatientName', setpf(p), ...
+    'Store PatientName in NIfTI hdr, ext and json');
+sz = get(h, 'Extent'); set(h, 'Position', [240 84 sz(3)+24 sz(4)]);
 
 p = 'scale_16bit';
 h = chkbox(ph, getpf(p,false), 'Use 16-bit scaling', setpf(p), ...
     'Losslessly scale 16-bit integers to use dynamic range');
-sz = get(h, 'Extent'); set(h, 'Position', [180 12 sz(3)+24 sz(4)]);
+sz = get(h, 'Extent'); set(h, 'Position', [240 60 sz(3)+24 sz(4)]);
+
+p = 'lefthand';
+lh = chkbox(ph, getpf(p,true), 'Left-hand storage', setpf(p), ...
+    'Left hand storage works well for FSL, and likely doesn''t matter for others');
+sz = get(lh, 'Extent'); set(lh, 'Position', [240 12 sz(3)+24 sz(4)]);
+lh.Visible = getpf('reorient', true);
+
+p = 'reorient';
+h = chkbox(ph, getpf(p,true), 'Reorient NIfTI', {@setReorient lh}, ...
+    'Reorient the NIfTI image for better compatibility. If not sure, keep it checked');
+sz = get(h, 'Extent'); set(h, 'Position', [240 36 sz(3)+24 sz(4)]);
 
 hs.fig = fh;
 guidata(fh, hs); % store handles
@@ -2070,6 +2080,11 @@ catch me
 end
 
 gui_callback([], [], 'set_src', fh);
+
+%% turn lefthand on/off
+function setReorient(o, ~, lefthand)
+setpref('dicm2nii_gui_para', 'reorient', o.Value);
+if o.Value, lefthand.Visible = 'on'; else, lefthand.Visible = 'off'; end
 
 %% subfunction: return phase positive and phase axis (1/2) in image reference
 function [phPos, iPhase] = phaseDirection(s)
