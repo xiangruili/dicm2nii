@@ -1012,7 +1012,7 @@ ext = decode_ext(ext, swap);
 function ext = decode_ext(ext, swap)
 % Decode edata if we know ecode
 for i = 1:numel(ext)
-    if isfield(ext(i), 'edata_decoded'), continue; end % done
+    try, if ~isempty(ext(i).edata_decoded'), continue; end; end % done
     if ext(i).ecode == 40 % Matlab: any kind of matlab variable
         nByte = cast_swap(ext(i).edata(1:4), 'int32', swap); % MAT data
         tmp = [tempname '.mat']; % temp MAT file to save edata
