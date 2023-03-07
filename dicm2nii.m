@@ -273,6 +273,7 @@ pf.use_seriesUID    = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
 pf.lefthand         = getpref('dicm2nii_gui_para', 'lefthand', true);
 pf.scale_16bit      = getpref('dicm2nii_gui_para', 'scale_16bit', false);
 pf.reorient         = getpref('dicm2nii_gui_para', 'reorient', true);
+pf.dicom_ext        = getpref('dicm2nii_gui_para', 'dicom_ext', false);
 
 %% Check each file, store partial header in cell array hh
 % first 2 fields are must. First 10 indexed in code
@@ -893,7 +894,8 @@ for i = 1:nRun
         nam = fnames{i};
         if numel(nii)>1, nam = nii(j).hdr.file_name; end
         fprintf(fmtStr, nam, nii(j).hdr.dim(2:5));
-        nii(j).ext = set_nii_ext(nii(j).json); % NIfTI extension
+        if pf.dicom_ext; sDcm = s; else, sDcm = ''; end
+        nii(j).ext = set_nii_ext(nii(j).json, sDcm); % NIfTI extension
         if pf.save_json, save_json(nii(j).json, fname); end
         nii_tool('save', nii(j), fullfile(niiFolder, strcat(nam, ext)), rst3D);
     end
@@ -2050,6 +2052,11 @@ sz = get(h, 'Extent'); set(h, 'Position', [4 36 sz(3)+24 sz(4)]);
 p = 'save_patientName';
 h = chkbox(ph, getpf(p,true), 'Store PatientName', setpf(p), ...
     'Store PatientName in NIfTI hdr, ext and json');
+sz = get(h, 'Extent'); set(h, 'Position', [4 12 sz(3)+24 sz(4)]);
+
+p = 'dicom_ext';
+h = chkbox(ph, getpf(p,false), 'Save dicom extension', setpf(p), ...
+    'Save header of the first DICOM file into NIfTI extension');
 sz = get(h, 'Extent'); set(h, 'Position', [240 84 sz(3)+24 sz(4)]);
 
 p = 'scale_16bit';
@@ -2503,12 +2510,12 @@ end
 % -0.25444411 0.52460458 -0.81243353 
 % ...
 % 0.9836791 0.17571079 0.038744]; % matrix rows separated by char(10) and/or ';'
-function ext = set_nii_ext(s)
-flds = fieldnames(s);
+function ext = set_nii_ext(json, s)
+flds = fieldnames(json);
 ext.ecode = 6; % text ext
 ext.edata = '';
 for i = 1:numel(flds)
-    try val = s.(flds{i}); catch, continue; end
+    try val = json.(flds{i}); catch, continue; end
     if ischar(val)
         str = sprintf('''%s''', val);
     elseif numel(val) == 1 % single numeric
@@ -2526,6 +2533,15 @@ for i = 1:numel(flds)
     ext.edata = [ext.edata flds{i} ' = ' str ';' char([0 10])];
 end
 
+% Dicom ext: ecode = 2
+if ~isempty(s) && isfield(s, 'SOPInstanceUID') % make sure it is dicom
+    if exist('ext', 'var'), n = numel(ext)+1; else, n = 1; end
+    ext(n).ecode = 2; % dicom
+    fid = fopen(s.Filename);
+    ext(n).edata = fread(fid, s.PixelData.Start, '*uint8');
+    fclose(fid);
+end
+
 % % Matlab ext: ecode = 40
 % fname = [tempname '.mat'];
 % save(fname, '-struct', 's', '-v7'); % field as variable
@@ -2539,15 +2555,6 @@ end
 % ext(n).edata = [typecast(int32(numel(b)), 'uint8')'; b];
 % ext(n).ecode = 40; % Matlab
  
-% % Dicom ext: ecode = 2
-% if isfield(s, 'SOPInstanceUID') % make sure it is dicom
-%     if exist('ext', 'var'), n = numel(ext)+1; else n = 1; end
-%     ext(n).ecode = 2; % dicom
-%     fid = fopen(s.Filename);
-%     ext(n).edata = fread(fid, s.PixelData.Start, '*uint8');
-%     fclose(fid);
-% end
-
 %% Fix some broken multiband sliceTiming. Hope this won't be needed in future.
 % Odd number of nShot is fine, but some even nShot may have problem.
 % This gives inconsistent result to the following example in PDF doc, but I
