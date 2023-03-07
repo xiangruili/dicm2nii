@@ -381,9 +381,9 @@ C = {
     '0028' '0103' 'US' 'PixelRepresentation'
     '0028' '0104' 'US' 'SmallestValidPixelValue'
     '0028' '0105' 'US' 'LargestValidPixelValue'
-    '0028' '0106' 'US' 'SmallestImagePixelValue'
-    '0028' '0107' 'US' 'LargestImagePixelValue'
-    '0028' '0120' 'SS' 'PixelPaddingValue'
+    '0028' '0106' 'SS' 'SmallestImagePixelValue' % can be US
+    '0028' '0107' 'US' 'LargestImagePixelValue' % can be SS
+    '0028' '0120' 'SS' 'PixelPaddingValue' % can be US
     '0028' '0301' 'CS' 'BurnedInAnnotation'
     '0028' '1050' 'DS' 'WindowCenter'
     '0028' '1051' 'DS' 'WindowWidth'
@@ -392,9 +392,9 @@ C = {
     '0028' '1054' 'LO' 'RescaleType'
     '0028' '1055' 'LO' 'WindowCenterWidthExplanation'
     '0028' '1080' 'LT' 'GrayScale'
-    '0028' '1101' 'US' 'RedPaletteColorLookupTableDescriptor'
-    '0028' '1102' 'US' 'GreenPaletteColorLookupTableDescriptor'
-    '0028' '1103' 'US' 'BluePaletteColorLookupTableDescriptor'
+    '0028' '1101' 'US' 'RedPaletteColorLookupTableDescriptor' % can be SS
+    '0028' '1102' 'US' 'GreenPaletteColorLookupTableDescriptor' % can be SS
+    '0028' '1103' 'US' 'BluePaletteColorLookupTableDescriptor' % can be SS
     '0028' '1201' 'OW' 'RedPaletteColorLookupTableData'
     '0028' '1202' 'OW' 'GreenPaletteColorLookupTableData'
     '0028' '1203' 'OW' 'BluePaletteColorLookupTableData'
@@ -447,8 +447,8 @@ C = {
     '0040' '2400' 'LT' 'ImagingServiceRequestComments'
     '0040' '9096' 'SQ' 'RealWorldValueMappingSequence'
     '0040' '9210' 'SH' 'LUTLabel'
-    '0040' '9211' 'SS' 'RealWorldValueLastValueMapped'
-    '0040' '9216' 'SS' 'RealWorldValueFirstValueMapped'
+    '0040' '9211' 'SS' 'RealWorldValueLastValueMapped' % can be US
+    '0040' '9216' 'SS' 'RealWorldValueFirstValueMapped' % can be US
     '0040' '9224' 'FD' 'RealWorldValueIntercept'
     '0040' '9225' 'FD' 'RealWorldValueSlope'
     '0040' 'A168' 'SQ' 'ConceptCodeSequence'
@@ -508,7 +508,7 @@ C = {
     '5200' '9229' 'SQ' 'SharedFunctionalGroupsSequence'
     '5200' '9230' 'SQ' 'PerFrameFunctionalGroupsSequence'
     '5600' '0020' 'OF' 'PixelData' % SpectroscopyData
-    '7FE0' '0010' 'OW' 'PixelData' };
+    '7FE0' '0010' 'OW' 'PixelData' }; % can be OB
 
 % Following add vendor specific tags
 if strncmpi(vendor, 'SIEMENS', 7)
