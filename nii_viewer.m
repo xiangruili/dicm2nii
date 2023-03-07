@@ -2235,14 +2235,13 @@ hs.value.String = str;
 
 %% nii essentials
 function s = nii_essential(hdr)
-% info = nii_essential(hdr);
-% Decode important NIfTI hdr into struct info, which is human readable.
+% Decode important NIfTI hdr into struct with human readable info.
 if isfield(hdr, 'nii') % input by nii_viewer
     s.FileName = hdr.nii.hdr.file_name;
     if isfield(hdr, 'mask_info'), s.MaskedBy = hdr.mask_info; end
-    if isfield(hdr, 'modulation_info'), s.ModulatdBy = hdr.modulation_info; end
+    if isfield(hdr, 'modulation_info'), s.ModulatedBy = hdr.modulation_info; end
     if isfield(hdr, 'alignMtx'), s.AlignMatrix = hdr.alignMtx; end
-    hdr = hdr.nii.hdr;
+    hdr = hdr.hdr0; % original nii header
 else
     s.FileName = hdr.file_name;
 end
