@@ -2629,8 +2629,7 @@ pName = fileparts(nam);
 if isempty(pName), pName = pwd; end
 try nii = nii_tool('load', nam); % re-load to be safe
 catch % restore reoriented img
-    nii = p.nii;
-    nii.img = permute(nii.img, [p.perm 4:8]); % all vol in dim(4)
+    nii = p.nii; % just save reoriented version if no original img
     slope = nii.hdr.scl_slope; if slope==0, slope = 1; end
     nii.img = (single(nii.img) - nii.hdr.scl_inter) / slope; % undo scale
     if nii.hdr.datatype == 4 % leave others as it is or single
@@ -2700,7 +2699,7 @@ elseif ~isempty(strfind(c, 'new resolution'))
         errordlg('Invalid spatial resolution');
         return;
     end
-    if isequal(res, p.nii.hdr.pixdim(2:4))
+    if isequal(res, nii.hdr.pixdim(2:4))
         warndlg('The input resolution is the same as current one');
         return;
     end
