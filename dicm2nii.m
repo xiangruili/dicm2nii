@@ -436,7 +436,7 @@ for i = 1:nRun
             end
         end
         if ~keep(i), break; end % skip silently
-        ind = sum(abs(bsxfun(@minus, val, val(:,2))), 1) / sum(abs(val(:,2))) > 0.01;
+        ind = sum(abs(val - val(:,2)), 1) / sum(abs(val(:,2))) > 0.01;
         if ~any(ind), continue; end % good
         if any(strcmp(fldsCk{k}, {'RescaleIntercept' 'RescaleSlope'}))
             h{i}{1}.ApplyRescale = true;
@@ -564,7 +564,7 @@ for i = 1:nRun
     end
 end
 if numel(unique(fnames)) < nRun % may happen to user-modified dicom/par
-    fnames = matlab.lang.makeUniqueStrings(fnames); % since R2014a
+    fnames = matlab.lang.makeUniqueStrings(fnames);
 end
 fmtStr = sprintf(' %%-%gs %%dx%%dx%%dx%%d\n', max(cellfun(@numel, fnames))+12);
 
@@ -911,12 +911,8 @@ for i = 1:nRun
 end
 
 [~, fnames] = cellfun(@fileparts, fnames, 'UniformOutput', false);
-try % since 2014a 
-    fnames = matlab.lang.makeValidName(fnames);
-    fnames = matlab.lang.makeUniqueStrings(fnames, {}, namelengthmax);
-catch
-    fnames = genvarname(fnames);
-end
+fnames = matlab.lang.makeValidName(fnames);
+fnames = matlab.lang.makeUniqueStrings(fnames, {}, namelengthmax);
 h = cell2struct(h, fnames, 2); % convert into struct
 if bids, fname = fullfile(niiFolder, ['sub-' SubjectTable{1,1}], 'dcmHeaders.mat');
 else, fname = fullfile(niiFolder, 'dcmHeaders.mat');
@@ -1119,9 +1115,7 @@ nii.hdr.pixdim(2:4) = pixdim; % voxel zize
 frmCode = all(isfield(s, {'ImageOrientationPatient' 'ImagePositionPatient'}));
 frmCode = tryGetField(s, 'TemplateSpace', frmCode);
 nii.hdr.sform_code = frmCode; % 1: SCANNER_ANAT
-nii.hdr.srow_x = R(1,:);
-nii.hdr.srow_y = R(2,:);
-nii.hdr.srow_z = R(3,:);
+nii.hdr.sform_mat = R;
 
 R0 = normc(R(:, 1:3));
 sNorm = null(R0(:, setdiff(1:3, iSL))');
@@ -1131,13 +1125,9 @@ R0(:,iSL) = sNorm;
 
 % qform
 nii.hdr.qform_code = frmCode;
-nii.hdr.qoffset_x = R(1,4);
-nii.hdr.qoffset_y = R(2,4);
-nii.hdr.qoffset_z = R(3,4);
+nii.hdr.qoffset_xyz = R(:,4);
 [q, nii.hdr.pixdim(1)] = dcm2quat(R0); % 3x3 dir cos matrix to quaternion
-nii.hdr.quatern_b = q(2);
-nii.hdr.quatern_c = q(3);
-nii.hdr.quatern_d = q(4);
+nii.hdr.quatern_bcd = q(2:4)';
 
 if shear
     nii.hdr.hdrTilt = nii.hdr; % copy all hdr for tilt version
@@ -1145,9 +1135,7 @@ if shear
     gantry = tryGetField(s, 'GantryDetectorTilt', 0);
     nii.hdr.hdrTilt.pixdim(iSL+1) = norm(R(1:3, iSL)) * cosd(gantry);
     R(1:3, iSL) = sNorm * nii.hdr.hdrTilt.pixdim(iSL+1);
-    nii.hdr.hdrTilt.srow_x = R(1,:);
-    nii.hdr.hdrTilt.srow_y = R(2,:);
-    nii.hdr.hdrTilt.srow_z = R(3,:);
+    nii.hdr.hdrTilt.sform_mat = R;
 end
 
 % store some possibly useful info in descrip and other text fields
@@ -1323,9 +1311,8 @@ if isempty(TR), TR = tryGetField(s, 'TemporalResolution'); end
 if isempty(TR), return; end
 hdr.pixdim(5) = TR / 1000;
 hdr.xyzt_units = 8; % seconds
-if hdr.dim(5)<3 || tryGetField(s, 'isDTI', 0) || ...
-        strncmp(tryGetField(s, 'MRAcquisitionType'), '3D', 2)
-    return; % skip 3D, DTI, fieldmap, short EPI etc
+if hdr.dim(5)<3 || strncmp(tryGetField(s, 'MRAcquisitionType'), '3D', 2)
+    return; % skip 3D, fieldmap, short EPI etc
 end
 
 nSL = hdr.dim(4);
@@ -1464,7 +1451,7 @@ s = h{1};
 ref = 1; % not coded by Manufacturer, but by how we get bvec (since 190213).
 % With this method, the code will get correct ref if bvec ref scheme changes 
 % some day, e.g. if GE saves (0018,9089) in the future.
-% ref = 0: IMG, UIH for now; PE='ROW" not tested 
+% ref = 0: IMG, UIH for now; PE='ROW' not tested 
 % ref = 1: PCS, Siemens/Philips/lateCanon or unknown vendor, this is default
 % ref = 2: FPS, Bruker (need to verify)
 % ref = 3: FPS_GE, confusing signs
@@ -1610,7 +1597,7 @@ if any(nm>0.01 & abs(nm-1)>0.01) % this check may not be necessary
     h{1}.bval_original = bval; % before scaling
     bval = bval .* nm;
     nm(nm<1e-4) = 1; % remove zeros after correcting bval
-    bvec = bsxfun(@rdivide, bvec, sqrt(nm));
+    bvec = bvec ./ sqrt(nm);
 end
 
 h{1}.bval = bval; % store all into header of 1st file
@@ -1635,7 +1622,8 @@ function val = csa_header(s, key)
 fld = 'CSAImageHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 if isfield(s, key), val = s.(key); return; end % general tag: 2nd choice
-try val = s.PerFrameFunctionalGroupsSequence.Item_1.(fld).Item_1.(key); return; end
+try val = s.PerFrameFunctionalGroupsSequence.Item_1.(fld).Item_1.(key); return;
+catch, end
 fld = 'CSASeriesHeaderInfo';
 if isfield(s, fld) && isfield(s.(fld), key), val = s.(fld).(key); return; end
 val = [];
@@ -2469,24 +2457,6 @@ end
 function doParal = useParTool
 doParal = usejava('jvm');
 if ~doParal, return; end
-
-if isempty(which('parpool')) % for early matlab versions
-    try 
-        if matlabpool('size')<1 %#ok<*DPOOL>
-            try
-                matlabpool; 
-            catch me
-                fprintf(2, '%s\n', me.message);
-                doParal = false;
-            end
-        end
-    catch
-        doParal = false;
-    end
-    return;
-end
-
-% Following for later matlab with parpool
 try 
     if isempty(gcp('nocreate'))
         try
@@ -2605,8 +2575,7 @@ elseif ucMode == 4 % interleaved
     ind = mod((0:nShot-1)*inc, nShot)'; % my guess based on chris data
     
     if nShot==6, ind = [0 2 4 1 5 3]'; end % special case
-    ind = bsxfun(@plus, ind*ones(1,mb), (0:mb-1)*nShot);
-    ind = ind + 1;
+    ind = ind*ones(1,mb) + (0:mb-1)*nShot + 1;
 
     t = zeros(nSL, 1);
     for i = 1:nShot
@@ -2932,7 +2901,7 @@ end
 function v = normc(M)
 vn = sqrt(sum(M .^ 2)); % vn = vecnorm(M);
 vn(vn==0) = 1;
-v = bsxfun(@rdivide, M, vn);
+v = M ./ vn;
 
 %%
 function BtnModalityTable(h,TT,TS)
@@ -3101,21 +3070,6 @@ else
         rst(i0(end):i(1)+2) = '';
     end
     if isempty(rst), rst = '/'; end
-end
-
-%% this can be removed for matlab 2013b+
-function y = flip(varargin)
-try
-    y = builtin('flip', varargin{:});
-catch
-    if nargin<2, varargin{2} = find(size(varargin{1})>1, 1); end
-    y = flipdim(varargin{:}); %#ok
-end
-
-%% this can be removed for matlab 2013b+
-function tf = isfolder(folderName)
-try tf = builtin('isfolder', folderName);
-catch, tf = isdir(folderName); %#ok
 end
 
 %% Return true if input is char or single string (R2016b+)
