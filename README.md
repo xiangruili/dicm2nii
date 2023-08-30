@@ -10,6 +10,12 @@ Create, load, save NIfTI file. Support both version 1 and 2 NIfTI, and variety o
 # nii_viewer
 Visualize NIfTI. Can also visualize any file convertible to NIfTI by dicm2nii.
 
+# nii_coreg
+Affine registration of images with the same modality.
+
+# nii_deface
+Removes face and neck structure from T1w/T2w NIfTI.
+
 # nii_moco
 Perform motion correction on a NIfTI.
 
