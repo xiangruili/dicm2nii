@@ -184,6 +184,7 @@ C = {
     '0018' '1315' 'CS' 'VariableFlipAngleFlag'
     '0018' '1316' 'DS' 'SAR'
     '0018' '1318' 'DS' 'dBdt'
+    '0018' '1320' 'FL' 'B1rms'
     '0018' '1081' 'IS' 'LowRRValue'
     '0018' '1082' 'IS' 'HighRRValue'
     '0018' '1083' 'IS' 'IntervalsAcquired'
