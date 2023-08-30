@@ -118,5 +118,20 @@
             {"name":"vendor", "kind":"positional", "type":"choices={'SIEMENS', 'GE', 'Philips'}"},
             {"name":"flds",   "kind":"positional", "type":[["char"], ["cell"]]}
         ]
+},
+"nii_coreg":
+{
+    "inputs":
+        [
+            {"name":"niiT", "kind":"required", "type":[["struct"], ["filepath=*.nii,*.nii.gz"]]},
+            {"name":"niiM", "kind":"required", "type":[["struct"], ["filepath=*.nii,*.nii.gz"]]}
+        ]
+},
+"nii_deface":
+{
+    "inputs":
+        [
+            {"name":"in", "kind":"required", "type":[["struct"], [["folderpath"], "filepath=*.nii,*.nii.gz"]]}
+        ]
 }
 }
