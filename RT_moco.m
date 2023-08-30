@@ -21,6 +21,7 @@ set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ...
 	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', [1 1 1]*0.94, ...
     'Name', 'Real Time Image Monitor ', 'Tag', 'RT_moco', 'Visible', 'off');
 try fh.WindowState = 'maximized'; catch, fh.Position = [1 60 res(3) res(4)-80]; end
+drawnow;
 hs.fig = fh;
 hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
 hs.backupDir = getpref('dicm2nii_gui_para', 'backupDir', '');
@@ -47,7 +48,7 @@ uimenu(h, 'Label', 'Reset Brightness', 'Callback', @setCLim);
 uimenu(h, 'Label', 'Increase Brightness', 'Callback', @setCLim);
 uimenu(h, 'Label', 'Decrease Brightness', 'Callback', @setCLim);
 hDV = uimenu(h, 'Label', '&DVARS Threshold', 'Separator', 'on');
-for i = [0.01 0.02 0.05 0.1 0.12 0.15 0.2 0.4]
+for i = [0.01 0.02 0.04 0.05 0.06 0.08 0.1 0.2 0.4]
     uimenu(hDV, 'Label', num2str(i), 'Callback', @DV_yLim);
 end
 uimenu(h, 'Label', 'Show FD plot', 'Callback', @toggleFD, 'Separator', 'on');
@@ -71,7 +72,7 @@ else
     subjPos = [0 0.98]; seriesPos = [1 0.1]; msPos = [0 0.6]; ha = 'left';
 end
 
-dy = 0.12 * (0:3);
+dy = 0.06 * (0:3);
 hs.ax = axes(pa2, 'Position', [0.07 0.5 0.86 0.38], ...
     'NextPlot', 'add', 'XLim', [0.5 300.5], 'UserData', dy, ...
     'TickDir', 'out', 'TickLength', 0.002*[1 1], 'ColorOrder', [0 0 1; 1 0 1]);
@@ -151,9 +152,10 @@ guidata(fh, hs); closeSubj(fh);
 start(hs.timer);
 
 %% Log error for debugging
-function errorLog(obj, evt) %#ok
+function errorLog(obj, evt)
 hs = guidata(obj.UserData);
 vnam = "err_"+hs.subj.String+"_"+hs.series.String{1};
+evt.Data.me = lasterror; %#ok MException.last only from the Command Window
 eval(vnam+" = evt.Data;");
 fnam = hs.logDir+"errorLog.mat";
 if isfile(fnam), save(fnam, vnam, '-append'); else, save(fnam, vnam); end
@@ -225,7 +227,7 @@ else % T1, T2, fieldmap etc: show info/img only
     nam = sprintf('%s%06u.dcm', f, nIN*nTE);
     tEnd = now + 9/86400; % wait several seconds for files to arrive
     while now<tEnd && ~isfile(nam), pause(0.2); end
-    if ~isfile(nam)
+    if ~isfile(nam) || isDTI
         hs.instnc.String = '1';
         img = dicm_img(s);
     else
@@ -235,6 +237,7 @@ else % T1, T2, fieldmap etc: show info/img only
         else
             hs.instnc.String = '';
             nii = dicm2nii([s.Filename(1:end-10) '*'], ' ', 'no_save');
+            if isempty(nii), return; end % conversion fails
             iSL = bitand(nii.hdr.dim_info, 48)/16;
             img = nii.img(:,:,:,1);
             if     iSL == 1, img = permute(img, [3 2 1]);
@@ -272,12 +275,8 @@ if isEnh
     multiFrameFields = dicm2nii('', 'multiFrameFields', 'func_handle');
     s = multiFrameFields(s);
 end
-img = brainMask(img, s);
 try thk = s.SpacingBetweenSlices; catch, thk = s.SliceThickness; end
 p = refVol(img, [s.PixelSpacing' thk]);
-if isDTI
-    p.mean = p.mean*5; % make it similar to EPI
-end
 img0 = double(img);
 set_img(hs.img, mos);
 init_series(hs, s, nIN, nIN);
@@ -307,7 +306,7 @@ for i = 2:nIN
     hs.img.UserData(iN) = mean(img(:)); 
     set_img(hs.img, mos); hs.instnc.String = num2str(iN);
     hs.slider.Value = iN; % show progress
-    img = brainMask(img);
+    if isDTI, continue; end % give up for now
     
     if isMoCo % FD from dicom hdr, DV uses MoCo img for now
         if isEnh
@@ -323,7 +322,7 @@ for i = 2:nIN
         [m6(2,:), R1] = moco_estim(p, R1);
     end
     a = abs(m6(2,:) - m6(1,:)); m6(1,:) = m6(2,:);
-    hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: head radius
+    hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: brain radius
     
     img = double(img);
     a = img(:) - img0(:);
@@ -384,7 +383,7 @@ hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN [] [] []}; hs.table.Dat
 hs.fig.UserData.hdr{end+1} = s; % 1st instance
 
 pat = asc_header(s,'sPat.lAccelFactPE', 1);
-if pat==1, thr = 0.12; else, thr = 0.15; end % arbitrary
+if pat==1, thr = 0.06; else, thr = 0.08; end % arbitrary
 h = findobj(hs.fig, 'Type', 'uimenu', 'Label', '&DVARS Threshold');
 thrs = str2double(get(h.Children, 'Label'));
 [~, i] = min(abs(thrs-thr));
@@ -571,36 +570,31 @@ dG = dG / dd; % derivative
 % choose voxels with larger derivative for alignment: much faster
 a = sum(dG.^2); % 6 derivatives has similar range
 ind = a > std(a(~isnan(a)))/10; % arbituray threshold. Also exclude NaN
-p.mean = mean(V0);
 p.dG = dG(:, ind);
 p.V0 = V0(ind);
+p.mean = mean(p.V0);
 p.mm = I(:, ind);
 F.GridVectors = {0:d(1)-1, 0:d(2)-1, 0:d(3)-1};
 p.F = F;
 p.sz = sz;
 
 %% motion correction to ref-vol. From nii_moco.m
-function [m6, rst] = moco_estim(p, R)
-mss0 = inf;
-rst = R;
+function [m6, R] = moco_estim(p, R)
+if isnan(R(1)), R = inv(p.R0); end
 for iter = 1:64
     J = R * p.mm; % R_rst*J -> R0*ijk
     V = p.F(J(1,:), J(2,:), J(3,:));
     ind = ~isnan(V); % NaN means out of range
     dV = p.V0(ind) - V(ind);
-    mss = dV*dV' / numel(dV); % mean(dV.^2)
-    if mss > mss0, break; end % give up and use previous R
-    rst = R; % accecpt only if improving
-    if 1-mss/mss0 < 1e-6, break; end % little effect, stop
-    
+    if sum(ind)<32 || dV*dV'/numel(dV)>p.mean*p.mean, R = nan(4); break; end
     a = p.dG(:, ind);
-    p6 = (a * a') \ (a * dV'); % dG(:,ind)'\dV' estimate p6 from current R
-    R = R * rigid_mat(p6); % inv(inv(rigid_mat(p6)) * inv(R_rst))
-    mss0 = mss;
+    b = (a * a') \ (a * dV'); % dG(:,ind)'\dV' estimate p6 from current R
+    R = R * rigid_mat(b); % inv(inv(rigid_mat(p6)) * inv(R_rst))
+    if b'*b < 1e-4, break; end % little effect, stop
 end
 
-R = p.R0 * rst; % inv(R_rst / Rref)
-m6 = -[R(1:3, 4)' atan2(R(2,3), R(3,3)) asin(R(1,3)) atan2(R(1,2), R(1,1))];
+M = p.R0 * R; % inv(R_rst / Rref)
+m6 = -[M(1:3, 4)' atan2(M(2,3), M(3,3)) asin(M(1,3)) atan2(M(1,2), M(1,1))];
 
 %% Translation (mm) and rotation (deg) to 4x4 R. Order: ZYXT
 function R = rigid_mat(p6)
@@ -632,57 +626,6 @@ out = smooth3(F(J), 'gaussian'); % sz=3
 F = griddedInterpolant(J, out, intp);
 out = F(I);
 
-%% mask brain for better motion estimate
-function img = brainMask(img, s)
-persistent msk isDTI;
-if nargin>1 % init msk from Volume 1
-    isDTI = contains(s.ImageType, '\DIFFUSION');
-    nii = nii_tool('init', logical(img)); % xposed, img=dicm_img(s)
-    xform_mat = dicm2nii('', 'xform_mat', 'func_handle');
-    [~, R, nii.hdr.pixdim(2:4)] = xform_mat(s); R = R(:,[2 1 3 4]); % LPS
-    nii.hdr.sform_code = 1;
-    nii.hdr.srow_x = -R(1,:); % RAS
-    nii.hdr.srow_y = -R(2,:);
-    nii.hdr.srow_z = R(3,:);
-    if ~isDTI || isempty(msk)
-        msk = nii;
-        msk.img = EPI_mask(img);
-        msk.img = smooth3(double(msk.img), 'guassian', 5) > 1e-6; % dilate
-    end
-    if isDTI % possibly EPI mask
-        msk = nii_xform(msk, nii, [], 'nearest', false); 
-    end
-end
-img(~msk.img) = 0;
-if ~isDTI, return; end % for EPI: only mask out
-img = EPI_mask(img);
-
-%% Quick brain mask for EPI or alike with low contrast
-function M = EPI_mask(img)
-B = smooth3(double(img), 'box', 5);
-mn = median(B(B>mean(B(:)/8)));
-mn = min(max(B(:)), mn*20);
-[N, edges] = histcounts(img(:), linspace(0,mn,100));
-N = movmean(N, 9);
-mx = mean(N);
-for i = 1:9
-    p = islocalmin(N, 'MinProminence', mx);
-    if any(p), break; end
-    mx = mx / 2;
-end
-if ~any(p), M = true(size(B)); return; end % give up
-B = B > edges(find(p,1))*0.7;
-M = false(size(B));
-c = round(nii_viewer('LocalFunc', 'img_cog', img));
-M(c(1), c(2), c(3)) = true; n1 = 1;
-while 1
-    for i = 1:3
-        M = (M<circshift(M, 1,i) | M<circshift(M,-1,i)) & B | M;
-    end
-    n2 = sum(M(:));
-    if n2>n1, n1 = n2; else, break; end
-end
-
 %% new series or new subj: result saved as incoming_DICOM/RTMM_log/subj.mat
 % The subj folders (yyyymmdd.PatientName.PatientID) default to ../incoming_DICOM/
 % The dcm file names from Siemens push are always in format of
@@ -713,7 +656,7 @@ for i = numel(dirs):-1:1
 end
 
 % Move/Delete old subj folder right after mid-night
-if ~isfile([hs.rootDir 'host.txt']) || mod(now,1) > 10/86400; return; end
+if ~isfile([hs.rootDir 'dClock']) || mod(now,1) > 10/86400; return; end
 dirs(now-[dirs.datenum]<2) = []; % keep for 2 days
 for i = 1:numel(dirs)
     src = [hs.rootDir dirs(i).name];
@@ -825,7 +768,7 @@ T1w = dicm2nii(nams, ' ', 'no_save');
 nams = dir([hs.slider.UserData '*.dcm']);
 nams = strcat(nams(1).folder, '/', {nams.name});
 epi = dicm2nii(nams, ' ', 'no_save');
-fh = nii_viewer(T1w, epi);
+fh = nii_viewer(T1w, epi); fh.Position(2) = fh.Position(2)-200;
 nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh);
 
 %% slider callback: show img if avail
@@ -925,13 +868,13 @@ mx = mean(im) + 2*std(im);
 %% Create QC report
 function QC_report(rootDir)
 nam = dir([rootDir 'closed_*']);
-if isempty(nam) || isfile([rootDir 'EyelinkRecording.mat']), return; end
+if isempty(nam) || now-nam(1).datenum<1/1440 || ...
+        isfile([rootDir 'EyelinkRecording.mat']); return; end
 nam = [rootDir nam(1).name];
 done = onCleanup(@()movefile(nam, strrep(nam, 'closed_', 'done_'))); 
 rmQC = onCleanup(@()delete('./tmp_QC_*.pdf'));
 subj = regexp(nam, '(?<=closed_)\d{4}\w{2}$', 'match', 'once');
-if isempty(subj), return; end
-load([rootDir 'RTMM_log/' subj '.mat'], 'T3');
+try load([rootDir 'RTMM_log/' subj '.mat'], 'T3'); catch, return; end
 uDat = T3.Properties.UserData;
 
 close all; delete('./tmp_QC_*.pdf');
