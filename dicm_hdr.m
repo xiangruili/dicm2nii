@@ -1418,6 +1418,8 @@ s.NumberOfTemporalPositions = s.NumberOfFrames/nSL;
 iVol = ind_sort((0:s.NumberOfTemporalPositions-1)*nSL + 1); % already XYZT
 typ = {'MAGNITUDE' 'REAL' 'IMAGINARY' 'PHASE'};
 imgType = xml_val(ch, 'Type', 0, iVol); % 'M'
+a = cellfun(@(c) ~any(startsWith(typ, c)), imgType);
+if any(a), typ = [typ imgType(a)]; end
 for i = 1:numel(imgType), imgType{i} = find(strncmpi(typ, imgType{i}, 1), 1); end
 imgType = cell2mat(imgType);
 if numel(iVol) == 1
