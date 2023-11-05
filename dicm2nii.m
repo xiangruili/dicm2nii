@@ -690,14 +690,12 @@ if bids
     if guiOn
         setappdata(0,'Canceldicm2nii',false);
         scrSz = get(0, 'ScreenSize');
-        figargs = {'bids'*256.^(0:3)','Position',[min(scrSz(4)+420,620) scrSz(4)-600 800 400],...
+        figargs = {'Position',[min(scrSz(4)+420,620) scrSz(4)-600 800 400],...
             'Color', [1 1 1]*206/256, 'CloseRequestFcn', @my_closereq};
         if verLessThanOctave
-            hf = figure(figargs{1});
-            set(hf,figargs{2:end});
+            hf = figure(figargs{:});
             % add help
-            set(hf,'ToolBar','none')
-            set(hf,'MenuBar','none')
+            set(hf,'ToolBar','none','MenuBar','none')
         else
             hf = uifigure(figargs{:});
         end
