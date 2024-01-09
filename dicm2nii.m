@@ -933,7 +933,7 @@ if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
 %% Subfunction: return AcquisitionDate
 function acq = AcquisitionDateField(s)
 acq = tryGetField(s, 'AcquisitionDate');
-if isempty(acq), acq = tryGetField(s, 'AcquisitionDateTime'); end
+if isempty(acq), acq = tryGetField(s, 'AcquisitionDateTime'); acq = acq(1:8); end
 if isempty(acq), acq = tryGetField(s, 'SeriesDate'); end
 if isempty(acq), acq = tryGetField(s, 'StudyDate', ''); end
 
@@ -1124,6 +1124,7 @@ R0(:,iSL) = sNorm;
 % qform
 nii.hdr.qform_code = frmCode;
 nii.hdr.qoffset_xyz = R(:,4);
+nii.hdr.qform_mat = nii.hdr.sform_mat;
 [q, nii.hdr.pixdim(1)] = dcm2quat(R0); % 3x3 dir cos matrix to quaternion
 nii.hdr.quatern_bcd = q(2:4)';
 
@@ -1489,7 +1490,8 @@ elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
         end
     elseif nDir == nFile % 1 vol per file, e.g. Siemens/UIH
         for i = 1:nDir
-            bval(i) = MF_val('B_value', h{i}, 1);
+            a = MF_val('B_value', h{i}, 1);
+            if ~isempty(a), bval(i) = a; end
             a = MF_val('DiffusionGradientDirection', h{i}, 1);
             if isempty(a)
                 a = MF_val('MRDiffusionGradOrientation', h{i}, 1);
@@ -2086,6 +2088,7 @@ fld = 'InPlanePhaseEncodingDirection';
 if isfield(s, fld)
     if     strncmpi(s.(fld), 'COL', 3), iPhase = 2; % based on dicm_img(s,0)
     elseif strncmpi(s.(fld), 'ROW', 3), iPhase = 1;
+    elseif strncmpi(s.(fld), 'OTHER', 3) % seen in AAHScout_MPR_sag
     else, errorLog(['Unknown ' fld ' for ' s.Filename ': ' s.(fld)]);
     end
 end
@@ -2242,6 +2245,7 @@ end
 %% subfunction: return value from Shared or PerFrame FunctionalGroupsSequence
 function val = MF_val(fld, s, iFrame)
 pffgs = 'PerFrameFunctionalGroupsSequence';
+sfgs = 'SharedFunctionalGroupsSequence';
 switch fld
     case 'EffectiveEchoTime'
         sq = 'MREchoSequence';
@@ -2283,11 +2287,11 @@ switch fld
         error('Sequence for %s not set.', fld);
 end
 if nargin<2
-    val = {'SharedFunctionalGroupsSequence' pffgs sq fld 'NumberOfFrames'}; 
+    val = {sfgs pffgs sq fld 'NumberOfFrames'}; 
     return;
 end
-try 
-    val = s.SharedFunctionalGroupsSequence.Item_1.(sq).Item_1.(fld);
+try
+    val = s.(sfgs).Item_1.(sq).Item_1.(fld);
 catch
     try
         val = s.(pffgs).(sprintf('Item_%g', iFrame)).(sq).Item_1.(fld);
