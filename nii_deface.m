@@ -34,7 +34,7 @@ end
 f = fileparts(which('nii_viewer'));
 niiT1 = nii_tool('load', [f '/templates/MNI_2mm_T1.nii']);
 niiT2 = nii_tool('load', [f '/templates/MNI_2mm_T2.nii']);
-msk = load([f './example_data.mat'], 'MNI_2mm_deface_mask');
+msk = load([f '/example_data.mat'], 'MNI_2mm_deface_mask');
 msk = msk.MNI_2mm_deface_mask; % enlarged brain+scalp mask
 
 if isfile(in)
