@@ -381,6 +381,14 @@ for i = 1:numel(h)
     end
 end
 
+%% remove last instance if it is an outlier (stopped scan by user)
+for i = 1:numel(h)
+    a = cellfun(@(c)c.PixelData.Bytes, h{i});
+    if numel(a)>2 && a(1)~=a(end) && a(1)==a(end-1)
+        h{i}(end) = [];
+    end
+end
+
 %% Check headers: remove dim-inconsistent series
 nRun = numel(h);
 if nRun<1 % no valid series
@@ -407,8 +415,8 @@ for i = 1:nRun
     end
     studyIDs{i} = tryGetField(s, 'StudyID', '1');
     series = sprintf('Subject %s, %s (Series %g)', subjs{i}, ProtocolName(s), sNs(i));
-    s = multiFrameFields(s); % no-op if non multi-frame
-    if isempty(s), keep(i) = 0; continue; end % invalid multiframe series
+    [s, err] = multiFrameFields(s); % no-op if non multi-frame
+    if ~isempty(err), keep(i) = 0; continue; end % invalid multiframe series
     s.isDTI = isDTI(s);
     if ~isfield(s, 'AcquisitionDateTime') % assumption: 1st instance is earliest
         try s.AcquisitionDateTime = [s.AcquisitionDate s.AcquisitionTime]; end
@@ -489,10 +497,8 @@ for i = 1:nRun
     end    
 end
 h = h(keep); sNs = sNs(keep); studyIDs = studyIDs(keep); hSuf = hSuf(keep);
-subjs = subjs(keep); vendor = vendor(keep);
+subjs = subjs(keep); vendor = vendor(keep); acqs = acqs(keep);
 subj = unique(subjs);
-acqs = acqs(keep);
-acq = unique(acqs);
 
 % sort h by PatientName, then StudyID, then SeriesNumber
 % Also get correct order for subjs/studyIDs/nStudy/sNs for nii file names
@@ -592,6 +598,7 @@ if bids
         end
         return;
     end
+    acq = unique(acqs);
     if numel(acq)>1
         fprintf('Multiple acquitisition detected!!!!! \n')
         for iacq = 1:length(acq)
@@ -2141,7 +2148,8 @@ if R(ixy(iPhase), iPhase)<0, phPos = ~phPos; end % tricky! in image ref
 if strncmpi(s.Manufacturer, 'Philips', 7), phPos = []; end % invalidate for now
 
 %% subfunction: extract useful fields for multiframe dicom
-function s = multiFrameFields(s)
+function [s, err] = multiFrameFields(s)
+err = '';
 if isfield(s, 'MRVFrameSequence') % not real multi-frame dicom
     try
     s.ImagePositionPatient = s.MRVFrameSequence.Item_1.ImagePositionPatient;
@@ -2190,14 +2198,17 @@ if n>0 && isfield(s, 'DimensionIndexSequence')
         s.SortFrames = ind; % to sort img and get iVol/iSL for PerFrameSQ
     end
     s.LocationsInAcquisition = max(sorted(:,end));
-    if mod(nFrame, s.LocationsInAcquisition), s = []; return; end
+    if mod(nFrame, s.LocationsInAcquisition)
+        err = "nFrame="+nFrame+"; nSlice="+s.LocationsInAcquisition;
+        return;
+    end
 end
 
 % copy important fields into s
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
         'RepetitionTime' 'FlipAngle' 'RescaleIntercept' 'RescaleSlope' ...
         'ImageOrientationPatient' 'ImagePositionPatient' ...
-        'ImageTypeText' 'ImageHistory' ...
+        'ImageTypeText' 'ImageHistory' 'ICE_Dims' ...
         'InPlanePhaseEncodingDirection' 'MRScaleSlope' 'CardiacTriggerDelayTime'};
 iF = 1; if isfield(s, 'SortFrames'), iF = s.SortFrames(1); end
 for i = 1:numel(flds)
@@ -2239,7 +2250,8 @@ if ~isempty(a), s.LastFile.ImagePositionPatient = a; end
 fld = 'ImageOrientationPatient';
 val = MF_val(fld, s, iF);
 if ~isempty(val) && isfield(s, fld) && any(abs(val-s.(fld))>1e-4)
-    s = []; return; % inconsistent orientation, skip
+    err = "Inconsistent "+fld;
+    return;
 end
 
 %% subfunction: return value from Shared or PerFrame FunctionalGroupsSequence
@@ -2281,7 +2293,7 @@ switch fld
         catch, val = [0 0 0]';
         end
         if nargin>1, return; end
-    case {'ImageTypeText' 'ImageHistory'}
+    case {'ImageTypeText' 'ImageHistory' 'ICE_Dims'}
         sq = 'CSAImageHeaderInfo';
     otherwise
         error('Sequence for %s not set.', fld);
