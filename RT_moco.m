@@ -11,6 +11,7 @@ function RT_moco()
 %  2. Set up real time image transfer at Siemens console.
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
+% 240115 drop support for mosaic
 
 % Create/re-use GUI and start timer
 fh = findall(0, 'Type', 'figure', 'Tag', 'RT_moco');
@@ -19,9 +20,8 @@ res = get(0, 'ScreenSize');
 fh = figure('mc'*[256 1]'); clf(fh);
 set(fh, 'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off', ... 
 	'DockControls', 'off', 'CloseRequestFcn', @closeFig, 'Color', [1 1 1]*0.94, ...
-    'Name', 'Real Time Image Monitor ', 'Tag', 'RT_moco', 'Visible', 'off');
-try fh.WindowState = 'maximized'; catch, fh.Position = [1 60 res(3) res(4)-80]; end
-drawnow;
+    'Name', 'Real Time Image Monitor ', 'Tag', 'RT_moco', ...
+    'WindowState', 'maximized', 'Visible', 'off');
 hs.fig = fh;
 hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
 hs.backupDir = getpref('dicm2nii_gui_para', 'backupDir', '');
@@ -145,7 +145,7 @@ hs.serial = serial(port, 'BaudRate', 115200, 'Terminator', '', 'Tag', 'RTMM', ..
 try fopen(hs.serial); catch, end
 
 hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', 'UserData', fh, ...
-    'StopFcn', @saveResult, 'TimerFcn', @doSeries, 'ErrorFcn', @errorLog);
+    'StopFcn', @saveResult, 'TimerFcn', @timerFcn, 'ErrorFcn', @errorLog);
 
 hs.countDown = timer('ExecutionMode', 'fixedRate', 'ObjectVisibility', 'off', ...
     'TimerFcn', {@countDown hs}, 'UserData', 0);
@@ -154,16 +154,19 @@ guidata(fh, hs); closeSubj(fh);
 start(hs.timer);
 
 %% Log error for debugging
-function errorLog(obj, evt)
+function errorLog(obj, evt) %#ok
 hs = guidata(obj.UserData);
-vnam = genvarname("err_"+hs.subj.String+"_"+hs.series.String{1});
-evt.Data.me = lasterror; %#ok MException.last only from the Command Window
-eval(vnam+" = evt.Data;");
+vnam = hs.series.String;
+if iscell(vnam) && numel(vnam)>1, vnam = vnam{1}; end
+vnam = genvarname("err_"+hs.subj.String+datestr(now,'_HHMM')+"_"+vnam);
+eval(vnam +" = evt;");
 fnam = hs.logDir+"errorLog.mat";
 if isfile(fnam), save(fnam, vnam, '-append'); else, save(fnam, vnam); end
 
 %% TimerFunc: do a series if avail, then call stopFunc to save result
-function doSeries(obj, ~)
+function timerFcn(obj, ~)
+try doSeries(obj); catch me, errorLog(obj, me); end
+function doSeries(obj)
 hs = guidata(obj.UserData);
 hs.fig.Name(end) = 78 - hs.fig.Name(end); % dot/space switch: timer indicator
 set(hs.menu, 'Enable', 'off'); set([hs.table hs.slider], 'Enable', 'inactive');
@@ -171,8 +174,12 @@ set(hs.menu, 'Enable', 'off'); set([hs.table hs.slider], 'Enable', 'inactive');
 if isempty(nam), return; end
 s = dicm_hdr_wait(nam);
 if isempty(s), return; end % non-image dicom, skip series
+if size(hs.table.Data,1) && hs.table.Data{1,2}==s.SeriesNumber % current series
+    hs.table.Data{1,3} = numel(dir([seriesBase(nam) '*.dcm']));
+    return;
+end
 
-try hs.fig.WindowState = 'maximized'; catch, end
+hs.fig.WindowState = 'maximized';
 L0 = java.awt.MouseInfo.getPointerInfo().getLocation();
 java.awt.Robot().mouseMove(L0.getX+9, L0.getY+9); % wake up screen
 pause(0.1); java.awt.Robot().mouseMove(L0.getX, L0.getY);
@@ -188,145 +195,106 @@ end
 
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
 if hs.SBRef.Checked=="on" && endsWith(s.SeriesDescription, '_SBRef'), return; end
-if startsWith(s.SequenceName, 'ABCD3d1'), return; end
+% if startsWith(s.SequenceName, 'ABCD3d1'), return; end
 
 isDTI = contains(s.ImageType, '\DIFFUSION');
-isMOS = contains(s.ImageType, '\MOSAIC');
 isMoCo = contains(s.ImageType, '\MOCO');
-% isEnh = isfield(s, 'NumberOfFrames') && s.NumberOfFrames>1;
-isEnh = isfield(s, 'SharedFunctionalGroupsSequence');
-
 nTE = asc_header(s, 'lContrasts', 1);
 % fieldmap phase diff series: nTE=2, EchoNumber=2
 if (contains(s.ImageType, '\P\') && contains(s.SequenceName, 'fm2d')) || ...
    (contains(s.ImageType, '\MEAN') && s.NumberOfAverages>1) % vNAV RMS
     nTE = 1;
 end
+
+multiFrameFields = dicm2nii('', 'multiFrameFields', 'func_handle');
+s = multiFrameFields(s);
+nCh = 1;
+if s.ICE_Dims(1) ~= "X" % coil not combined: no \CC: in ImageHistory
+    k = 'sCoilSelectMeas.aRxCoilSelectData[0].asList.__attribute__.size';
+    nCh = asc_header(s, k, 1);
+end
+
 if isDTI
-    nV = [];
+    nTR = [];
     for i = 1:999
         a = asc_header(s, sprintf('sDiffusion.alAverages[%i]', i-1));
-        if isempty(a), break; else, nV(i) = a; end %#ok
+        if isempty(a), break; else, nTR(i) = a; end %#ok
     end
-    nV = nV(1) + sum(nV(2:end))*asc_header(s, 'sDiffusion.lDiffDirections');
+    nTR = nTR(1) + sum(nTR(2:end))*asc_header(s, 'sDiffusion.lDiffDirections');
 else
-    nV = nTE * (asc_header(s, 'lRepetitions', 0)+1);
+    nTR = asc_header(s, 'lRepetitions', 0) + 1;
 end
+nIN = nTR * nTE * nCh;
+init_series(hs, s, nIN, nTR);
 if ~isMoCo, hs.series.String = seriesInfo(s); end
-if isMOS, nSL = s.CSAImageHeaderInfo.NumberOfImagesInMosaic; end
+img = dicm_img(s);
+set_img(hs.img, img);
+drawnow; 
 
-if isDTI && (isMOS || isEnh)
-    nIN = nV;
-elseif contains(s.SequenceName, {'epfid2d' 'ASL'}) && (isMOS || isEnh) % EPI/ASL
-    nIN = asc_header(s, 'lRepetitions', 0) + 1;
-elseif endsWith(s.SeriesDescription, '_setter') % not safe
-    return;
-else % T1, T2, fieldmap etc: show info/img only
-    if s.MRAcquisitionType == "3D", nIN = asc_header(s, 'sKSpace.lImagesPerSlab');
-    else, nIN = asc_header(s, 'sSliceArray.lSize'); % 2D
-    end
-    if isEnh, nIN = nIN / s.NumberOfFrames; end
-    init_series(hs, s, nIN*nV, nV);
-
+% T1, T2, fieldmap etc: show info/img only
+if ~isDTI && ~contains(s.SequenceName, {'epfid2d' 'ASL'}) || nCh>1
     nam = [seriesBase(nam) '*.dcm'];
     tEnd = now + 9/86400; % wait several seconds for files to arrive
     while now<tEnd
         N = numel(dir(nam));
-        if N<nIN*nTE, pause(0.2); else, break; end
+        if N<nIN, pause(0.2); else, break; end
     end
+    if N>nIN, hs.table.Data{1,3} = N; end
     hs.instnc.UserData = hs.instnc.UserData + N - 1; 
-    if N<nIN*nTE || isDTI
-        hs.instnc.String = '1';
-        img = dicm_img(s);
-    else
-        if isEnh
-            hs.instnc.String = '1';
-            img = permute(dicm_img(s), [1 2 4 3]);
-        else
-            hs.instnc.String = '';
-            nii = dicm2nii([seriesBase(s.Filename) '*.dcm'], ' ', 'no_save');
-            if isempty(nii), return; end % conversion fails
-            iSL = bitand(nii.hdr.dim_info, 48)/16;
-            img = nii.img(:,:,:,1);
-            if     iSL == 1, img = permute(img, [3 2 1]);
-            elseif iSL == 2, img = permute(img, [3 1 2]);
-            elseif iSL == 3, img = permute(img, [2 1 3]);
-            end
-            img = flip(img, 1);
-        end
-    end
+    hs.instnc.String = '1';
     hs.slider.Value = 1;
-    set_img(hs.img, img);
     return;
 end
 
 if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
-if nIN>5 && hs.countDown.Running == "off" % work for EPI without tricks
+if nTR>5 && hs.countDown.Running == "off" % work for EPI without tricks
     a = dir(s.Filename);
     try dClock = str2double(fileread([hs.rootDir 'dClock']))/86400;
     catch, dClock = 0;
     end
-    hs.countDown.UserData = a.datenum -dClock + (nIN-1)*asc_header(s,'alTR[0]')/864e8;
+    hs.countDown.UserData = a.datenum -dClock + (nTR-1)*asc_header(s,'alTR[0]')/864e8;
     start(hs.countDown);
 end
 try stopAt = str2double(regexp(s.ImageComments, '(?<=stopAt:)\d*', 'match', 'once')); 
 catch, stopAt = inf;
 end
 
-mos = dicm_img(s);
-if isMOS, img = mos2vol(mos, nSL);
-else, img = permute(mos, [1 2 4 3]); mos = vol2mos(img);
-end
-if isEnh
-    multiFrameFields = dicm2nii('', 'multiFrameFields', 'func_handle');
-    s = multiFrameFields(s);
-end
 try thk = s.SpacingBetweenSlices; catch, thk = s.SliceThickness; end
+img = double(img(:,:,:));
+img0 = img;
 p = refVol(img, [s.PixelSpacing' thk]);
-img0 = double(img);
-set_img(hs.img, mos);
-init_series(hs, s, nIN, nIN);
 hs.img.UserData(1) = mean(img(:));
 viewer = findall(0, 'Type', 'figure', 'Tag', 'nii_viewer');
-if nIN<6 && isempty(viewer), overlay(hs.fig); end
+if nTR<6 && isempty(viewer), overlay(hs.fig); end
 
 R1 = inv(p.R0);
 m6 = zeros(2,6);
-
 dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
-for i = 2:nIN
-    tEnd = now + 1/1440; % 1 minute no mosaic coming, treat as stopped series
+for i = 2:nTR
+    tEnd = now + 20/86400; % 20 secs no img coming, treat as stopped series
     N = hs.instnc.UserData;
     while now<tEnd
         [nam, new] = nextFile(hs);
-        if new, return; end
+        if ~isequal(new, false), return; end
         if hs.countDown.Running=="on", countDown(hs.countDown, 0, hs); end
         if hs.serial.Status=="open", serialRead(hs.serial); end
-        if hs.instnc.UserData-N == nTE, break; end
+        if hs.instnc.UserData-N == nTE*nCh, break; end
         pause(0.2);
     end
     if isempty(nam), return; end % timeout
     s = dicm_hdr_wait(nam, dict);
     iN = s.InstanceNumber;
     if nTE>1, iN = i; end % fake InstanceNumber for multi-echo EPI
-    mos = dicm_img(s);
-    if isMOS, img = mos2vol(mos, nSL);
-    else, img = permute(mos, [1 2 4 3]); mos = vol2mos(img);
-    end
+    img = dicm_img(s);
+    img = double(img(:,:,:));
     hs.img.UserData(iN) = mean(img(:)); 
-    set_img(hs.img, mos); hs.instnc.String = num2str(iN);
+    set_img(hs.img, img); hs.instnc.String = num2str(iN);
     hs.slider.Value = iN; % show progress
     if isDTI, continue; end % give up for now
     
     if isMoCo % FD from dicom hdr, DV uses MoCo img for now
-        if isEnh
-            s1 = dicm_hdr(nam, dicm_dict('Siemens', {'RBMoCoTrans' 'RBMoCoRot'}));
-            m6(2,:) = [s1.RBMoCoTrans; s1.RBMoCoRot];
-        else
-            s1 = dicm_hdr(nam, dicm_dict('Siemens', 'CSAImageHeaderInfo'));
-            m6(2,:) = [s1.CSAImageHeaderInfo.RBMoCoTrans; ...
-                s1.CSAImageHeaderInfo.RBMoCoRot];
-        end
+        s1 = dicm_hdr(nam, dicm_dict('Siemens', {'RBMoCoTrans' 'RBMoCoRot'}));
+        m6(2,:) = [s1.RBMoCoTrans; s1.RBMoCoRot];
     else
         p.F.Values = smooth_mc(img, p.sz);
         [m6(2,:), R1] = moco_estim(p, R1);
@@ -334,7 +302,6 @@ for i = 2:nIN
     a = abs(m6(2,:) - m6(1,:)); m6(1,:) = m6(2,:);
     hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: brain radius
     
-    img = double(img);
     a = img(:) - img0(:);
     hs.dv.YData(iN) = sqrt(a'*a / numel(a)) / p.mean;
     img0 = img;
@@ -366,21 +333,20 @@ for i = 1:nSL
 end
 
 %% Initialize GUI for a new series
-function init_series(hs, s, nIN, nV)
-if size(hs.table.Data,1)>0 && hs.table.Data{1,2}==s.SeriesNumber, return; end
+function init_series(hs, s, nIN, nTR)
 fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
 fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), dicmTime(s));
 fclose(fid);
 
-set(hs.slider, 'Max', nIN, 'Value', 1, 'UserData', seriesBase(s.Filename));
-if nIN==1, hs.slider.Visible = 'off';
-else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
+set(hs.slider, 'Max', nTR, 'Value', 1, 'UserData', seriesBase(s.Filename));
+if nTR==1, hs.slider.Visible = 'off';
+else, set(hs.slider, 'SliderStep', [1 1]./(nTR-1)); hs.slider.Visible = 'on';
 end
-hs.dv.YData = nan(nV,1); hs.fd.YData = nan(nV,1); hs.img.UserData = nan(nV,1);
+hs.dv.YData = nan(nTR,1); hs.fd.YData = nan(nTR,1); hs.img.UserData = nan(nTR,1);
 hs.fig.UserData.nIN{end+1} = nIN;
-if nV>1 && nIN==nV
+if nTR>1
     set([hs.ax hs.pct], 'Visible', 'on');
-    hs.ax.XLim(2) = nV + 0.5;
+    hs.ax.XLim(2) = nTR + 0.5;
 else
     set([hs.ax hs.pct], 'Visible', 'off');
 end
@@ -399,7 +365,7 @@ thrs = str2double(get(h.Children, 'Label'));
 [~, i] = min(abs(thrs-thr));
 DV_yLim(h.Children(i));
 
-%%
+%% return series base name from a file name
 function nam = seriesBase(fname)
 [pth, nam] = fileparts(fname);
 nam = fullfile(pth, nam(1:11));
@@ -669,15 +635,15 @@ if ~isempty(f) % check next file for current subj
         return;
     end
 end
-dirs = dir([hs.dicm '20*']); % check new subj
-valid = cellfun(@(c)~isempty(regexp(c,'\d{8}\.[\w\d]*\.[\w\d]*','once')), {dirs.name});
-dirs = dirs(valid);
-for i = numel(dirs):-1:1
-    subj = regexp(dirs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
+fs = dir([hs.dicm '20*']); % check new subj
+valid = cellfun(@(c)~isempty(regexp(c,'\d{8}\.[\w\d]+\.[\w\d]+','once')), {fs.name});
+fs = fs(valid & [fs.isdir]);
+for i = numel(fs):-1:1
+    subj = regexp(fs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
     subj = regexprep(subj, '[_\s]', '');
     if isfile([hs.logDir subj '.mat']), continue; end
     new = subj; % new subj
-    f = fullfile(dirs(i).folder, dirs(i).name);
+    f = fullfile(fs(i).folder, fs(i).name);
     hs.subj.UserData = f;
     hs.instnc.UserData = 1;
     nams = dir([f '/*.dcm']);
@@ -685,19 +651,51 @@ for i = numel(dirs):-1:1
     hs.series.UserData = sscanf(nams(1).name, '%3u_%6u', [1 2]);
     return;
 end
+if ~isfile([hs.rootDir 'dClock']); return; end % rest only for RTMM computer
+
+% Delete daily QA related
+% id = ['QA' datestr(now-1, 'yymm')];
+% [~, ~] = system(['rm ' hs.logDir id '.mat']);
+% fs(endsWith({fs.name}, ['.' id '.' id])) = [];
+% i = endsWith({fs.name}, ['.' id '.' id]);
+% if any(i) && now-fs(i).datenum>1/24
+%     rmdir([hs.dicm fs(i).name], 's'); fs(i) = [];
+%     delete([hs.logDir id '.mat']);
+% end
+
+if ~isfolder(hs.backupDir) || abs(mod(now,1)-2/24)>9/86400; return; end
+for i = 1:numel(fs)
+    if isfolder([hs.backupDir fs(i).name]), continue; end
+    [err, str] = system(['cp -p -r ' hs.dicm fs(i).name ' ' hs.backupDir]);
+    if err, errorLog(hs.timer, str); return; end
+end
+fid = fopen([hs.rootDir '/archived.txt'], 'a');
+fprintf(fid, '%s\r\n', fs.name);
+fclose(fid);
 
 % Move/Delete old subj folder around 2AM
-if ~isfile([hs.rootDir 'dClock']) || abs(mod(now,1)-2/24)>10/86400; return; end
-d = ['QA' datestr(now-1, 'yymm')];
-delete([hs.logDir d '.mat']);
-d = [datestr(now-1, 'yyyymmdd') '.' d '.' d];
-for i = 1:numel(dirs)
-    src = [hs.dicm dirs(i).name];
-    if isfolder(hs.backupDir) && ~strcmp(dirs(i).name, d)
-        system(['cp -p -r ' src ' ' hs.backupDir]);
-    end
-    rmdir(src, 's');
-end
+% if ~isfolder(hs.backupDir) || abs(mod(now,1)-2/24)>9/86400; return; end
+% for i = 1:numel(fs)
+%     src = [hs.dicm './' fs(i).name];
+%     [~, ~] = system(['rsync -a --relative ' src ' ' hs.backupDir]);
+%     [~, ~] = system(['echo ' fs(i).name '>>' hs.rootDir '/archived.txt']);
+% end
+
+% % Delete daily QA related
+% id = ['QA' datestr(now-1, 'yymm')];
+% i = endsWith({fs.name}, ['.' id '.' id]);
+% if any(i) && now-fs(i).datenum>1/24
+%     rmdir([hs.dicm fs(i).name], 's'); fs(i) = [];
+%     delete([hs.logDir id '.mat']);
+% end
+
+% % Move/Delete old subj folder around 2AM
+% if abs(mod(now,1)-2/24)>9/86400; return; end
+% for i = 1:numel(fs)
+%     src = [hs.dicm fs(i).name];
+%     if isfolder(hs.backupDir), system(['cp -p -r ' src ' ' hs.backupDir]); end
+%     rmdir(src, 's');
+% end
 
 %% Subfunction: get a parameter in CSA series ASC header: MrPhoenixProtocol
 function val = asc_header(s, key, dft)
