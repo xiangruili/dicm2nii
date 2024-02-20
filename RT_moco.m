@@ -11,7 +11,7 @@ function RT_moco()
 %  2. Set up real time image transfer at Siemens console.
 
 % 200207 xiangrui.li at gmail.com first working version inspired by FIRMM
-% 240115 drop support for mosaic
+% 240115 works for XA30 and drop support for mosaic
 
 % Create/re-use GUI and start timer
 fh = findall(0, 'Type', 'figure', 'Tag', 'RT_moco');
@@ -35,7 +35,8 @@ if ~isfolder(hs.logDir), mkdir(hs.logDir); end % folder to save subj.mat
 h = uimenu(fh, 'Label', '&Patient');
 hs.menu(1) = uimenu(h, 'Label', 'Load Patient', 'Callback', @loadSubj);
 hs.menu(2) = uimenu(h, 'Label', 'Redo Patient', 'Callback', @redoSubj);
-hs.menu(3) = uimenu(h, 'Label', 'Close Patient', 'Callback', @closeSubj);
+hs.menu(3) = uimenu(h, 'Label', 'Create QC Report', 'Callback', @QC_report);
+hs.menu(4) = uimenu(h, 'Label', 'Close Patient', 'Callback', @closeSubj);
 
 h = uimenu(fh, 'Label', '&Series');
 uimenu(h, 'Label', 'View Selected Series in 3D', 'Callback', @view_3D);
@@ -121,34 +122,33 @@ hs.img = image(ax, 'CData', ones(2)*0.94, 'CDataMapping', 'scaled');
 axis equal; colormap(ax, 'gray');
 hs.instnc = text(ax, 'Units', 'normalized', 'Position', [0.99 0.01], ...
     'Color', 'y', 'FontSize', 14, 'HorizontalAlignment', 'right', ...
-    'VerticalAlignment', 'bottom', 'UserData', 0);
+    'VerticalAlignment', 'bottom');
 
 ax = axes(pa1, 'Position', lbPos, 'Visible', 'off');
 hs.subj = text(ax, 'Position', subjPos, 'FontSize', 24, 'FontWeight', 'bold', ...
     'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none');
 hs.series = text(ax, 'Position', seriesPos, 'FontSize', 18, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
-    'BackgroundColor', fh.Color, 'Interpreter', 'none', 'UserData', [1 0]);
+    'BackgroundColor', fh.Color, 'Interpreter', 'none');
 hs.MMSS = text(ax, 'Position', msPos, 'FontSize', 18, 'FontWeight', 'bold', ...
     'HorizontalAlignment', ha, 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
     'BackgroundColor', fh.Color, 'String', {'' ''}, 'Color', 'b');
 
-set(fh, 'HandleVisibility', 'callback', 'Visible', 'on'); % fh.Resize = 'off';
+set(fh, 'HandleVisibility', 'off', 'Visible', 'on'); % fh.Resize = 'off';
 
 % set up serial port
-delete(instrfind('Tag', 'RTMM'));
 if ispc, port = 'COM1'; else, port = '/dev/ttyUSB0'; end % change this to yours
-hs.serial = serial(port, 'BaudRate', 115200, 'Terminator', '', 'Tag', 'RTMM', ...
-    'Timeout', 0.3, 'UserData', struct('fig', fh, 'send', false), ...
-    'BytesAvailableFcnCount', 1, 'BytesAvailableFcnMode', 'byte', ...
-    'BytesAvailableFcn', @serialRead); %#ok
-try fopen(hs.serial); catch, end
+try %#ok<*TRYNC>
+    hs.serial = serialport(port, 115200, 'Timeout', 0.3);
+    hs.serial.UserData = struct('fig', fh, 'send', false);
+    configureCallback(hs.serial, "byte", 1, @serialRead);  
+end
 
 hs.timer = timer('StartDelay', 5, 'ObjectVisibility', 'off', 'UserData', fh, ...
     'StopFcn', @saveResult, 'TimerFcn', @timerFcn, 'ErrorFcn', @errorLog);
 
 hs.countDown = timer('ExecutionMode', 'fixedRate', 'ObjectVisibility', 'off', ...
-    'TimerFcn', {@countDown hs}, 'UserData', 0);
+    'TimerFcn', {@countDown hs}, 'UserData', datetime);
 
 guidata(fh, hs); closeSubj(fh);
 start(hs.timer);
@@ -158,7 +158,8 @@ function errorLog(obj, evt) %#ok
 hs = guidata(obj.UserData);
 vnam = hs.series.String;
 if iscell(vnam) && numel(vnam)>1, vnam = vnam{1}; end
-vnam = genvarname("err_"+hs.subj.String+datestr(now,'_HHMM')+"_"+vnam);
+vnam = hs.subj.String+"_"+hs.series.UserData+"_"+hs.instnc.String+vnam;
+vnam = genvarname("err_"+vnam);
 eval(vnam +" = evt;");
 fnam = hs.logDir+"errorLog.mat";
 if isfile(fnam), save(fnam, vnam, '-append'); else, save(fnam, vnam); end
@@ -169,14 +170,16 @@ try doSeries(obj); catch me, errorLog(obj, me); end
 function doSeries(obj)
 hs = guidata(obj.UserData);
 hs.fig.Name(end) = 78 - hs.fig.Name(end); % dot/space switch: timer indicator
+if hs.timer.StartDelay > 1, return; end % no new series
 set(hs.menu, 'Enable', 'off'); set([hs.table hs.slider], 'Enable', 'inactive');
-[nam, new] = nextFile(hs);
+
+bNam = fullfile(hs.subj.UserData, hs.series.UserData);
+nam = dir([bNam '000001_*.dcm']);
 if isempty(nam), return; end
-s = dicm_hdr_wait(nam);
+s = dicm_hdr_wait(nam, []);
 if isempty(s), return; end % non-image dicom, skip series
-if size(hs.table.Data,1) && hs.table.Data{1,2}==s.SeriesNumber % current series
-    hs.table.Data{1,3} = numel(dir([seriesBase(nam) '*.dcm']));
-    return;
+if size(hs.table.Data,1)<1 && datetime-datetime(nam.date)<minutes(5)
+    save([hs.rootDir '/hdr_' hs.subj.String], 's'); % as new subj flag
 end
 
 hs.fig.WindowState = 'maximized';
@@ -184,21 +187,11 @@ L0 = java.awt.MouseInfo.getPointerInfo().getLocation();
 java.awt.Robot().mouseMove(L0.getX+9, L0.getY+9); % wake up screen
 pause(0.1); java.awt.Robot().mouseMove(L0.getX, L0.getY);
 
-if ischar(new) % reset GUI
-    closeSubj(hs.fig);
-    close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
-    hs.subj.String = new;
-    if now-getfield(dir(s.Filename), 'datenum')<5/1440
-        save([hs.rootDir '/hdr_' new], 's'); % as new subj flag
-    end
-end
-
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
 if hs.SBRef.Checked=="on" && endsWith(s.SeriesDescription, '_SBRef'), return; end
-% if startsWith(s.SequenceName, 'ABCD3d1'), return; end
+if startsWith(s.SequenceName, 'ABCD3d1'), return; end
+if strcmp(s.SeriesDescription, 'MoCoSeries'), return; end
 
-isDTI = contains(s.ImageType, '\DIFFUSION');
-isMoCo = contains(s.ImageType, '\MOCO');
 nTE = asc_header(s, 'lContrasts', 1);
 % fieldmap phase diff series: nTE=2, EchoNumber=2
 if (contains(s.ImageType, '\P\') && contains(s.SequenceName, 'fm2d')) || ...
@@ -214,6 +207,7 @@ if s.ICE_Dims(1) ~= "X" % coil not combined: no \CC: in ImageHistory
     nCh = asc_header(s, k, 1);
 end
 
+isDTI = contains(s.ImageType, '\DIFFUSION');
 if isDTI
     nTR = [];
     for i = 1:999
@@ -221,38 +215,24 @@ if isDTI
         if isempty(a), break; else, nTR(i) = a; end %#ok
     end
     nTR = nTR(1) + sum(nTR(2:end))*asc_header(s, 'sDiffusion.lDiffDirections');
-else
+else % ToDo: Reduce to real nTR for Sparse seq
     nTR = asc_header(s, 'lRepetitions', 0) + 1;
 end
-nIN = nTR * nTE * nCh;
-init_series(hs, s, nIN, nTR);
-if ~isMoCo, hs.series.String = seriesInfo(s); end
+hs.series.String = seriesInfo(s);
+init_series(hs, s, nTR);
 img = dicm_img(s);
 set_img(hs.img, img);
 drawnow; 
 
 % T1, T2, fieldmap etc: show info/img only
 if ~isDTI && ~contains(s.SequenceName, {'epfid2d' 'ASL'}) || nCh>1
-    nam = [seriesBase(nam) '*.dcm'];
-    tEnd = now + 9/86400; % wait several seconds for files to arrive
-    while now<tEnd
-        N = numel(dir(nam));
-        if N<nIN, pause(0.2); else, break; end
-    end
-    if N>nIN, hs.table.Data{1,3} = N; end
-    hs.instnc.UserData = hs.instnc.UserData + N - 1; 
     hs.instnc.String = '1';
     hs.slider.Value = 1;
     return;
 end
 
-if isempty(nIN) || endsWith(s.SeriesDescription, '_SBRef'), nIN = 1; end
 if nTR>5 && hs.countDown.Running == "off" % work for EPI without tricks
-    a = dir(s.Filename);
-    try dClock = str2double(fileread([hs.rootDir 'dClock']))/86400;
-    catch, dClock = 0;
-    end
-    hs.countDown.UserData = a.datenum -dClock + (nTR-1)*asc_header(s,'alTR[0]')/864e8;
+    hs.countDown.UserData = datetime(nam.date) + seconds((nTR-1)*asc_header(s,'alTR[0]')/1e6);
     start(hs.countDown);
 end
 try stopAt = str2double(regexp(s.ImageComments, '(?<=stopAt:)\d*', 'match', 'once')); 
@@ -271,71 +251,98 @@ R1 = inv(p.R0);
 m6 = zeros(2,6);
 dict = dicm_dict('', {'Rows' 'Columns' 'BitsAllocated' 'InstanceNumber'});
 for i = 2:nTR
-    tEnd = now + 20/86400; % 20 secs no img coming, treat as stopped series
-    N = hs.instnc.UserData;
-    while now<tEnd
-        [nam, new] = nextFile(hs);
-        if ~isequal(new, false), return; end
+    tEnd = datetime + seconds(20); % treat as stopped series if timeout
+    iNam = sprintf('%s%06i_*.dcm', bNam, nTE*nCh*(i-1)+1);
+    while datetime<tEnd
+        nam = dir(iNam);
+        if isempty(nam), pause(0.2); else, break; end
+        if startsWith(hs.MMSS.String{2}, 'Finished'), return; end
         if hs.countDown.Running=="on", countDown(hs.countDown, 0, hs); end
-        if hs.serial.Status=="open", serialRead(hs.serial); end
-        if hs.instnc.UserData-N == nTE*nCh, break; end
-        pause(0.2);
+        if isfield(hs, 'serial'), serialRead(hs.serial); end
     end
     if isempty(nam), return; end % timeout
     s = dicm_hdr_wait(nam, dict);
-    iN = s.InstanceNumber;
-    if nTE>1, iN = i; end % fake InstanceNumber for multi-echo EPI
     img = dicm_img(s);
+    if ~isequal(numel(img), numel(img0)), return; end % bad last Instance
     img = double(img(:,:,:));
-    hs.img.UserData(iN) = mean(img(:)); 
-    set_img(hs.img, img); hs.instnc.String = num2str(iN);
-    hs.slider.Value = iN; % show progress
+    hs.img.UserData(i) = mean(img(:)); 
+    set_img(hs.img, img); hs.instnc.String = num2str(i);
+    hs.slider.Value = i; % show progress
     if isDTI, continue; end % give up for now
     
-    if isMoCo % FD from dicom hdr, DV uses MoCo img for now
-        s1 = dicm_hdr(nam, dicm_dict('Siemens', {'RBMoCoTrans' 'RBMoCoRot'}));
-        m6(2,:) = [s1.RBMoCoTrans; s1.RBMoCoRot];
-    else
-        p.F.Values = smooth_mc(img, p.sz);
-        [m6(2,:), R1] = moco_estim(p, R1);
-    end
+
+    p.F.Values = smooth_mc(img, p.sz);
+    [m6(2,:), R1] = moco_estim(p, R1);
     a = abs(m6(2,:) - m6(1,:)); m6(1,:) = m6(2,:);
-    hs.fd.YData(iN) = sum([a(1:3) a(4:6)*50]); % 50mm: brain radius
+    hs.fd.YData(i) = sum([a(1:3) a(4:6)*50]); % 50mm: brain radius
     
     a = img(:) - img0(:);
-    hs.dv.YData(iN) = sqrt(a'*a / numel(a)) / p.mean;
+    hs.dv.YData(i) = sqrt(a'*a / numel(a)) / p.mean;
     img0 = img;
-    if hs.serial.UserData.send
-        fwrite(hs.serial, uint8(hs.dv.YData(iN) / hs.ax.YAxis(1).Limits(2)*255));
+    if isfield(hs, 'serial') && hs.serial.UserData.send
+        hs.serial.write(hs.dv.YData(i)/hs.ax.YAxis(1).Limits(2)*255, 'uint8');
     end
     
-    a = hs.dv.YData(1:iN); a = [0 a(~isnan(a))];
-    dy = hs.ax.UserData; fd = hs.fd.YData(1:iN);
+    a = hs.dv.YData(1:i); a = [0 a(~isnan(a))];
+    dy = hs.ax.UserData; fd = hs.fd.YData(1:i);
     N = {numel(a) sum(a<dy(2)) sum(a<dy(3))};
     hs.table.Data(1,3:6) = [N mean(fd, 'omitnan')];
     for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', N{j+1}/N{1}*100); end
     if i==2, set(hs.pct, 'Visible', 'on'); end
     if N{2}>=stopAt, [~, ~] = system(['touch "' hs.rootDir 'StopScan"']); end
-    if iN>=nIN, return; end % ISSS alike
-%     drawnow; % update instance for offline test
+    % drawnow; % update instance for offline test
 end
 
-%% Reshape mosaic into volume, remove padded zeros
-function vol = mos2vol(mos, nSL)
-nMos = ceil(sqrt(nSL)); % nMos x nMos tiles for Siemens
-[nr, nc] = size(mos); % number of row & col in mosaic
-nr = nr / nMos; nc = nc / nMos; % number of row and col in slice
-vol = zeros([nr nc nSL], class(mos));
-for i = 1:nSL
-    r = floor((i-1)/nMos) * nr + (1:nr); % 2nd slice is tile(1,2)
-    c =    mod(i-1, nMos) * nc + (1:nc);
-    vol(:, :, i) = mos(r, c);
+%% new series or new subj: update hs.subj and hs.series.UserData
+% XA30 dicm name format: 002_000003_000001_1..UID.dcm
+% 1st for Study, 2nd for Series, 3rd for Instance, then long UID, .dcm
+% Only Instance starts with 1 and continuous (the code relies on this)
+function new = new_series(hs)
+try setCountDown(hs); end
+f = hs.subj.UserData;
+if ~isempty(f) % check next file for current subj
+    nams = dir([f '/*_*_000001*.dcm']); % 1st instance for all series
+    i = find(startsWith({nams.name}, hs.series.UserData), 1);
+    if i < numel(nams)
+        hs.series.UserData = nams(i+1).name(1:11);
+        new = true; return;
+    end
 end
+new = false;
+fs = dir([hs.dicm '20*']); % subj folder format: yyyymmdd.PatientName.PatientID
+valid = cellfun(@(c)~isempty(regexp(c,'\d{8}\.[\w\d]+\.[\w\d]+','once')), {fs.name});
+fs = fs(valid & [fs.isdir]);
+for i = numel(fs):-1:1
+    subj = regexp(fs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
+    subj = regexprep(subj, '[_\s]', '');
+    if isfile([hs.logDir subj '.mat']), continue; end
+    closeSubj(hs.fig);
+    hs.subj.UserData = fullfile(fs(i).folder, fs(i).name);
+    hs.subj.String = subj;
+    nams = dir([hs.subj.UserData '/*_*_000001*.dcm']);
+    hs.series.UserData = nams(1).name(1:11);
+    new = true; return;
+end
+if ~isfile([hs.rootDir 'dClock']); return; end % rest only for RTMM computer
+QC_report(hs.subj);
+
+% Backup subj folder around 2AM
+if ~isfolder(hs.backupDir) || abs(datetime-datetime('today')-hours(2))>seconds(9); return; end
+for i = 1:numel(fs)
+    f = fs(i).name;
+    if isempty(regexp(f, '\d{8}\.\d{4,6}\w{2}', 'once')), continue; end
+    if isfolder([hs.backupDir f]), continue; end
+    [err, str] = system(['cp -p -r ' hs.dicm f ' ' hs.backupDir]);
+    if err, errorLog(hs.timer, str); return; end
+end
+fid = fopen([hs.rootDir '/archived.txt'], 'a');
+fprintf(fid, '%s\r\n', fs.name);
+fclose(fid);
 
 %% Initialize GUI for a new series
-function init_series(hs, s, nIN, nTR)
+function init_series(hs, s, nTR)
 fid = fopen([hs.rootDir 'currentSeries.txt'], 'w');
-fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), dicmTime(s));
+fprintf(fid, '%s_%s_%s', s.PatientName, asc_header(s, 'tProtocolName'), s.AcquisitionDateTime(3:12));
 fclose(fid);
 
 set(hs.slider, 'Max', nTR, 'Value', 1, 'UserData', seriesBase(s.Filename));
@@ -343,7 +350,6 @@ if nTR==1, hs.slider.Visible = 'off';
 else, set(hs.slider, 'SliderStep', [1 1]./(nTR-1)); hs.slider.Visible = 'on';
 end
 hs.dv.YData = nan(nTR,1); hs.fd.YData = nan(nTR,1); hs.img.UserData = nan(nTR,1);
-hs.fig.UserData.nIN{end+1} = nIN;
 if nTR>1
     set([hs.ax hs.pct], 'Visible', 'on');
     hs.ax.XLim(2) = nTR + 0.5;
@@ -355,7 +361,7 @@ set(hs.resp, 'XData', nan, 'YData', 1); update_resp(hs);
 set([hs.instnc hs.pct], 'String', '');
 figure(hs.fig); drawnow; % bring GUI front if needed
 if contains(s.ImageType, '\MOCO'), return; end
-hs.table.Data = [{s.SeriesDescription s.SeriesNumber nIN [] [] []}; hs.table.Data];
+hs.table.Data = [{s.SeriesDescription s.SeriesNumber 1 [] [] []}; hs.table.Data];
 hs.fig.UserData.hdr{end+1} = s; % 1st instance
 
 pat = asc_header(s,'sPat.lAccelFactPE', 1);
@@ -390,10 +396,9 @@ c{1} = s.SeriesDescription;
 if numel(c{1})>24, c{1} = [c{1}(1:16) '...' c{1}(end-3:end)]; end
 c{2} = sprintf('Series %g', s.SeriesNumber);
 % if s.StudyID~="1", c{2} = ['Study ' s.StudyID ', ' c{2}]; end
-dcmT = dicmTime(s);
-c{3} = datestr(datenum(dcmT, 'yymmddHHMMSS.fff'), 'HH:MM:SS AM');
-c{4} = datestr(datenum(dcmT, 'yymmdd'), 'ddd, mmm dd, yyyy');
-try c{5} = sprintf('TR = %g', asc_header(s, 'alTR[0]')/1000); catch, end
+c{3} = dicmDT(s, 'h:mm:ss a');
+c{4} = dicmDT(s, 'eee, MMM d, y');
+try c{5} = sprintf('TR = %g', asc_header(s, 'alTR[0]')/1000); end
 
 %% toggle FD display on/off
 function toggleFD(h, ~)
@@ -438,11 +443,12 @@ iR = size(C,1) - iT + 1;
 dV = hs.fig.UserData.DV{iR};
 hs.fd.YData = hs.fig.UserData.FD{iR};
 hs.dv.YData = dV;
+nTR = numel(dV);
 if numel(dV)<2 || isnan(dV(2))
     set([hs.ax hs.pct], 'Visible', 'off');
 else    
     set([hs.ax hs.pct], 'Visible', 'on');
-    for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', C{iT,j+3}/C{iT,3}*100); end
+    for j = 1:2, hs.pct(j).String = sprintf('%.3g%%', C{iT,j+3}/nTR*100); end
     hs.resp(1).Parent.XLim(2) = hs.ax.XLim(2);
     try
         for i = 1:3
@@ -458,16 +464,15 @@ hs.series.String = C{iT,1}; % in case hdr not saved
 try s = hs.fig.UserData.hdr{iR}; catch, set_img(hs.img, inf(2)); return; end
 if ~isfile(s.Filename), s.Filename = strrep(s.Filename, hs.dicm, hs.backupDir); end
 
-nIN = C{iT,3};
-iIN = ceil(nIN/2); % start with middle Instance if avail
+iIN = ceil(nTR/2); % start with middle Instance if avail
 nam = dir(sprintf('%s%06g.dcm', seriesBase(s.Filename), iIN));
 if isempty(nam), iIN = 1; nam = s;
 else, nam = fullfile(nam(1).folder, nam(1).name);
 end
 hs.instnc.String = num2str(iIN);
-set(hs.slider, 'Max', nIN, 'Value', iIN, 'UserData', seriesBase(s.Filename));
-if nIN == 1, hs.slider.Visible = 'off';
-else, set(hs.slider, 'SliderStep', [1 1]./(nIN-1)); hs.slider.Visible = 'on';
+set(hs.slider, 'Max', nTR, 'Value', iIN, 'UserData', seriesBase(s.Filename));
+if nTR == 1, hs.slider.Visible = 'off';
+else, set(hs.slider, 'SliderStep', [1 1]./(nTR-1)); hs.slider.Visible = 'on';
 end
 hs.ax.XLim(2) = numel(hs.dv.YData) + 0.5;
 hs.series.String = seriesInfo(s);
@@ -479,36 +484,39 @@ function loadSubj(h, ~)
 hs = guidata(h);
 [fname, pName] = uigetfile([hs.logDir '*.mat'], 'Select MAT file for a Patient');
 if isnumeric(fname), return; end
-load([pName '/' fname], 'T3');
+load([pName '/' fname], 'T3'); % T4 later
 hs.fig.UserData = T3.Properties.UserData; 
 DV = hs.fig.UserData.DV;
-N = size(T3, 1);
-C = flip(table2cell(T3), 1); C(:,6) = C(:,3);
+[N, M] = size(T3);
+C = flip(table2cell(T3), 1); C(:,6) = C(:,M);
 dy = hs.ax.UserData;
 for i = 1:N
     a = DV{N-i+1}; a = [0 a(~isnan(a))];
-    if numel(a)<2, C(i,3:5) = {numel(a) [] []};
-    else, C(i,3:5) = {numel(a) sum(a<dy(2)) sum(a<dy(3))};
+    if numel(a)<2, C(i,4:5) = {[] []};
+    else, C(i,4:5) = {sum(a<dy(2)) sum(a<dy(3))};
     end
-    try C{i,3} = hs.fig.UserData.nIN{N-i+1}; end
+    if M<4, C{i,3} = numel(a); end % did not save this before 240205
 end 
 hs.table.Data = C;
-s = hs.fig.UserData.hdr{end};
-hs.subj.String = regexprep(s.PatientName, '[_\s]', '');
-[hs.subj.UserData, nam] = fileparts(s.Filename);
-hs.series.UserData = sscanf(nam, '%u_%u', 1:2);
+fnam = hs.fig.UserData.hdr{end}.Filename;
+[hs.subj.UserData, nam] = fileparts(fnam);
+subj = regexp(hs.subj.UserData, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
+hs.subj.String = regexprep(subj, '[_\s]', '');
+hs.series.UserData = nam(1:11);
 tableCB(hs.table, struct('Indices', [1 1])); % show top series
 
 %% close subj
 function closeSubj(h, ~)
 hs = guidata(h);
-hs.table.Data = {};
+hs.table.Data = cell(0,6);
 hs.img.CData = ones(2)*0.94;
 hs.fd.YData = nan; hs.dv.YData = nan;
 c = {{}};
-hs.fig.UserData = struct('FD', c, 'DV', c, 'hdr', c, 'resp', c, 'GM', c, 'nIN', c);
+hs.fig.UserData = struct('FD', c, 'DV', c, 'hdr', c, 'resp', c, 'GM', c);
 set([hs.subj hs.series hs.instnc], 'String', '');
+set([hs.subj hs.series], 'UserData', '');
 set(hs.pct, 'Visible', 'off');
+close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer')); % last subj if any
 
 %% Re-do current subj: useful in case of error during a session
 function redoSubj(h, ~)
@@ -519,8 +527,9 @@ if ~isfolder(hs.subj.UserData)
     fprintf(2, 'Image for %s deleted?\n', subj);
     return;
 end
-try delete([hs.logDir subj '*.mat']); catch, end
+try delete([hs.logDir subj '*.mat']); end
 closeSubj(hs.fig)
+hs.subj.String = subj;
 
 %% Get reference vol info. Adapted from nii_moco.m
 function p = refVol(img, pixdim)
@@ -617,86 +626,6 @@ out = smooth3(F(J), 'gaussian'); % sz=3
 F = griddedInterpolant(J, out, intp);
 out = F(I);
 
-%% Return next file name. new=1 for new series; new=subj for new subj
-function [nam, new] = nextFile(hs)
-nam = ''; new = false;
-try setCountDown(hs); catch, end
-QC_report(hs.rootDir);
-f = hs.subj.UserData;
-if ~isempty(f) % check next file for current subj
-    N = hs.instnc.UserData;
-    nams = dir([f '/*.dcm']);
-    if numel(nams) > N % new file avail
-        hs.instnc.UserData = N+1;
-        nam = fullfile(f, nams(N+1).name);
-        iR = sscanf(nams(N+1).name, '%3u_%6u', [1 2]);
-        new = ~isequal(iR, hs.series.UserData);
-        if new, hs.series.UserData = iR; end
-        return;
-    end
-end
-fs = dir([hs.dicm '20*']); % check new subj
-valid = cellfun(@(c)~isempty(regexp(c,'\d{8}\.[\w\d]+\.[\w\d]+','once')), {fs.name});
-fs = fs(valid & [fs.isdir]);
-for i = numel(fs):-1:1
-    subj = regexp(fs(i).name, '(?<=\d{8}\.).*?(?=\.)', 'match', 'once');
-    subj = regexprep(subj, '[_\s]', '');
-    if isfile([hs.logDir subj '.mat']), continue; end
-    new = subj; % new subj
-    f = fullfile(fs(i).folder, fs(i).name);
-    hs.subj.UserData = f;
-    hs.instnc.UserData = 1;
-    nams = dir([f '/*.dcm']);
-    nam = fullfile(f, nams(1).name);
-    hs.series.UserData = sscanf(nams(1).name, '%3u_%6u', [1 2]);
-    return;
-end
-if ~isfile([hs.rootDir 'dClock']); return; end % rest only for RTMM computer
-
-% Delete daily QA related
-% id = ['QA' datestr(now-1, 'yymm')];
-% [~, ~] = system(['rm ' hs.logDir id '.mat']);
-% fs(endsWith({fs.name}, ['.' id '.' id])) = [];
-% i = endsWith({fs.name}, ['.' id '.' id]);
-% if any(i) && now-fs(i).datenum>1/24
-%     rmdir([hs.dicm fs(i).name], 's'); fs(i) = [];
-%     delete([hs.logDir id '.mat']);
-% end
-
-if ~isfolder(hs.backupDir) || abs(mod(now,1)-2/24)>9/86400; return; end
-for i = 1:numel(fs)
-    if isfolder([hs.backupDir fs(i).name]), continue; end
-    [err, str] = system(['cp -p -r ' hs.dicm fs(i).name ' ' hs.backupDir]);
-    if err, errorLog(hs.timer, str); return; end
-end
-fid = fopen([hs.rootDir '/archived.txt'], 'a');
-fprintf(fid, '%s\r\n', fs.name);
-fclose(fid);
-
-% Move/Delete old subj folder around 2AM
-% if ~isfolder(hs.backupDir) || abs(mod(now,1)-2/24)>9/86400; return; end
-% for i = 1:numel(fs)
-%     src = [hs.dicm './' fs(i).name];
-%     [~, ~] = system(['rsync -a --relative ' src ' ' hs.backupDir]);
-%     [~, ~] = system(['echo ' fs(i).name '>>' hs.rootDir '/archived.txt']);
-% end
-
-% % Delete daily QA related
-% id = ['QA' datestr(now-1, 'yymm')];
-% i = endsWith({fs.name}, ['.' id '.' id]);
-% if any(i) && now-fs(i).datenum>1/24
-%     rmdir([hs.dicm fs(i).name], 's'); fs(i) = [];
-%     delete([hs.logDir id '.mat']);
-% end
-
-% % Move/Delete old subj folder around 2AM
-% if abs(mod(now,1)-2/24)>9/86400; return; end
-% for i = 1:numel(fs)
-%     src = [hs.dicm fs(i).name];
-%     if isfolder(hs.backupDir), system(['cp -p -r ' src ' ' hs.backupDir]); end
-%     rmdir(src, 's');
-% end
-
 %% Subfunction: get a parameter in CSA series ASC header: MrPhoenixProtocol
 function val = asc_header(s, key, dft)
 if nargin>2, val = dft; else, val = []; end
@@ -736,14 +665,16 @@ else % decimal
 end
 
 %% Wait till a file copy is complete
-function s = dicm_hdr_wait(varargin)
-tEnd = now + 1/86400; % wait up to 1 second
+function s = dicm_hdr_wait(nam, dict)
+tEnd = datetime + seconds(2); % wait till file ready
+nam = [nam.folder '/' nam.name];
 while 1
-    s = dicm_hdr(varargin{:});
-    try %#ok<*TRYNC> maybe too strict to be equal? Test indicates always equal 
-        if s.PixelData.Start+s.PixelData.Bytes == s.FileSize, return; end
+    s = dicm_hdr(nam, dict);
+    try
+        if s.PixelData.Start+s.PixelData.Bytes <= s.FileSize, return; end
+    catch me
     end
-    if now>tEnd, s = []; return; end % give up
+    if datetime>tEnd, fprintf(2,'%s\n', nam); rethrow(me); end % give up
     pause(0.1);
 end
 
@@ -751,9 +682,9 @@ end
 function closeFig(fh, ~)
 hs = guidata(fh);
 delete(fh);
-try delete(hs.serial); catch, end
-try hs.timer.StopFcn = ''; catch, end
-try tObj = timerfindall; stop(tObj); delete(tObj); catch, end
+try hs.timer.StopFcn = ''; end
+try tObj = timerfindall; stop(tObj); delete(tObj); end
+clear hs; % close serialport
 
 %% menu callback for both DERIVED and _SBRef
 function toggleChecked(h, ~)
@@ -819,42 +750,49 @@ hs.instnc.String = num2str(h.Value);
 function saveResult(obj, ~)
 hs = guidata(obj.UserData);
 set([hs.menu hs.table hs.slider], 'Enable', 'on');
-if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series to save?
+toSave = false;
+if size(hs.table.Data,1)
+    N = numel(dir([seriesBase(hs.fig.UserData.hdr{end}.Filename) '*.dcm']));
+    if N > hs.table.Data{1,3}
+        hs.table.Data{1,3} = N; % update instances
+        toSave = true;
+    end
+end
+if size(hs.table.Data,1) > numel(hs.fig.UserData.FD) % new series done
+    if isfield(hs, 'serial'), hs.serial.UserData.send = false; end % stop sending
     hs.fig.UserData.FD{end+1} = hs.fd.YData;
     hs.fig.UserData.DV{end+1} = hs.dv.YData;
     hs.fig.UserData.GM{end+1} = hs.img.UserData;
     hs.fig.UserData.resp{end+1} = {hs.resp.XData};
-    T3 = cell2table(flip(hs.table.Data(:,[1 2 6]), 1), ...
-        'VariableNames', {'Description' 'SeriesNumber' 'MeanFD'});
+    toSave = true;
+end
+if toSave
+    T3 = cell2table(flip(hs.table.Data(:,[1:3 6]), 1), ...
+        'VariableNames', {'Description' 'SeriesNumber' 'Instances' 'MeanFD'});
     T3.Properties.UserData = hs.fig.UserData;
     save([hs.logDir hs.subj.String], 'T3');
-    hs.serial.UserData.send = false; % stop until asked again
 end
-if numel(dir([hs.subj.UserData '/*.dcm'])) > hs.instnc.UserData
-    obj.StartDelay = 0.1; 
-else
-    obj.StartDelay = 5;
-end
+if new_series(hs), obj.StartDelay = 0.1; else, obj.StartDelay = 5; end
 start(obj);
 
 %% Serial BytesAvail callback: update response: 1=missed, 2=incorrect, 3=correct 
 function serialRead(s, ~)
-if s.BytesAvailable<1, return; end
-b = fread(s, 1);
+if s.NumBytesAvailable<1, return; end
+b = s.read(1, 'uint8');
 hs = guidata(s.UserData.fig);
-if     b == '?', fwrite(s, uint8('RTMM')); return; % identity
-elseif b == 'P', fwrite(s, uint8(hs.subj.String)); return; % PatientName
-elseif b == 'T', fwrite(s, uint8(strjoin(hs.MMSS.String))); return; % count down
-elseif b == 'M', s.UserData.send = true; return; % start to send motion info
+if     b == '?', s.write('RTMM', 'char'); % identity
+elseif b == 'P', s.write(hs.subj.String, 'char'); % PatientName
+elseif b == 'T', s.write(strjoin(hs.MMSS.String), 'char'); % count down
+elseif b == 'M', s.UserData.send = true; % start to send motion info
 elseif b == 'Q' % stim computer asks to stop scan
-    [~, ~] = system(['touch "' hs.rootDir 'StopScan"']); return;
-elseif b<1 || b>3, return; % ignore for now
+    [~, ~] = system(['touch "' hs.rootDir 'StopScan"']);
+elseif b>0 && b<4 % response
+    x = find(~isnan(hs.dv.YData), 1, 'last');
+    if x == numel(hs.dv.YData), return; end % not running
+    if isempty(x), x = 0; end
+    hs.resp(b).XData(end+1) = x + 1; hs.resp(b).YData(end+1) = 1;
+    update_resp(hs);
 end
-x = find(~isnan(hs.dv.YData), 1, 'last');
-if x == numel(hs.dv.YData), return; end % not running
-if isempty(x), x = 0; end
-hs.resp(b).XData(end+1) = x + 1; hs.resp(b).YData(end+1) = 1;
-update_resp(hs);
 
 %% update response text
 function update_resp(hs)
@@ -875,10 +813,10 @@ delete(nam);
 % From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec
 c = regexp(c, '"(.*?)" "(.*?)" (\d+)', 'tokens', 'once');
 if isempty(c), return; end % MeasFinished?
-tStart = datenum(c{1}, 'yyyy/mm/dd-HH:MM:SS.fff');
-dClock = str2double(fileread([hs.rootDir 'dClock']))/86400;
-tFnsh = tStart - dClock + str2double(c{3})/86400;
-if tFnsh-now < 2/86400, return; end
+tStart = datetime(c{1}, 'Format', 'yyyy/MM/dd-HH:mm:ss.SSSSSS');
+dClock = load([hs.rootDir 'dClock'], '-ascii');
+tFnsh = tStart + seconds(str2double(c{3})-dClock);
+if tFnsh-datetime < seconds(2), return; end
 hs.countDown.UserData = tFnsh;
 if numel(c{2})>24, c{2} = [c{2}(1:16) '...' c{2}(end-3:end)]; end
 hs.MMSS.String = {c{2} ''};
@@ -886,15 +824,15 @@ if hs.countDown.Running=="off", start(hs.countDown); end
 
 %% timer func to show scanning time
 function countDown(tObj, ~, hs)
-t = tObj.UserData - now;
-if t<1/86400, stop(tObj); hs.MMSS.String = {'' ''}; return; end
-hs.MMSS.String{2} = ['Scanning ' datestr(t, 'MM:SS')];
+t = tObj.UserData - datetime; t.Format = 'mm:ss';
+if t<seconds(1), stop(tObj); hs.MMSS.String = {'' ''}; return; end
+hs.MMSS.String{2} = ['Scanning ' char(t)];
 nam = hs.rootDir + "SyngoMeas";
 if ~isfile(nam), return; end
 if ~startsWith(fileread(nam), "Finished"), return; end
 delete(nam);
 stop(tObj);
-hs.MMSS.String{2} = ['Finished ' datestr(t, 'MM:SS')];
+hs.MMSS.String{2} = ['Finished ' char(t)];
 
 %% get CLim for dicom img
 function mx = imgClim(img)
@@ -903,22 +841,28 @@ im = im(im>max(im)/10);
 mx = mean(im) + 2*std(im);
 
 %% Create QC report
-function QC_report(rootDir)
-nam = dir([rootDir 'closed_*']);
-if isempty(nam) || now-nam(1).datenum<1/1440 || ...
-        isfile([rootDir 'EyelinkRecording.mat']); return; end
-nam = [rootDir nam(1).name];
-done = onCleanup(@()movefile(nam, strrep(nam, 'closed_', 'done_'))); 
+function QC_report(h, ~)
+hs = guidata(h);
+if nargin>1 % calling from menu
+    subj = hs.subj.String;
+else
+    nam = dir([hs.rootDir 'closed_*']);
+    if isempty(nam) || datetime-datetime(nam(1).date)<seconds(1) || ...
+            isfile([hs.rootDir 'EyelinkRecording.mat']); return; end
+    nam = [hs.rootDir nam(1).name];
+    done = onCleanup(@()movefile(nam, strrep(nam, 'closed_', 'done_')));
+    subj = regexp(nam, '(?<=closed_)\d{4}\w{2}$', 'match', 'once');
+end
 rmQC = onCleanup(@()delete('./tmp_QC_*.pdf'));
-subj = regexp(nam, '(?<=closed_)\d{4}\w{2}$', 'match', 'once');
-try load([rootDir 'RTMM_log/' subj '.mat'], 'T3'); catch, return; end
+try load([hs.rootDir 'RTMM_log/' subj '.mat'], 'T3'); catch, return; end
 uDat = T3.Properties.UserData;
 
-close all; delete('./tmp_QC_*.pdf');
+delete('./tmp_QC_*.pdf');
 fig = figure('Position', [10 30 [8.5 11]*96], 'Units', 'normalized');
+closeFig = onCleanup(@()delete(fig));
 set(fig, 'Color', 'w', 'PaperUnits', 'normalized', 'PaperPosition', [0 0 1 1]);
 ax = axes(fig, 'Position', [0.01 0.955 0.98 0.045], 'Visible', 'off');
-try imshow('./logo.png', 'Parent', ax); ax.HandleVisibility = 'off'; catch, end
+try imshow('./logo.png', 'Parent', ax); ax.HandleVisibility = 'off'; end
 
 layout = getpref('nii_viewer_para', 'layout');
 if layout ~= 1
@@ -929,8 +873,7 @@ end
 ax = axes(fig, 'Position', [0.1 0.92 0.8 0.03], 'Visible', 'off');
 text(ax, 0.5, 1, subj, 'FontSize', 18, 'HorizontalAlignment', 'center');
 s = uDat.hdr{1};
-dat = datestr(datenum(dicmTime(s,1), 'yymmdd'), 'dddd mmm dd, yyyy');
-text(ax, 0.5, 0, dat, 'FontSize', 12, 'HorizontalAlignment', 'center');
+text(ax, 0.5, 0, dicmDT(s,'eeee MMM d, y'), 'FontSize', 12, 'HorizontalAlignment', 'center');
 tbl = cell(0, 5);
 dict = dicm_dict('', {'AcquisitionDateTime' 'AcquisitionDate' ...
     'AcquisitionTime' 'SeriesNumber' 'SeriesDescription'});
@@ -939,21 +882,21 @@ for i = 1:uDat.hdr{end}.SeriesNumber+5
     nams = dir([bnam(1:end-7) sprintf('%06i_',i) '*.dcm']);
     if isempty(nams), continue; end
     s = dicm_hdr([nams(1).folder '/' nams(1).name], dict);
-    d = dicmTime(s); d = d(7:8)+":"+d(9:10)+":"+d(11:12);
     try a = T3.MeanFD{T3.SeriesNumber == s.SeriesNumber}; catch, a = []; end
-    tbl(end+1,:) = {s.SeriesNumber d numel(nams) s.SeriesDescription a}; %#ok
+    tbl(end+1,:) = {s.SeriesNumber dicmDT(s,'HH:mm:ss') numel(nams) s.SeriesDescription a}; %#ok
 end
 tbl = cellfun(@num2str, tbl, 'UniformOutput', false); % for left-align
 vName = {'SeriesNumber' 'Time' 'TotalInstances' 'Description' 'meanFD'};
-h = uitable(fig, 'Units', 'normalized', 'Position', [0.04 0.1 0.9 0.8], ...
+h = uitable(fig, 'Units', 'normalized', 'Position', [0.04 0.04 0.9 0.85], ...
     'FontSize', 12, 'RowName', [], 'ColumnName', vName, 'Data', tbl, ...
     'ColumnWidth', {96 96 108 342 82});
 i = size(tbl, 1);
-if i>40, h.FontSize = max(8, fix(450/i)); end
+if i>40, h.FontSize = max(6, fix(450/i)); end
+warning('off', 'MATLAB:print:ExcludesUIInFutureRelease');
 newPage(fig); y = 0.95;
 
 el = {}; clear EL;
-nam = dir([rootDir 'RTMM_log/' subj '_*.edf']);
+nam = dir([hs.rootDir 'RTMM_log/' subj '_*.edf']);
 while ~isempty(nam)
     tm = []; tg = []; pa = [];
     for i = numel(nam):-1:1 % in case of multiple files
@@ -978,14 +921,14 @@ end
 
 for i = 1:numel(uDat.hdr)
     s = uDat.hdr{i};
-    series = sprintf('%s (Series %g)', s.ProtocolName, s.SeriesNumber);
+    series = sprintf('%s (Series %g)', s.SeriesDescription, s.SeriesNumber);
     if contains(s.SequenceName, {'epfid2d' 'mbPCASL' 'ep_b0'}) % EPI/ASL/Diff
         fd = uDat.FD{i};
         N = find(~isnan(fd), 1, 'last');
         if isempty(N) || N<11 || all(fd==0), continue; end % skip slice check etc
         if y<0.35, newPage(fig); y = 0.95; end
         if exist('EL', 'var') && contains(s.SequenceName, 'epfid2d')
-            t0 = mod(datenum(dicmTime(s), 'yymmddHHMMSS.fff'), 1) * 86400;
+            t0 = seconds(timeofday(dicmDT(s)));
             [mi, j] = min(abs(EL.tg - t0));
             if mi<5 % recording started late if mi too large
                 TR = asc_header(s, 'alTR[0]')*1e-6;
@@ -1009,21 +952,24 @@ for i = 1:numel(uDat.hdr)
         plot(ax, gm, '.-m');
         set(ax, 'YTick', [], 'YLim', [-rg rg], 'XLim', [0 N+1], 'XTick', []);
         ylabel(ax, 'GM (%)', 'Color', 'm');
-        try ax = ax0; catch, end
+        try ax = ax0; end
         title(ax, series, 'Interpreter', 'none', 'FontSize', 12);
         % ylabel(ax, [char(916) 'GM (%)']);
         ax = axes(fig, 'Position', [0.1 y+0.03 0.8 0.16]);
-        yyaxis right; plot(ax, fd(1:N), '.-');
+        yyaxis(ax, 'right'); plot(ax, fd(1:N), '.-');
         ylabel(ax, 'FD (mm)'); xlabel(ax, 'Volume Number');
         set(ax, 'YTick', 0:0.6:1.8, 'YLim', [0 1.8], 'XLim', [0 N+1]);
         str = sprintf('meanFD=%.2g', mean(fd(2:N)));
         text(ax, 0.8, 0.9, str, 'Units', 'normalized', 'Color', [0.85 0.32 0.1]);
-        yyaxis left; plot(ax, uDat.DV{i}(1:N), '.-');
+        yyaxis(ax, 'left'); plot(ax, uDat.DV{i}(1:N), '.-');
         ylabel(ax, 'DVARS'); set(ax, 'YTick', 0:0.12:0.36, 'YLim', [0 0.3]);
-    elseif contains(s.SequenceName, {'tfl3d' 'spc' 'tse2d' 'fm2d' 'epse2d'}) % T1/T2/fmap
-        nams = dir([seriesBase(s.Filename) '*.dcm']);
+    elseif contains(s.SequenceName, {'tfl3d' 'tfl_me3d' 'spc' 'tse2d' 'fm2d' 'epse2d'})
+        if endsWith(s.SeriesDescription, '_setter'), continue; end
+        nams = dir([seriesBase(s.Filename) '000001*.dcm']);
         nams = strcat(nams(1).folder, '/', {nams.name});
-        fh = nii_viewer(dicm2nii(nams, ' ', 'no_save'));
+        nii = dicm2nii(nams, ' ', 'no_save');
+        if isempty(nii), continue; end
+        fh = nii_viewer(nii);
         nii_viewer('LocalFunc', 'nii_viewer_cb', [], [], 'center', fh);
         hsV = guidata(fh);
         drawnow; F = getframe(fh, hsV.frame.Position); close(fh); img = F.cdata;
@@ -1039,17 +985,27 @@ for i = 1:numel(uDat.hdr)
 end
 newPage(fig); close(fig);
 
-if ~isempty(el), save([rootDir 'RTMM_log/' subj '_eye.mat'], 'el'); end
-pdfNam = rootDir+"RTMM_log/"+subj+"_"+dicmTime(s,1)+"_QC.pdf";
-setenv('LD_LIBRARY_PATH', getenv('PATH'));
-[~, ~] = system("pdfunite ./tmp_QC_*.pdf "+pdfNam); % for Linux 
+if ~isempty(el), save([hs.rootDir 'RTMM_log/' subj '_eye.mat'], 'el'); end
+pdfNam = hs.rootDir+"RTMM_log/"+subj+"_"+dicmDT(s,'yyMMdd')+"_QC.pdf";
+PDFs = dir('./tmp_QC_*.pdf');
+mergePdfs({PDFs.name}, pdfNam); 
 
-%% print fig to a new PDF, called by QC_report()
+%% export fig to a new PDF, called by QC_report()
 function newPage(fig)
 nam = dir('./tmp_QC_*.pdf');
 if isempty(nam), i = 1; else, i = str2double(nam(end).name(8:10)) + 1; end
 print(fig, sprintf('./tmp_QC_%03i.pdf', i), '-dpdf');
+% exportapp(fig, sprintf('./tmp_QC_%03i.pdf', i)); % for uifigure
 clf(fig);
+
+%% merge PDFs, by Benjamin Großmann
+% https://www.mathworks.com/matlabcentral/fileexchange/89127-merge-pdf-documents
+function mergePdfs(INs, out)
+memSet = org.apache.pdfbox.io.MemoryUsageSetting.setupMainMemoryOnly();
+merger = org.apache.pdfbox.multipdf.PDFMergerUtility;
+cellfun(@(f) merger.addSource(f), INs);
+merger.setDestinationFileName(out);
+merger.mergeDocuments(memSet);
 
 %% 3D to mos: for display purpose
 function mos = vol2mos(vol)
@@ -1066,14 +1022,9 @@ for i = 0:nMos-1
     end
 end
 
-%% return dicm dateTime in yymmddHHMMSS.fff
-function dt = dicmTime(s, dateOnly)
-if isfield(s, 'AcquisitionDateTime')
-    dt = s.AcquisitionDateTime(3:end);
-elseif isfield(s, 'AcquisitionDate')
-    dt = [s.AcquisitionDate(3:8) s.AcquisitionTime];
-else
-    a = dir(s.Filename); dt = datestr(a.datenum, 'yymmddHHMMSS.fff');
-end
-if nargin>1 && dateOnly, dt = dt(1:6); end
+%% return datetime obj, or date/time str if fmt provided
+function dt = dicmDT(s, fmt)
+dt = datetime(s.AcquisitionDateTime, 'InputFormat', 'yyyyMMddHHmmss.SSSSSS');
+if nargin>1, dt.Format = fmt; dt = char(dt); end
+
 %%
