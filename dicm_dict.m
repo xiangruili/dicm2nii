@@ -579,6 +579,7 @@ if strncmpi(vendor, 'SIEMENS', 7)
 	'0021' '1038' 'DS' 'TransmitterCalibration'
 	'0021' '103B' 'DS' 'dBdt_limit'
 	'0021' '103D' 'CS' 'PhaseSliceOversampling'
+    '0021' '103F' 'UT' 'AutoAlignData'
 	'0021' '1043' 'UT' 'FmriExternalInfo'
 	'0021' '1044' 'DS' 'B1rms'
 	'0021' '1045' 'CS' 'B1rmsSupervision'
