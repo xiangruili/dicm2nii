@@ -1006,8 +1006,7 @@ hist = afni_key('HISTORY_NOTE');
 i = strfind(hist, 'Time:') + 6;
 if ~isempty(i)
     dat = sscanf(hist(i:end), '%11c', 1); % Mar  1 2010
-    dat = datenum(dat, 'mmm dd yyyy');
-    s.AcquisitionDateTime = datestr(dat, 'yyyymmdd');
+    s.AcquisitionDateTime = char(datetime(dat, 'InputFormat', 'MMM d y', 'Format', 'yMMdd'));
 end
 i = strfind(hist, 'Sequence:') + 9;
 if ~isempty(i), s.SequenceName = strtok(hist(i:end), ' '); end
@@ -1263,7 +1262,8 @@ s.ImagePositionPatient = pos(:,1);
 s.LastFile.ImagePositionPatient = pos(:,2);
 
 % Following make dicm2nii happy
-s.SeriesInstanceUID = sprintf('%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999));
+tim = char(datetime("now", 'Format', 'yyMMddHHmmssSSS'));
+s.SeriesInstanceUID = sprintf('%s_%03x', tim, randi(999));
 end
 
 %% subfunction: read Freesurfer mgh or mgz file, return dicm info dicm_hdr.
