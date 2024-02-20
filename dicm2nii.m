@@ -179,20 +179,19 @@ if bids && verLessThanOctave
 end
 
 if (isnumeric(fmt) && any(fmt==[0 1 4 5])) || ...
-        (ischar(fmt) && ~isempty(regexpi(fmt, 'nii')))
+        (ischar(fmt) && containsI(fmt, 'nii'))
     ext = '.nii';
-elseif (isnumeric(fmt) && any(fmt==[2 3 6 7])) || (ischar(fmt) && ...
-        (~isempty(regexpi(fmt, 'hdr')) || ~isempty(regexpi(fmt, 'img'))))
+elseif (isnumeric(fmt) && any(fmt==[2 3 6 7])) || (ischar(fmt) && containsI(fmt, {'hdr' 'img'}))
     ext = '.img';
 else
     error(' Invalid output file format (the 3rd input).');
 end
 
-if (isnumeric(fmt) && mod(fmt,2)) || (ischar(fmt) && ~isempty(regexpi(fmt, '.gz')))
+if (isnumeric(fmt) && mod(fmt,2)) || (ischar(fmt) && containsI(fmt, '.gz'))
     ext = [ext '.gz']; % gzip file
 end
 
-rst3D = (isnumeric(fmt) && fmt>3) || (ischar(fmt) && ~isempty(regexpi(fmt, '3D')));
+rst3D = (isnumeric(fmt) && fmt>3) || (ischar(fmt) && containsI(fmt, '3D'));
 
 if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
     create_gui; % show GUI if input is not enough
@@ -381,10 +380,10 @@ for i = 1:numel(h)
     end
 end
 
-%% remove last instance if it is an outlier (stopped scan by user)
+%% remove last instance if it is different from 1st one (stopped scan by user)
 for i = 1:numel(h)
-    a = cellfun(@(c)c.PixelData.Bytes, h{i});
-    if numel(a)>2 && a(1)~=a(end) && a(1)==a(end-1)
+    if ~isfield(h{i}{1}.PixelData, 'Bytes'), continue; end
+    if h{i}{1}.PixelData.Bytes ~= h{i}{end}.PixelData.Bytes
         h{i}(end) = [];
     end
 end
@@ -418,24 +417,18 @@ for i = 1:nRun
     [s, err] = multiFrameFields(s); % no-op if non multi-frame
     if ~isempty(err), keep(i) = 0; continue; end % invalid multiframe series
     s.isDTI = isDTI(s);
+    s.isEnh = isfield(s, 'PerFrameFunctionalGroupsSequence');
     if ~isfield(s, 'AcquisitionDateTime') % assumption: 1st instance is earliest
         try s.AcquisitionDateTime = [s.AcquisitionDate s.AcquisitionTime]; end
     end
     
     h{i}{1} = s; % update record in case of full hdr or multiframe
-    
     nFile = numel(h{i});
-    if nFile>1 && tryGetField(s, 'NumberOfFrames', 1) > 1 % seen in vida
-        for k = 2:nFile % this can be slow: improve in the future
-            h{i}{k} = dicm_hdr(h{i}{k}.Filename); % full header
-            h{i}{k} = multiFrameFields(h{i}{k});
-        end
-    end
     
-    % check consistency in 'fldsCk'
+    % check consistency in 'fldsCk' (skip Siemens if isEnh
     nFlds = numel(fldsCk);
     if isfield(s, 'SpacingBetweenSlices'), nFlds = nFlds - 1; end % check 1 of 2
-    for k = 1:nFlds*(nFile>1)
+    for k = 1:nFlds*(nFile>1 && ~(s.isEnh && strncmpi(s.Manufacturer, 'Siemens', 7)))
         if isfield(s, fldsCk{k}), val = s.(fldsCk{k}); else, continue; end
         val = repmat(double(val), [1 nFile]);
         for j = 2:nFile
@@ -479,7 +472,7 @@ for i = 1:nRun
             for j = 1:nFile
                 s2 = dicm_hdr(h{i}{j}.Filename, dict);
                 dt = [s2.AcquisitionDate s2.AcquisitionTime];
-                vTime(j) = datenum(dt, 'yyyymmddHHMMSS.fff');
+                vTime(j) = datenum(dt, 'yyyymmddHHMMSS.fff'); %#ok<*DATNM>
             end
             vTime = vTime - min(vTime);
             h{i}{1}.VolumeTiming = vTime * 86400; % day to seconds
@@ -488,7 +481,7 @@ for i = 1:nRun
     end
         
     if ~keep(i) || nFile<2 || ~isfield(s, 'ImagePositionPatient'), continue; end
-    if tryGetField(s, 'NumberOfFrames', 1) > 1, continue; end % Siemens Vida
+    if s.isEnh, continue; end % Siemens enhanced dicom
     
     [err, h{i}] = checkImagePosition(h{i}); % may re-oder h{i} for Philips
     if ~isempty(err)
@@ -640,7 +633,7 @@ if bids
             T.Type(i) = {'dwi'}; T.Modality(i) = {'dwi'};
         elseif seqContains({'epfid2d' 'EPI' 'epi'})
             T.Type(i) = {'func'};
-            if ~isempty(regexpi(T.Name{i}, 'rest'))
+            if containsI(T.Name{i}, 'rest')
                 T.Modality(i) = {'task-rest'};
             else
                 try nam = h{i}{1}.ProtocolName; 
@@ -798,11 +791,7 @@ if bids
     if ~isempty(ses)
         try
             tsvfile = fullfile(niiFolder, ['sub-' SubjectTable{1}],['sub-' SubjectTable{1} '_sessions.tsv']);
-            if verLessThanOctave
-                write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
-            else
-                write_tsv(session_id,tsvfile,'acq_time',datestr(SubjectTable{3},'yyyy-mm-dd'),'Comment',SubjectTable{4})
-            end
+            write_tsv(session_id,tsvfile,'acq_time',SubjectTable{3},'Comment',SubjectTable{4})
         catch ME
             fprintf(1, '\n')
             warning(['Could not save sub-' SubjectTable{1} '_sessions.tsv']);
@@ -940,7 +929,10 @@ if isempty(subj), subj = tryGetField(s, 'PatientID', 'Anonymous'); end
 %% Subfunction: return AcquisitionDate
 function acq = AcquisitionDateField(s)
 acq = tryGetField(s, 'AcquisitionDate');
-if isempty(acq), acq = tryGetField(s, 'AcquisitionDateTime'); acq = acq(1:8); end
+if isempty(acq)
+    acq = tryGetField(s, 'AcquisitionDateTime');
+    if numel(acq)>8, acq = acq(1:8); end
+end
 if isempty(acq), acq = tryGetField(s, 'SeriesDate'); end
 if isempty(acq), acq = tryGetField(s, 'StudyDate', ''); end
 
@@ -1377,8 +1369,7 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
 end
 
 % Siemens multiframe: read TimeAfterStart from last file
-if isempty(t) && tryGetField(s, 'NumberOfFrames', 1)>1 &&  ...
-        ~isempty(csa_header(s, 'TimeAfterStart'))
+if isempty(t) && s.isEnh && ~isempty(csa_header(s, 'TimeAfterStart'))
     % Use TimeAfterStart, not FrameAcquisitionDatetime. See
     % https://github.com/rordenlab/dcm2niix/issues/240#issuecomment-433036901
     % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
@@ -1393,7 +1384,8 @@ end
 
 % Get slice timing for non-mosaic Siemens file. Could remove Manufacturer
 % check, but GE/Philips AcquisitionTime seems useless
-if isempty(t) && ~tryGetField(s, 'isMos', 0) && strncmpi(s.Manufacturer, 'SIEMENS', 7)
+if isempty(t) && ~tryGetField(s, 'isMos', 0) && ~s.isEnh && mod(numel(h), nSL)==0 ...
+      && strncmpi(s.Manufacturer, 'SIEMENS', 7)
     dict = dicm_dict('', {'AcquisitionDateTime' 'AcquisitionDate' 'AcquisitionTime'});
     t = zeros(nSL, 1);
     for j = 1:nSL
@@ -1471,7 +1463,7 @@ if isfield(s, 'bvec_original') % from BV or PAR file
     bval = s.B_value;
     bvec = s.bvec_original;
     % ref = tryGetField(s, 'bvec_ref', 1); % not implemented yet
-elseif isfield(s, 'PerFrameFunctionalGroupsSequence')
+elseif s.isEnh
     if nFile== 1 % all vol in 1 file, for Philips/Bruker
         iDir = 1:nSL:nSL*nDir;
         if isfield(s, 'SortFrames'), iDir = s.SortFrames(iDir); end
@@ -3096,4 +3088,8 @@ if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
 function c = cross(a, b)
 c = a([2 3 1]).*b([3 1 2]) - a([3 1 2]).*b([2 3 1]);
 
+%% contains(str, pat, 'IgnoreCase', true)
+function TF = containsI(str, pat)
+TF = contains(str, pat, 'IgnoreCase', true);
 %%
+
