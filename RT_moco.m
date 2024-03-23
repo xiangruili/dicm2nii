@@ -26,7 +26,6 @@ hs.fig = fh;
 hs.rootDir = getpref('dicm2nii_gui_para', 'incomingDcm', '../incoming_DICOM/');
 hs.backupDir = getpref('dicm2nii_gui_para', 'backupDir', '');
 fullName = dicm2nii('', 'fullName', 'func_handle');
-hs.dicm = fullName('../DICM/');
 hs.rootDir = fullName(hs.rootDir);
 if isfolder(hs.backupDir), hs.backupDir = fullName(hs.backupDir); end
 hs.logDir = [hs.rootDir 'RTMM_log/'];
@@ -158,7 +157,7 @@ function errorLog(obj, evt) %#ok
 hs = guidata(obj.UserData);
 vnam = hs.series.String;
 if iscell(vnam) && numel(vnam)>1, vnam = vnam{1}; end
-vnam = hs.subj.String+"_"+hs.series.UserData+"_"+hs.instnc.String+vnam;
+vnam = hs.subj.String+"_"+hs.series.UserData+hs.instnc.String+"_"+vnam;
 vnam = genvarname("err_"+vnam);
 eval(vnam +" = evt;");
 fnam = hs.logDir+"errorLog.mat";
@@ -300,8 +299,9 @@ end
 function new = new_series(hs)
 try setCountDown(hs); end
 f = hs.subj.UserData;
-if ~isempty(f) % check next file for current subj
+if ~isempty(f) % check next series for current subj
     nams = dir([f '/*_*_000001*.dcm']); % 1st instance for all series
+    [~, a] = sort([nams.datenum]); nams = nams(a);
     i = find(startsWith({nams.name}, hs.series.UserData), 1);
     if i < numel(nams)
         hs.series.UserData = nams(i+1).name(1:11);
@@ -309,7 +309,7 @@ if ~isempty(f) % check next file for current subj
     end
 end
 new = false;
-fs = dir([hs.dicm '20*']); % subj folder format: yyyymmdd.PatientName.PatientID
+fs = dir([hs.rootDir '20*']); % subj folder format: yyyymmdd.PatientName.PatientID
 valid = cellfun(@(c)~isempty(regexp(c,'\d{8}\.[\w\d]+\.[\w\d]+','once')), {fs.name});
 fs = fs(valid & [fs.isdir]);
 for i = numel(fs):-1:1
@@ -320,24 +320,20 @@ for i = numel(fs):-1:1
     hs.subj.UserData = fullfile(fs(i).folder, fs(i).name);
     hs.subj.String = subj;
     nams = dir([hs.subj.UserData '/*_*_000001*.dcm']);
+    [~, a] = sort([nams.datenum]); nams = nams(a);
     hs.series.UserData = nams(1).name(1:11);
     new = true; return;
 end
 if ~isfile([hs.rootDir 'dClock']); return; end % rest only for RTMM computer
 QC_report(hs.subj);
 
-% Backup subj folder around 2AM
-if ~isfolder(hs.backupDir) || abs(datetime-datetime('today')-hours(2))>seconds(9); return; end
+% Backup subj folder around 3AM
+if ~isfolder(hs.backupDir) || abs(datetime-datetime('today')-hours(3))>seconds(9); return; end
+fs = fs(datetime-datetime({fs.date})>days(2));
 for i = 1:numel(fs)
-    f = fs(i).name;
-    if isempty(regexp(f, '\d{8}\.\d{4,6}\w{2}', 'once')), continue; end
-    if isfolder([hs.backupDir f]), continue; end
-    [err, str] = system(['cp -p -r ' hs.dicm f ' ' hs.backupDir]);
-    if err, errorLog(hs.timer, str); return; end
+    if isfolder([hs.backupDir fs(i).name]), continue; end
+    movefile([hs.rootDir fs(i).name], hs.backupDir);
 end
-fid = fopen([hs.rootDir '/archived.txt'], 'a');
-fprintf(fid, '%s\r\n', fs.name);
-fclose(fid);
 
 %% Initialize GUI for a new series
 function init_series(hs, s, nTR)
@@ -462,7 +458,7 @@ end
 hs.instnc.String = '';
 hs.series.String = C{iT,1}; % in case hdr not saved
 try s = hs.fig.UserData.hdr{iR}; catch, set_img(hs.img, inf(2)); return; end
-if ~isfile(s.Filename), s.Filename = strrep(s.Filename, hs.dicm, hs.backupDir); end
+if ~isfile(s.Filename), s.Filename = strrep(s.Filename, hs.rootDir, hs.backupDir); end
 
 iIN = ceil(nTR/2); % start with middle Instance if avail
 nam = dir(sprintf('%s%06g.dcm', seriesBase(s.Filename), iIN));
@@ -673,8 +669,8 @@ while 1
     try
         if s.PixelData.Start+s.PixelData.Bytes <= s.FileSize, return; end
     catch me
+        if datetime>tEnd, fprintf(2,'%s\n', nam); rethrow(me); end % give up
     end
-    if datetime>tEnd, fprintf(2,'%s\n', nam); rethrow(me); end % give up
     pause(0.1);
 end
 
@@ -725,7 +721,7 @@ if ~any(is3D), view_3D(h); return; end % no T1, just show in nii_viewer
 is3D = find(is3D, 1, 'last');
 a = seriesBase(hdrs{is3D}.Filename);
 nams = dir([a '*.dcm']);
-if isempty(nams), nams = dir([strrep(a, hs.dicm, hs.backupDir) '*.dcm']); end
+if isempty(nams), nams = dir([strrep(a, hs.rootDir, hs.backupDir) '*.dcm']); end
 nams = strcat(nams(1).folder, '/', {nams.name});
 T1w = dicm2nii(nams, ' ', 'no_save');
 nams = dir([hs.slider.UserData '*.dcm']);
@@ -741,7 +737,7 @@ if isempty(h.UserData), return; end
 h.Value = round(h.Value);
 base = sprintf('%s%06u*.dcm', h.UserData, h.Value);
 nam = dir(base);
-if isempty(nam), nam = dir(strrep(base, hs.dicm, hs.backupDir)); end
+if isempty(nam), nam = dir(strrep(base, hs.rootDir, hs.backupDir)); end
 if isempty(nam), return; end
 set_img(hs.img, dicm_img(fullfile(nam(1).folder, nam(1).name)));
 hs.instnc.String = num2str(h.Value);
@@ -851,7 +847,7 @@ else
             isfile([hs.rootDir 'EyelinkRecording.mat']); return; end
     nam = [hs.rootDir nam(1).name];
     done = onCleanup(@()movefile(nam, strrep(nam, 'closed_', 'done_')));
-    subj = regexp(nam, '(?<=closed_)\d{4}\w{2}$', 'match', 'once');
+    subj = regexp(nam, '(?<=closed_)\d{4,6}\w{2}$', 'match', 'once');
 end
 rmQC = onCleanup(@()delete('./tmp_QC_*.pdf'));
 try load([hs.rootDir 'RTMM_log/' subj '.mat'], 'T3'); catch, return; end
@@ -874,16 +870,17 @@ ax = axes(fig, 'Position', [0.1 0.92 0.8 0.03], 'Visible', 'off');
 text(ax, 0.5, 1, subj, 'FontSize', 18, 'HorizontalAlignment', 'center');
 s = uDat.hdr{1};
 text(ax, 0.5, 0, dicmDT(s,'eeee MMM d, y'), 'FontSize', 12, 'HorizontalAlignment', 'center');
-tbl = cell(0, 5);
-dict = dicm_dict('', {'AcquisitionDateTime' 'AcquisitionDate' ...
-    'AcquisitionTime' 'SeriesNumber' 'SeriesDescription'});
-bnam = seriesBase(s.Filename);
-for i = 1:uDat.hdr{end}.SeriesNumber+5
-    nams = dir([bnam(1:end-7) sprintf('%06i_',i) '*.dcm']);
-    if isempty(nams), continue; end
-    s = dicm_hdr([nams(1).folder '/' nams(1).name], dict);
-    try a = T3.MeanFD{T3.SeriesNumber == s.SeriesNumber}; catch, a = []; end
-    tbl(end+1,:) = {s.SeriesNumber dicmDT(s,'HH:mm:ss') numel(nams) s.SeriesDescription a}; %#ok
+f = [fileparts(s.Filename) filesep];
+nam1 = dir([f '*_*_000001*.dcm']); % 1st instance for all series
+[~, a] = sort([nam1.datenum]); nam1 = {nam1(a).name};
+tbl = cell(numel(nam1), 5);
+dict = dicm_dict('', {'AcquisitionDateTime' 'SeriesNumber' 'SeriesDescription'});
+for i = 1:size(tbl,1)
+    nams = dir([f nam1{i}(1:11) '*.dcm']);
+    s = dicm_hdr([f nams(1).name], dict);
+    ind = T3.SeriesNumber==s.SeriesNumber & strcmp(s.SeriesDescription, T3.Description);
+    if any(ind), a = T3.MeanFD{find(ind,1)}; else, a = []; end
+    tbl(i,:) = {s.SeriesNumber dicmDT(s,'HH:mm:ss') numel(nams) s.SeriesDescription a};
 end
 tbl = cellfun(@num2str, tbl, 'UniformOutput', false); % for left-align
 vName = {'SeriesNumber' 'Time' 'TotalInstances' 'Description' 'meanFD'};
