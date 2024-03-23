@@ -876,7 +876,7 @@ for i = 1:nRun
     fname = fullfile(niiFolder, fnames{i}); % name without ext
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
 
-    nii = split_components(nii, h{i}{1}); % split vol components
+    nii = split_components(nii, h{i}); % split vol components
     if no_save % only return the first nii
         nii(1).hdr.file_name = strcat(fnames{i}, '.nii');
         nii(1).hdr.magic = 'n+1';
@@ -1372,12 +1372,13 @@ end
 if isempty(t) && s.isEnh && ~isempty(csa_header(s, 'TimeAfterStart'))
     % Use TimeAfterStart, not FrameAcquisitionDatetime. See
     % https://github.com/rordenlab/dcm2niix/issues/240#issuecomment-433036901
+    sn = dicm_hdr(h{end}.Filename); % avoid 1st vol
     % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-    % s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
-    % t = datenum(s2.FrameAcquisitionDatetime, 'yyyymmddHHMMSS.fff');
-    % t = (t - min(t)) * 24 * 3600 * 1000; % day to ms
+    % s2 = dicm_hdr(sn, s2, 1:nSL);
+    % t = datetime(s2.FrameAcquisitionDatetime, 'InputFormat', 'yyyyMMddHHmmss.SSSSSS');
+    % t = milliseconds(t - min(t));
     s2 = struct('TimeAfterStart', nan(1, nSL));
-    s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st volume
+    s2 = dicm_hdr(sn, s2, 1:nSL);
     t = s2.TimeAfterStart; % in secs
     t = (t - min(t)) * 1000;
 end
@@ -2305,7 +2306,32 @@ catch
 end
 
 %% subfunction: split nii components into multiple nii
-function nii = split_components(nii, s)
+function nii = split_components(nii, h)
+s = h{1};
+if s.isEnh && strncmpi(s.Manufacturer, 'Siemens', 7)
+    % do TE for now only. May add ICE_Dims "X" means combined
+    nTE = asc_header(s, 'lContrasts', 1);
+    if nTE<2, return; end
+    dict = dicm_dict('Siemens', 'EffectiveEchoTime');
+    for i = min(nTE, numel(h)):-1:1 % _SBRef has no 1st TE
+        s1 = dicm_hdr(h{i}.Filename, dict);
+        ETs(i) = s1.EffectiveEchoTime;
+    end
+    if numel(h) <= nTE % no split for vNav or _SBRef
+        nii.json.EchoTimes = ETs;
+        return;
+    end
+    nii0 = nii;
+    for i = 1:nTE
+        nii(i) = nii0;
+        nii(i).img = nii0.img(:,:,:, i:nTE:end);
+        nii(i).hdr.file_name = [s.NiftiName '_e' num2str(i)];
+        nii(i) = nii_tool('update', nii(i));
+        nii(i).json.EchoTime = ETs(i);
+    end
+    return;
+end
+
 fld = 'ComplexImageComponent';
 if ~strcmp(tryGetField(s, fld, ''), 'MIXED'), return; end
 
