@@ -621,11 +621,11 @@ end
 %% subfunction: get fields for multiframe dicom
 function s1 = search_MF_val(s, s1, iFrame)
 % s1 = search_MF_val(s, s1, iFrame);
-%  Arg 1: the struct returned by dicm_hdr for a multiframe dicom
-%  Arg 2: a struct with fields to search, and with initial value, such as
+%  Arg1: the struct returned by dicm_hdr for a multiframe dicom
+%  Arg2: a struct with fields to search, and with initial value, such as
 %    zeros or nans. The number of rows indicates the number of values for the
 %    tag, and columns for frames indicated by iFrame, Arg 3.
-%  Arg 3: frame indice, length consistent with columns of s1 field values.
+%  Arg3: frame indice, length consistent with columns of s1 field values.
 % Example: 
 %  s = dicm_hdr('multiFrameFile.dcm'); % read only 1,2 and last frame by default
 %  s1 = struct('ImagePositionPatient', nan(3, s.NumberOfFrames)); % define size
@@ -633,7 +633,7 @@ function s1 = search_MF_val(s, s1, iFrame)
 % This is MUCH faster than asking all frames by dicm_hdr, and avoid to get into
 % annoying SQ levels under PerFrameFuntionalGroupSequence. In case a tag is not
 % found in PerFrameSQ, the code will search SharedSQ and common tags, and will
-% ignore the 3th arg and duplicate the same value for all frames.
+% ignore Arg3 and duplicate the same value for all frames.
 
 if ~isfield(s, 'PerFrameFunctionalGroupsSequence'), return; end
 expl = false;
