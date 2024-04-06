@@ -1368,17 +1368,16 @@ if isempty(t) && isfield(s, 'ProtocolDataBlock') && ...
     end
 end
 
-% Siemens multiframe: read TimeAfterStart from last file
+% Siemens multiframe: read TimeAfterStart from last volume
 if isempty(t) && s.isEnh && ~isempty(csa_header(s, 'TimeAfterStart'))
     % Use TimeAfterStart, not FrameAcquisitionDatetime. See
     % https://github.com/rordenlab/dcm2niix/issues/240#issuecomment-433036901
-    sn = dicm_hdr(h{end}.Filename); % avoid 1st vol
     % s2 = struct('FrameAcquisitionDatetime', {cell(nSL,1)});
-    % s2 = dicm_hdr(sn, s2, 1:nSL);
+    % s2 = dicm_hdr(h{end}, s2, 1:nSL);
     % t = datetime(s2.FrameAcquisitionDatetime, 'InputFormat', 'yyyyMMddHHmmss.SSSSSS');
     % t = milliseconds(t - min(t));
     s2 = struct('TimeAfterStart', nan(1, nSL));
-    s2 = dicm_hdr(sn, s2, 1:nSL);
+    s2 = dicm_hdr(h{end}, s2, 1:nSL); % avoid 1st vol
     t = s2.TimeAfterStart; % in secs
     t = (t - min(t)) * 1000;
 end
