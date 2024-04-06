@@ -635,7 +635,10 @@ function s1 = search_MF_val(s, s1, iFrame)
 % found in PerFrameSQ, the code will search SharedSQ and common tags, and will
 % ignore Arg3 and duplicate the same value for all frames.
 
-if ~isfield(s, 'PerFrameFunctionalGroupsSequence'), return; end
+if ~all(isfield(s, {'Manufacturer' 'PerFrameFunctionalGroupsSequence'}))
+    s = dicm_hdr(s.Filename, {'Manufacturer' 'PerFrameFunctionalGroupsSequence'});
+    if ~isfield(s, 'PerFrameFunctionalGroupsSequence'), return; end
+end
 expl = false;
 be = false;
 if isfield(s, 'TransferSyntaxUID')
@@ -1549,39 +1552,16 @@ function [ind, nSL] = sort_frames(sl, ic)
 nSL = max(sl(:, 1));
 nFrame = size(sl, 1);
 if nSL==nFrame, ind = 1:nSL; ind(sl(:,1)) = ind; return; end % single vol
-nVol = floor(nFrame / nSL);
-badVol = nVol*nSL < nFrame; % incomplete volume
 ic(isnan(ic)) = 0;
 id = zeros(size(ic));
 for i = 1:size(ic,2)
     [~, ~, id(:,i)] = unique(ic(:,i)); % entries to index
 end
-n = max(id); id = id(:, n>1); n = n(n>1);
-i = find(n == nVol+badVol, 1);
-if ~isempty(i) % most fMRI/DTI
-    id = id(:, i); % use a single column for sorting
-elseif ~badVol && numel(n)>1
-    [j, i] = find(tril(n' * n, -1) == nVol, 1); % need to ignore diag
-    if ~isempty(i)
-        id = id(:, [i j]); % 2 columns make nVol        
-    elseif numel(n)>2
-        i = find(cumprod(n) == nVol, 1);
-        if ~isempty(i), id = id(:, 1:i); end % first i columns make nVol
-    end
-end
-[~, ind] = sortrows([sl id]); % this sort idea is from julienbesle
-if badVol % only seen in Philips
-    try lastV = id(ind,1) > nVol; catch, lastV = []; end
-    if sum(lastV) == nFrame-nSL*nVol
-        ind(lastV) = []; % remove incomplete volume
-    else % suppose extra later slices are from bad volume
-        for i = 1:nSL
-            a = ind==i;
-            if sum(a) <= nVol, continue; end % shoule be ==
-            ind(find(a, 1, 'last')) = []; % remove last extra one
-            if numel(ind) == nSL*nVol, break; end
-        end
-    end
+n = max(id); id = id(:, n>1); n = n(n>1); % now only useful columns
+i = find(cumprod(n) > nFrame/nSL-prod(n(2:end)), 1); % not 100% safe
+[~, ind] = sortrows([sl id(:,1:i)]); % this sort idea is from julienbesle
+if sum(id(:,1)==n(1)) < sum(id(:,1)==1) % last vol incomplete?
+    ind(id(ind,1)==n(1)) = [];
 end
 ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
 ind = ind(:)';
