@@ -667,7 +667,9 @@ nam = [nam.folder '/' nam.name];
 while 1
     s = dicm_hdr(nam, dict);
     try
-        if s.PixelData.Start+s.PixelData.Bytes <= s.FileSize, return; end
+        if s.PixelData.Start+s.PixelData.Bytes<=s.FileSize || datetime>tEnd
+            return;
+        end
     catch me
         if datetime>tEnd, fprintf(2,'%s\n', nam); rethrow(me); end % give up
     end
