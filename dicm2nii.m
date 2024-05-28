@@ -449,6 +449,7 @@ for i = 1:nRun
             if ind(1) % re-do full header for new 1st file
                 s = dicm_hdr(h{i}{1}.Filename);
                 s.isDTI = isDTI(s);
+                s.isEnh = isfield(s, 'PerFrameFunctionalGroupsSequence');
                 h{i}{1} = s;
             end
         else
