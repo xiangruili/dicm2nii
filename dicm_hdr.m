@@ -799,11 +799,8 @@ keys = {'dynamic scan number' 'gradient orientation number' 'echo number' ...
     'cardiac phase number' 'image_type_mr' 'label type' 'scanning sequence'};
 ic = []; for i = 1:numel(keys), ic = [ic colIndex(keys{i})]; end %#ok
 sl = para(:, [colIndex('slice number') colIndex('diffusion_b_factor')]);
-[ind_sort, nSL] = sort_frames(sl, para(:, ic));
-a = par_val('index in REC file', 1:nFrame); % always 0:nFrame-1 ?
-a(a+1) = 1:nFrame; % [~, a] = sort(a);
-a = a(ind_sort)';
-if ~isequal(a, 1:nFrame), s.SortFrames = a; end % used only in dicm2nii
+[ind_sort, nSL] = sort_frames(sl, para(:, ic), par_val('index in REC file', 1:nFrame));
+if ~isequal(ind_sort, 1:nFrame), s.SortFrames = ind_sort; end % used only in dicm2nii
 para = para(ind_sort, :); % XYZT order
 
 s.LocationsInAcquisition = nSL;
@@ -1400,12 +1397,9 @@ for i = 1:numel(keys)
 end
 sl = xml_raw(ch, 'Slice'); 
 if isDTI, sl(:,2) = xml_raw(ch, 'Diffusion B Factor'); end
-[ind_sort, nSL] = sort_frames(sl, id);
+[ind_sort, nSL] = sort_frames(sl, id, xml_raw(ch, 'Index'));
 nFrame = size(sl, 1);
-a = xml_raw(ch, 'Index'); % always 0:nFrame-1 ?
-a(a+1) = 1:nFrame; % [~, a] = sort(a);
-a = a(ind_sort)';
-if ~isequal(a, 1:nFrame), s.SortFrames = a; end % used only in dicm2nii
+if ~isequal(ind_sort, 1:nFrame), s.SortFrames = ind_sort; end % used only in dicm2nii
 
 s.NumberOfFrames = numel(ind_sort); % may be smaller than nFrame
 s.NumberOfTemporalPositions = s.NumberOfFrames/nSL;
@@ -1544,11 +1538,13 @@ s.PixelData.Bytes = s.Rows * s.Columns * nFrame * s.BitsAllocated / 8;
     end
 end
 
-%% Get sorting index for multi-frame and PAR/XML
-function [ind, nSL] = sort_frames(sl, ic)
+%% Get index from PAR/XML to sort frames in REC
+function [ind, nSL] = sort_frames(sl, ic, iR)
 % sl is for slice index, and has B_value as 2nd column for DTI.
 % ic contains other possible identifiers which will be converted into index. 
 % The ic column order is important. 
+% iR is likely 0..nFrame-1, but whoe knows.
+% The returned ind is to sort both para table and frames in REC
 nSL = max(sl(:, 1));
 nFrame = size(sl, 1);
 if nSL==nFrame, ind = 1:nSL; ind(sl(:,1)) = ind; return; end % single vol
@@ -1559,10 +1555,10 @@ for i = 1:size(ic,2)
 end
 n = max(id); id = id(:, n>1); n = n(n>1); % now only useful columns
 i = find(cumprod(n) > nFrame/nSL-prod(n(2:end)), 1); % not 100% safe
-[~, ind] = sortrows([sl id(:,1:i)]); % this sort idea is from julienbesle
+[~, ind] = sortrows([sl(:,2:end) id(:,1:i) sl(:,1)]); % idea is from julienbesle
 if sum(id(:,1)==n(1)) < sum(id(:,1)==1) % last vol incomplete?
     ind(id(ind,1)==n(1)) = [];
 end
-ind = reshape(ind, [], nSL)'; % XYTZ to XYZT
-ind = ind(:)';
+iR(iR+1) = 1:nFrame;
+ind = iR(ind)';
 end
