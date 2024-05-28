@@ -22,7 +22,7 @@ function nii_deface(in)
 
 % 230415 Wrote it by Xiangrui.Li@gmail.com
 
-global DEFACE_PARAMS
+global DEFACE_PARAMS %#ok<*GVMIS>
 DEFACE_PARAMS = struct('noui', false, 'tag', '', 'dir', '');
 
 if nargin<1 || isempty(in)
