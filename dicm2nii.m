@@ -1493,7 +1493,7 @@ elseif s.isEnh
             a = MF_val('B_value', h{i}, 1);
             if ~isempty(a), bval(i) = a; end
             a = MF_val('DiffusionGradientDirection', h{i}, 1);
-            if isempty(a)
+            if isempty(a) && strncmpi(s.Manufacturer, 'UIH', 3)
                 a = MF_val('MRDiffusionGradOrientation', h{i}, 1);
                 if ~isempty(a), ref = 0; end % UIH
             end
@@ -2254,7 +2254,7 @@ sfgs = 'SharedFunctionalGroupsSequence';
 switch fld
     case 'EffectiveEchoTime'
         sq = 'MREchoSequence';
-    case {'DiffusionDirectionality' 'B_value'}
+    case {'DiffusionDirectionality' 'DiffusionGradientDirection' 'B_value'}
         sq = 'MRDiffusionSequence';
     case 'ComplexImageComponent'
         sq = 'MRImageFrameTypeSequence';
@@ -2278,14 +2278,6 @@ switch fld
         sq = 'CardiacTriggerSequence';
     case {'SliceNumberMR' 'EchoTime' 'MRScaleSlope' 'PhaseNumber' 'MRImageLabelType'}
         sq = 'PrivatePerFrameSq'; % Philips
-    case 'DiffusionGradientDirection' % 
-        sq = 'MRDiffusionSequence';
-        try
-            s2 = s.(pffgs).(sprintf('Item_%g', iFrame)).(sq).Item_1;
-            val = s2.DiffusionGradientDirectionSequence.Item_1.(fld);
-        catch, val = [0 0 0]';
-        end
-        if nargin>1, return; end
     case {'ImageTypeText' 'ImageHistory' 'ICE_Dims'}
         sq = 'CSAImageHeaderInfo';
     otherwise
@@ -2294,6 +2286,10 @@ end
 if nargin<2
     val = {sfgs pffgs sq fld 'NumberOfFrames'}; 
     return;
+end
+if ~isfield(s, pffgs)
+    s1 = dicm_hdr(s, struct(fld, []), 1);
+    if ~isempty(s1.(fld)), val = s1.(fld); return; end
 end
 try
     val = s.(sfgs).Item_1.(sq).Item_1.(fld);
