@@ -662,30 +662,33 @@ chDat = 'AE AS CS DA DT LO LT PN SH ST TM UI UT';
 nf = numel(iFrame);
 
 for i = 1:numel(flds)
-    k = find(strcmp(dict.name, flds{i}), 1, 'last'); % GE has another ipp tag
-    if isempty(k), continue; end % likely private tag for another vendor
-    vr = dict.vr{k};
-    group = dict.group(k);
-    isBE = be && group~=2;
-    isEX = expl || group==2;
-    tg = char(typecast([group dict.element(k)], 'uint8'));
-    if isBE, tg = tg([2 1 4 3]); end
-    if isEX, tg = [tg vr]; end %#ok
-    ind = strfind(b, tg);
-    ind = ind(mod(ind,2)>0); % indice is odd
-    if isempty(ind) % no tag in PerFrameSQ, try tag before PerFrameSQ
-        ind = strfind(b0, tg);
+    ks = find(strcmp(dict.name, flds{i}));
+    if isempty(ks), continue; end % likely private tag for another vendor
+    found = false;
+    for k = ks'
+        vr = dict.vr{k};
+        group = dict.group(k);
+        isBE = be && group~=2;
+        isEX = expl || group==2;
+        tg = char(typecast([group dict.element(k)], 'uint8'));
+        if isBE, tg = tg([2 1 4 3]); end
+        if isEX, tg = [tg vr]; end %#ok
+        ind = strfind(b, tg);
+        ind = ind(mod(ind,2)>0); % indice is odd
+        if ~isempty(ind), break; end
+        ind = strfind(b0, tg); % no tag in PerFrameSQ, try tag before PerFrameSQ
         ind = ind(mod(ind,2)>0);
         if ~isempty(ind)
-            k = ind(1) + numel(tg); % take 1st in case of multiple
-            [n, nvr] = val_len(vr, uint8(b0(k+(0:5))), isEX, isBE); k = k + nvr;
-            a = read_val(uint8(b0(k+(0:n-1))), vr, isBE);
+            m = ind(1) + numel(tg); % take 1st in case of multiple
+            [n, nvr] = val_len(vr, uint8(b0(m+(0:5))), isEX, isBE); m = m + nvr;
+            a = read_val(uint8(b0(m+(0:n-1))), vr, isBE);
             if ischar(a), a = {a}; end
             s1.(flds{i}) = repmat(a, 1, nf); % all frames have the same value
+            found = true; break;
         end
-        continue;
     end
-    
+    if found || isempty(ind), continue; end
+
     len = 4; % bytes of tag value length (uint32)
     if ~isEX % implicit, length irrevalent to VR
         ind = ind + 4; % tg(4)
