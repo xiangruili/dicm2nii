@@ -664,8 +664,7 @@ nf = numel(iFrame);
 for i = 1:numel(flds)
     ks = find(strcmp(dict.name, flds{i}));
     if isempty(ks), continue; end % likely private tag for another vendor
-    found = false;
-    for k = ks'
+    for k = flip(ks)'
         vr = dict.vr{k};
         group = dict.group(k);
         isBE = be && group~=2;
@@ -676,18 +675,19 @@ for i = 1:numel(flds)
         ind = strfind(b, tg);
         ind = ind(mod(ind,2)>0); % indice is odd
         if ~isempty(ind), break; end
-        ind = strfind(b0, tg); % no tag in PerFrameSQ, try tag before PerFrameSQ
+    end
+    if isempty(ind) % no tag in PerFrameSQ, try tag before PerFrameSQ
+        ind = strfind(b0, tg);
         ind = ind(mod(ind,2)>0);
         if ~isempty(ind)
-            m = ind(1) + numel(tg); % take 1st in case of multiple
-            [n, nvr] = val_len(vr, uint8(b0(m+(0:5))), isEX, isBE); m = m + nvr;
-            a = read_val(uint8(b0(m+(0:n-1))), vr, isBE);
+            k = ind(1) + numel(tg); % take 1st in case of multiple
+            [n, nvr] = val_len(vr, uint8(b0(k+(0:5))), isEX, isBE); k = k + nvr;
+            a = read_val(uint8(b0(k+(0:n-1))), vr, isBE);
             if ischar(a), a = {a}; end
             s1.(flds{i}) = repmat(a, 1, nf); % all frames have the same value
-            found = true; break;
         end
+        continue;
     end
-    if found || isempty(ind), continue; end
 
     len = 4; % bytes of tag value length (uint32)
     if ~isEX % implicit, length irrevalent to VR
