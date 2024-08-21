@@ -54,9 +54,9 @@ for i = 1:n
     end
     if ~isfield(s, 'StudyID'), s.StudyID = '1'; end
     
-    P = genvarname(['P' subj]); %#ok<*DEPGENAM>
+    P = matlab.lang.makeValidName(['P' subj]);
     if ~isfield(h, P), h.(P) = []; end
-    S = genvarname(['S' s.StudyID]);
+    S = matlab.lang.makeValidName(['S' s.StudyID]);
     if ~isfield(h.(P), S), h.(P).(S) = {}; end
     
     h.(P).(S){end+1} = s.Filename;
