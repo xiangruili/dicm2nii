@@ -284,6 +284,7 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
     'InstanceNumber' 'NumberOfFrames' 'B_value' 'DiffusionGradientDirection' ...
     'TriggerTime' 'RTIA_timer' 'RBMoCoTrans' 'RBMoCoRot' 'AcquisitionNumber' ...
     'CoilString' 'TemporalPositionIdentifier' ...
+    'PerFrameFunctionalGroupsSequence' ...
     'MRImageGradientOrientationNumber' 'MRImageLabelType' 'SliceNumberMR' 'PhaseNumber'};
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
@@ -842,7 +843,7 @@ for i = 1:nRun
         end
     end
     if strcmpi(tryGetField(s, 'DataRepresentation', ''), 'COMPLEX')
-        img = complex(img(:,:,:,1:2:end,:), img(:,:,:,2:2:end,:));
+        img = complex(img(1:2:end), img(2:2:end));
     end
     [~, ~, d3, d4, ~] = size(img);
     if strcmpi(tryGetField(s, 'SignalDomainColumns', ''), 'TIME') % no permute
@@ -2207,6 +2208,7 @@ iF = 1; if isfield(s, 'SortFrames'), iF = s.SortFrames(1); end
 for i = 1:numel(flds)
     if isfield(s, flds{i}), continue; end
     a = MF_val(flds{i}, s, iF);
+    if iscell(a), a = a{1}; end
     if ~isempty(a), s.(flds{i}) = a; end
 end
 
@@ -2287,19 +2289,11 @@ if nargin<2
     val = {sfgs pffgs sq fld 'NumberOfFrames'}; 
     return;
 end
-if ~isfield(s, pffgs)
-    s1 = dicm_hdr(s, struct(fld, []), 1);
-    if ~isempty(s1.(fld)), val = s1.(fld); return; end
-end
-try
-    val = s.(sfgs).Item_1.(sq).Item_1.(fld);
-catch
-    try
-        val = s.(pffgs).(sprintf('Item_%g', iFrame)).(sq).Item_1.(fld);
-    catch
-        val = [];
-    end
-end
+
+try val = s.(sfgs).Item_1.(sq).Item_1.(fld); return; end
+try val = s.(pffgs).(sprintf('Item_%g', iFrame)).(sq).Item_1.(fld); return; end
+s1 = dicm_hdr(s, struct(fld, []), iFrame);
+val = s1.(fld);
 
 %% subfunction: split nii components into multiple nii
 function nii = split_components(nii, h)
