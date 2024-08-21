@@ -197,7 +197,15 @@ for nb = [0 2e6 fSize] % if not enough, read more till all read
         tg = char([00 86 32 0]); % SpectroscopyData, VR = 'OF'
         if p.be, tg = tg([2 1 4 3]); end
         i = strfind(char(b8), tg); i = i(mod(i,2)==1);
+        if ~isempty(i), p.VR = 'OF'; end
     end
+    if isempty(i) && feof(fid)
+        tg = char([225 127 16 16]); % Siemens SpectroscopyData
+        if p.be, tg = tg([2 1 4 3]); end
+        i = strfind(char(b8), tg); i = i(mod(i,2)==1);
+        if ~isempty(i), p.VR = 'OF'; end
+    end
+
     for k = i(end:-1:1) % last is likely real PixelData
         p.iPixelData = k + p.expl*4 + 7; % s.PixelData.Start: 0-based
         if numel(b8)<p.iPixelData, b8 = [b8 fread(fid, 12, '*uint8')']; end %#ok
@@ -600,6 +608,7 @@ try % in case of error, we return the original csa
             if isempty(dat), continue; end
             if numel(dat)==1, dat = dat{1}; end
         end
+        if ~isvarname(nam), nam = matlab.lang.makeValidName(nam); end
         rst.(nam) = dat;
     end
     csa = rst;
