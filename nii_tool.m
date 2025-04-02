@@ -564,7 +564,7 @@ elseif strcmpi(cmd, 'cat3D')
     if ischar(fnames) % guess it is like run1*.nii
         f = dir(fnames);
         f = sort({f.name});
-        fnames = strcat([fileparts(fnames) '/'], f);
+        fnames = fullfile(fileparts(fnames), f);
     end
     
     n = numel(fnames);
@@ -1144,6 +1144,7 @@ end
 
 %% Return requested fname with ext, useful for .hdr and .img files
 function fname = nii_name(fname, ext)
+fname = char(fname);
 if strcmpi(ext, '.img')
     i = regexpi(fname, '.hdr(.gz)?$');
     if ~isempty(i), fname(i(end)+(0:3)) = ext; end
