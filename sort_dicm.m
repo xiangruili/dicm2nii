@@ -28,17 +28,9 @@ if nargin<1 || isempty(srcDir)
 end
 if ~exist(srcDir, 'dir'), error([srcDir ' not exists.']); end
 
-dirs = genpath(srcDir);
-dirs = textscan(dirs, '%s', 'Delimiter', pathsep);
-dirs = dirs{1}; % cell str
-fnames = {};
-for i = 1:numel(dirs)
-    curFolder = [dirs{i} filesep];
-    foo = dir(curFolder); % all files and folders
-    foo([foo.isdir]) = []; % remove folders
-    foo = strcat(curFolder, {foo.name});
-    fnames = [fnames foo]; %#ok<*AGROW>
-end
+dirs = dir([char(srcDir) '/**']);
+dirs([dirs.isdir]) = [];
+fnames = arrayfun(@(a)[a.folder '/' a.name], dirs, 'UniformOutput', false);
 
 dict = dicm_dict('', {'PatientName' 'PatientID' 'StudyID'});
 h = struct;
