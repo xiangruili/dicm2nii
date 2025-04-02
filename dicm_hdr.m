@@ -556,7 +556,7 @@ end
 function p = get_nFrames(s, p, ch)
 if isfield(s, 'NumberOfFrames')
     p.nFrames = s.NumberOfFrames; % useful for PerFrameSQ
-elseif all(isfield(s, {'Columns' 'Rows' 'BitsAllocated'})) && p.bytes<4294967295
+elseif all(isfield(s, {'Columns' 'Rows' 'BitsAllocated'})) && isfield(p, 'bytes') && p.bytes<4294967295
     if isfield(s, 'SamplesPerPixel'), spp = double(s.SamplesPerPixel);
     else, spp = 1;
     end
