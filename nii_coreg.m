@@ -109,6 +109,8 @@ F = griddedInterpolant(imgM, 'linear', 'none');
 
 niiM.hdr.sform_code = niiT.hdr.sform_code;
 RM = [niiM.hdr.sform_mat; 0 0 0 1] * [eye(4,3) [-1 -1 -1 1]'];
+dB2 = opts.delta * opts.DoF;
+
 M = opts.init;
 if isempty(M)
     cog = nii_viewer('func_handle', 'img_cog');
@@ -121,9 +123,10 @@ elseif isequal(size(M), [3 4])
 elseif ~isequal(size(M), [4 4])
     error('Invalid init value for M.');
 end
+opts.init = M;
 
-dB2 = opts.delta * opts.DoF;
-for iter = 1:256
+for reDo = 1:3 % try different init if max iteration reaches
+for nIter = 1:256
     IM = M * RM \ XT;
     vM = F(IM(1,:), IM(2,:), IM(3,:));
     ind = ~isnan(vM);
@@ -151,10 +154,22 @@ for iter = 1:256
     hsI(1).UserData.Ri = inv(M*[nii0.hdr.sform_mat; 0 0 0 1]);
     nii_viewer('LocalFunc', 'set_cdata', hs); drawnow;
 end
-if iter>255, warning('nii_coreg:IterExceed', 'Max iterations reached.'); end
+
+if nIter<256 && ~any(isnan(M(:))), break; end
+if reDo == 1 % first try X rot of 20 deg (arbituray)
+    p1 = p0; p1(4) = 20;
+    M = affine_mat(p1) * opts.init;
+elseif reDo == 2 % try Z trans due to too much neck tissue?
+    p1 = p0; p1(3) = -20;
+    M = affine_mat(p1) * opts.init;
+end
+
+end
+
+if nIter>255, warning('nii_coreg:IterExceed', 'Max iterations reached.'); end
 mss = std(vT(ind)-vM(ind)*b(1), 1) / muT; % make it independent of img intensity
 if opts.disp > 0
-    fprintf('iter=%i mss=%4.2f overlap=%.2g\n', iter, mss, mean(ind));
+    fprintf('iter=%i mss=%4.2f overlap=%.2g\n', nIter, mss, mean(ind));
 end
 if opts.disp == 2
     nii_viewer(niiT, nii_tool('update', niiM, M*[niiM.hdr.sform_mat; 0 0 0 1]));
