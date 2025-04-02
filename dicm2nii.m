@@ -199,7 +199,7 @@ if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
 end
 
 %% Deal with niiFolder
-if ~isfolder(niiFolder), mkdir(niiFolder); end
+if ~no_save && ~isfolder(niiFolder), mkdir(niiFolder); end
 niiFolder = strcat(fullName(niiFolder), filesep);
 converter = ['dicm2nii.m ' getVersion];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
@@ -2879,17 +2879,9 @@ end
 
 %% return all file names in a folder, including in sub-folders
 function files = filesInDir(folder)
-dirs = genpath(folder);
-dirs = regexp(dirs, pathsep, 'split');
-files = {};
-for i = 1:numel(dirs)
-    if isempty(dirs{i}), continue; end
-    curFolder = [dirs{i} filesep];
-    a = dir(curFolder); % all files and folders
-    a([a.isdir]) = []; % remove folders
-    a = strcat(curFolder, {a.name});
-    files = [files a]; %#ok<*AGROW>
-end
+files = dir([char(folder) '/**']);
+files([files.isdir]) = [];
+files = arrayfun(@(a)[a.folder '/' a.name], files, 'UniformOutput', false);
 
 %% Select both folders and files
 function out = jFileChooser(folder, prompt, multi, button)
