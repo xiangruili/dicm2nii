@@ -907,7 +907,7 @@ if isempty(cmd)
         if isempty(pth), pth = getenv('TMPDIR'); end
         if isempty(pth), pth = '/tmp'; end % last resort
     end
-    uid = @()sprintf('_%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999));
+    uid = @()sprintf('_%s_%03x', datestr(now, 'yymmddHHMMSSfff'), randi(999)); %#ok
 end
 
 fname = char(fname);
@@ -1046,7 +1046,7 @@ for i = 1:numel(ext)
                 a = strtrim(a);
                 if isempty(a), continue; end
                 try
-                    eval(['ss.' a]); % put all into struct
+                    eval(['ss.' a]); %#ok put all into struct
                 catch
                     try
                         a = regexp(a, '(.*?)\s*=\s*(.*?);', 'tokens', 'once');
@@ -1263,5 +1263,5 @@ end
 function tf = ischar(A)
 tf = builtin('ischar', A);
 if tf, return; end
-if exist('strings', 'builtin'), tf = isstring(A) && numel(A)==1; end
+if exist('strings', 'builtin'), tf = isstring(A) && isscalar(A); end
 %%
