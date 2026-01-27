@@ -181,12 +181,7 @@ if size(hs.table.Data,1)<1 && datetime-nam.date<minutes(5)
     save([hs.rootDir '/hdr_' hs.subj.String], 's'); % as new subj flag
 end
 
-L0 = java.awt.MouseInfo.getPointerInfo().getLocation();
-java.awt.Robot().mouseMove(L0.getX+9, L0.getY+9); % wake up screen
-pause(0.1); java.awt.Robot().mouseMove(L0.getX, L0.getY);
-! gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled false
 hs.fig.WindowState = 'maximized';
-
 if hs.derived.Checked=="on" && contains(s.ImageType, 'DERIVED'), return; end
 if hs.SBRef.Checked=="on" && endsWith(s.SeriesDescription, '_SBRef'), return; end
 if startsWith(s.SequenceName, 'ABCD3d1'), return; end
@@ -793,7 +788,12 @@ h.String = "Missed " + n(1) + ", \color{red}Incorrect " + n(2) + ...
 function setCountDown(hs)
 nam = [hs.rootDir 'SyngoMeas'];
 if ~isfile(nam), return; end
+% system('gnome-screensaver-command -d');
+L0 = java.awt.MouseInfo.getPointerInfo().getLocation();
+java.awt.Robot().mouseMove(L0.getX+9, L0.getY+9); % wake up screen
+pause(0.1); java.awt.Robot().mouseMove(L0.getX, L0.getY);
 c0 = fileread(nam); pause(0.2); c = fileread(nam);
+! gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled false
 if ~isequal(c0, c), pause(1); c = fileread(nam); end
 delete(nam); 
 % From scanner: "RunStartTime" "ProtocolName" TotalScanTimeSec
@@ -836,8 +836,11 @@ else
     if isempty(nam) || datetime-nam(1).date<seconds(1), return; end
     EyelinkStop([hs.rootDir 'EyelinkStarted']);
     nam = [hs.rootDir nam(1).name];
+    a = dir(hs.subj.UserData+"/0*");
+    [~,~]=system("echo "+numel(a)+" >"+nam);
     done = onCleanup(@()movefile(nam, strrep(nam, 'closed_', 'done_')));
     subj = regexp(nam, '(?<=closed_)\d{4,6}\w{2}$', 'match', 'once');
+    close(findall(0, 'Type', 'figure', 'Tag', 'nii_viewer'));
 end
 rmQC = onCleanup(@()delete('./tmp_QC_*.pdf'));
 try load([hs.rootDir 'RTMM_log/' subj '.mat'], 'T3'); catch, return; end
