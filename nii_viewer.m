@@ -187,7 +187,7 @@ function varargout = nii_viewer(fname, varargin)
 % 160620 Use JIDE CheckBoxList; Simplify KeyFcn by not focusing on active items. 
 % 161003 Add aligned overlay: accept FSL warp file as transformation.
 % 161115 Use .mat file for early spm Analyze file.
-% 170421 java_dnd() changed as func, ControlDown OS independent by ACTION_LINK.
+% 170421 java_dnd() changed as func, CtrlKey OS independent by ACTION_LINK.
 % 170515 Use area to normalize histogram.
 % 171214 Try to convert back to volume in case of CIfTI (need anatomical gii).
 % 171228 Surface view for gii (include HCP gii template).
@@ -298,6 +298,7 @@ jScroll = com.mathworks.mwswing.MJScrollPane(h); %#ok<*JAPIMATHWORKS>
 width = h.getPreferredScrollableViewportSize.getWidth;
 width = max(60, min(width+20, pos(3)-408)); % 20 pixels for vertical scrollbar
 warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
+warning('off', 'MATLAB:ui:javacomponent:BridgeForWebFigures');
 [~, hs.scroll] = javacomponent(jScroll, [2 4 width 60], hs.panel); %#ok<*JAVCM>
 hCB = handle(h.getCheckBoxListSelectionModel, 'CallbackProperties');
 hCB.ValueChangedCallback = cb('toggle'); % check/uncheck
@@ -337,31 +338,31 @@ end
 
 % Controls for each file
 h = hs.files.SelectionBackground; fClr = [h.getRed h.getGreen h.getBlue]/255;
-uicontrol(ph, 'Style', 'frame', 'Position', [1 5 412 32], 'ForegroundColor', fClr);
+uicontrol(ph, 'Style', 'frame', 'Position', [1 5 428 32], 'ForegroundColor', fClr);
 hs.lb = java_spinner([7 10 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), '#.##', 'min value (threshold)');
 hs.ub = java_spinner([59 10 56 22], [p.ub -inf inf p.ub_step], ph, ...
     cb('ub'), '#.##', 'max value (clipped)');
 hs.lutStr = {'grayscale' 'red' 'green' 'blue' 'violet' 'yellow' 'cyan' ...
-    'red-yellow' 'blue-green' 'two-sided'  '<html><font color="red">lines' ...
+    'red-yellow' 'blue-green' 'two-sided'  'lines' ...
     'parula' 'jet' 'hsv' 'hot' 'cool' 'spring' 'summer' 'autumn' 'winter' ...
     'bone' 'copper' 'pink' 'prism' 'flag' 'phase' 'phase3' 'phase6' 'RGB' 'custom'};
-hs.lut = uicontrol(ph, 'Style', 'popup', 'Position', [113 10 74 22], ...
+hs.lut = uicontrol(ph, 'Style', 'popup', 'Position', [118 10 78 22], ...
     'String', hs.lutStr, 'BackgroundColor', 'w', 'Callback', cb('lut'), ...
     'Value', p.lut, 'TooltipString', 'Lookup table options for non-RGB data');
 if p.lut==numel(hs.lutStr), set(hs.lut, 'Enable', 'off'); end
 
-hs.alpha = java_spinner([187 10 44 22], [1 0 1 0.1], ph, cb('alpha'), '#.#', ...
+hs.alpha = java_spinner([198 10 44 22], [1 0 1 0.1], ph, cb('alpha'), '#.#', ...
     'Alpha: 0 transparent, 1 opaque');
 
 hs.smooth = uicontrol(ph, 'Style', 'checkbox', 'Value', p.smooth, ...
-    'Position', [231 10 60 22], 'String', 'smooth', 'BackgroundColor', clr, ...
+    'Position', [246 10 60 22], 'String', 'smooth', 'BackgroundColor', clr, ...
     'Callback', cb('smooth'), 'TooltipString', 'Smooth image in 3D');
-hs.interp = uicontrol(ph, 'Style', 'popup', 'Position', [291 10 68 22], ...
+hs.interp = uicontrol(ph, 'Style', 'popup', 'Position', [304 10 68 22], ...
     'String', {'nearest' 'linear' 'cubic' 'spline'}, 'Value', p.interp, ...
     'Callback', cb('interp'), 'Enable', 'off', 'BackgroundColor', 'w', ... 
     'TooltipString', 'Interpolation method for overlay');
-hs.volume = java_spinner([361 10 44 22], [1 1 nVol 1], ph, cb('volume'), '#', ...
+hs.volume = java_spinner([376 10 44 22], [1 1 nVol 1], ph, cb('volume'), '#', ...
     ['Volume number, 1:' num2str(nVol)]);
 hs.volume.setEnabled(nVol>1);
 
@@ -512,18 +513,7 @@ checkUpdate = dicm2nii('', 'checkUpdate', 'func_handle');
 uimenu(h, 'Label', 'Check update', 'Callback', @(~,~)checkUpdate('nii_viewer'));
 uimenu(h, 'Label', 'About', 'Callback', cb('about'));
 guidata(fh, hs); % store handles and data
-
-%% java_dnd based on dndcontrol at matlabcentral/fileexchange/53511
-try % panel has JavaFrame in later matlab
-    warning('off', 'MATLAB:ui:javaframe:PropertyToBeRemoved');
-    jFrame = handle(hs.frame.JavaFrame.getGUIDEView, 'CallbackProperties');
-catch
-    warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
-    jFrame = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
-end
-if usejava('awt')
-    try java_dnd(jFrame, cb('drop')); catch me, disp(me.message); end
-end
+try uiFileDnD(hs.frame, cb('drop')); catch me, disp(me.message); end
 
 % iconPNG = fullfile(fileparts(mfilename('fullpath')), 'nii_viewer.png'); 
 % fh.JavaFrame.setFigureIcon(javax.swing.ImageIcon(iconPNG)); % windows only
@@ -787,8 +777,8 @@ switch cmd
         [fname, pName] = uiputfile(['*.' ext], 'Input file name to save figure');
         if ~ischar(fname), return; end
         fname = fullfile(pName, fname);
-        if any(strcmp(ext, {'eps' 'pdf' 'emf'})), render = '-painters';
-        else, render = '-opengl';
+        if any(strcmp(ext, {'eps' 'pdf' 'emf'})), render = '-vector';
+        else, render = '-image';
         end
         fh1 = ancestor(h, 'figure');
         if strncmp(get(fh1, 'Name'), 'nii_viewer', 10)
@@ -957,7 +947,7 @@ switch cmd
     case 'maximum' % crosshair to img max
         p = get_para(hs);
         img = p.nii.img(:,:,:,hs.volume.getValue);
-        if sum(img(:)~=0) < 1
+        if numel(unique(img(:))) < 2
             errordlg('All value are the same. No maximum!');
             return;
         end
@@ -1155,8 +1145,8 @@ switch cmd
         set(hs.lut, 'Enable', off_on{2-(p.lut==numel(hs.lutStr))});
     case 'drop'
         try
-            nii = get_nii(evt.Data);
-            if evt.ControlDown, addOverlay(nii, fh); % overlay
+            nii = get_nii(evt.names);
+            if evt.ctrlKey, addOverlay(nii, fh); % overlay
             else, nii_viewer(nii, fh); return; % background
             end
         catch me
@@ -3052,7 +3042,7 @@ function cii_view(hsN)
 fh = hsN.fig.UserData;
 if isempty(fh) || ~ishandle(fh) % create surface figure
     fh = figure(hsN.fig.Number+100);
-    set(fh, 'NumberTitle', 'off', 'MenuBar', 'none', 'Renderer', 'opengl', ...
+    set(fh, 'NumberTitle', 'off', 'MenuBar', 'none', ... % 'Renderer', 'opengl', ...
         'HandleVisibility', 'Callback', 'InvertHardcopy', 'off');
     if isnumeric(fh), fh = handle(fh); end
 
