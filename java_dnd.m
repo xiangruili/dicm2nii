@@ -6,6 +6,17 @@ function java_dnd(jObj, dropFcn)
 
 % Required: MLDropTarget.class under the same folder
 
+if ~startsWith(class(jObj), 'java')
+    old = warning('off');
+    try % panel has JavaFrame in later matlab
+        jObj = handle(jObj.JavaFrame.getGUIDEView, 'CallbackProperties');
+    catch
+        fh = ancestor(jObj, 'figure');
+        jObj = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
+    end
+    warning(old);
+end
+
 if ~exist('MLDropTarget', 'class')
     pth = fileparts(mfilename('fullpath'));
     javaaddpath(pth); % dynamic for this session
@@ -35,22 +46,22 @@ setComplete = onCleanup(@()jEvent.dropComplete(true));
 % DropAction: Neither ctrl nor shift Dn, PC/MAC 2, Linux 1
 % All OS: ctrlDn 1, shiftDn 2, both Dn 1073741824 (2^30)
 if ispc || ismac
-    evt.ControlDown = jEvent.getDropAction() ~= 2;
+    evt.ctrlKey = jEvent.getDropAction() ~= 2;
 else % fails to report CtrlDn if user releases shift between DragEnter and Drop
-    evt.ControlDown = bitget(jEvent.getDropAction,31)>0; % ACTION_LINK 1<<30
+    evt.ctrlKey = bitget(jEvent.getDropAction,31)>0; % ACTION_LINK 1<<30
     java.awt.Robot().keyRelease(16); % shift up
 end
 % evt.Location = [jEvent.getLocation.x jEvent.getLocation.y]; % top-left [0 0]
 if jSource.getDropType() == 1 % String dropped
     evt.DropType = 'string';
-    evt.Data = char(jSource.getTransferData());
+    evt.names = char(jSource.getTransferData());
     if strncmp(evt.Data, 'file://', 7) % files identified as string
         evt.DropType = 'file';
-        evt.Data = regexp(evt.Data, '(?<=file://).*?(?=\r?\n)', 'match')';
+        evt.names = regexp(evt.names, '(?<=file://).*?(?=\r?\n)', 'match')';
     end
 elseif jSource.getDropType() == 2 % file(s) dropped
     evt.DropType = 'file';
-    evt.Data = cell(jSource.getTransferData());
+    evt.names = cell(jSource.getTransferData());
 else, return; % No success
 end
 
