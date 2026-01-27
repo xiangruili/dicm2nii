@@ -1770,11 +1770,11 @@ p = get_para(hs, i);
 d = single(size(p.nii.img));
 pixdim = hs.bg.hdr.pixdim(2:4); % before reorient
 if strcmpi(get(p.hsI(1), 'Type'), 'image') % just switched to "lines"
+    cb = get(p.hsI(1), 'ButtonDownFcn');
     delete(p.hsI);
     lut = hs.lut.UserData; % last lut
     if isempty(lut), lut = 2; end % default red
     clr = lut2map(p, hs.lutStr{lut}); clr = clr(end,:);
-    cb = get(hs.hsI(1), 'ButtonDownFcn');
     for j = 1:3
         p.hsI(j) = quiver(hs.ax(j), 1, 1, 0, 0, 'Color', clr, ...
             'ShowArrowHead', 'off', 'AutoScale', 'off', 'ButtonDownFcn', cb);
@@ -2454,9 +2454,19 @@ end
 %% Duplicate image handles, inlcuding ButtonDownFcn for new matlab
 function h = copyimg(hs)
 h = hs.hsI;
-for i = 1:3, h(i) = handle(copyobj(hs.hsI(i), hs.ax(i))); end
-cb = get(hs.hsI(1), 'ButtonDownFcn');
-set(h, 'Visible', 'on', 'ButtonDownFcn', cb); % cb needed for 2014b+
+cb = {@nii_viewer_cb 'mousedown' hs.fig};
+if isvalid(hs.hsI(1))
+    for i = 1:3, h(i) = handle(copyobj(hs.hsI(i), hs.ax(i))); end
+    set(h, 'Visible', 'on', 'ButtonDownFcn', cb);
+else % when lut=lines is the background
+    for i = 1:3
+        j = 1:3; j(j==i) = [];
+        hs.hsI(i) = handle(image(hs.ax(i), zeros(hs.dim(j([2 1])), 'single')));
+    end
+    set(hs.hsI, 'Visible', 'on', 'ButtonDownFcn', cb);
+    guidata(hs.fig, hs);
+    h = hs.hsI;
+end
 crossFront(hs);
 
 %% Save selected nii as another file
