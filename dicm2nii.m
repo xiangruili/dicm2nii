@@ -1937,7 +1937,7 @@ end
 %% Subfuction: create GUI or bring it to front if exists
 function create_gui
 fh = findall(0, 'Type', 'figure', 'Tag', 'dicm2nii_fig');
-if ~isempty(fh), focus(fh); return; end
+if ~isempty(fh), fh.Visible = 'off'; fh.Visible = 'on'; return; end % focus(fh); 
 fh = uifigure('Tag', 'dicm2nii_fig', 'Visible', 'off');
 
 cb = @(cmd) {@gui_callback cmd fh}; % callback shortcut
