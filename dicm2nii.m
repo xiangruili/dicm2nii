@@ -1908,7 +1908,7 @@ switch cmd
         else
             web('www.sciencedirect.com/science/article/pii/S0165027016300073', '-browser');
         end
-    case 'drop_src' % Java drop source
+    case 'drop_src' % drop source
         try
             n = numel(evt.names);
             if n == 1
@@ -1922,7 +1922,7 @@ switch cmd
         catch me
             errordlg(me.message);
         end
-    case 'drop_dst' % Java drop dst
+    case 'drop_dst' % drop dst
         try
             nam = evt.names{1};
             if ~isfolder(nam), nam = fileparts(nam); end
