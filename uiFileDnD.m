@@ -1,110 +1,139 @@
-function uiFileDnD(target, dropFcn)
-% Set up a callback when file/folder is dropped onto a figure/uifigure component.
+function uiFileDnD(obj, dropFcn)
+% Set up a callback when file/folder is dropped onto a (ui)figure.
 % 
-% The target can be figure/uifigure or its component.
+% The obj can be figure/uifigure or its component.
 % 
 % dropFcn is the callback function when a file is dropped. Its syntax is the
 % same as general Matlab callback, like @myFunc or {@myFunc myOtherInput}.
-% In the callback, the first argument is the target, and 2nd the data containing
+% In the callback, the first argument is the obj, and 2nd a struct containing
+%      dropXY: [x y] % drop location in pixels relative to figure
 %     ctrlKey: 0 % true if Ctrl key is down while dropping
 %    shiftKey: 0 % true if Shift key is down while dropping
 %       names: {'/myPath/myFile'} % cellstr for full file/folder names
 % 
 % Example to show dropped file/folder onto uilistbox of uifigure:
-%  target = uilistbox(uifigure, 'Position', [80 100 400 100]);
-%  uiFileDnD(target, @(o,dat)set(o,'Items',dat.names));
+%  obj = uilistbox(uifigure, 'Position', [80 100 400 100]);
+%  uiFileDnD(obj, @(o,dat)set(o,'Items',dat.names));
 %
 % Example to show dropped file/folder onto listbox of figure:
-%  target = uicontrol(figure, 'Style', 'listbox', 'Position', [80 100 400 100]);
-%  uiFileDnD(target, @(o,dat)set(o,'String',dat.names));
+%  obj = uicontrol(figure, 'Style', 'listbox', 'Position', [80 100 400 100]);
+%  uiFileDnD(obj, @(o,dat)set(o,'String',dat.names));
 
 % 201001 Wrote it, by Xiangrui.Li at gmail.com 
 % 201023 Remove uihtml by using ww.executeJS
-% 260125 use ForceIndependentlyHostedFigures for R2025+. Thx EricMagalhaesDelgado 
+% 260125 need ForceIndependentlyHostedFigures for R2025+. Thx EricMagalhaesDelgado 
 % 260129 Rename from DnD_uifigure since works for figure too
+% 260305 Add 2nd hidden button to update rects, so work for text drop too.
 
 narginchk(2, 2);
-if isempty(target), target = uifigure; end
-if numel(target)>1 || ~ishandle(target)
-    error('uiFileDnD:badInput', 'target must be a single (ui)figure component');
+if isempty(obj), obj = uifigure; end
+if numel(obj)>1 || ~ishandle(obj)
+    error('uiFileDnD:badInput', 'obj must be a single (ui)figure component');
 end
 
-fh = ancestor(target, 'figure');
-hBtn = findall(fh, 'Type', 'uibutton', 'Tag', 'uiFileDnDBtn');
+fh = ancestor(obj, 'figure');
+old = warning('off'); resetWarn = onCleanup(@()warning(old)); % MATLAB:structOnObject
+drawnow; fhS = struct(fh);
+
+% This if-end block is for figure() before R2025a and can be removed in the future,
+% together with java_dnd.m & MLDropTarget.class
+if ~isfield(fhS, 'Controller') || isempty(fhS.Controller)
+    if ~exist("java_dnd.m", "file")
+        error("You are using figure() under R2024b or earlier. Get the package at:" + ...
+            newline + "https://github.com/xiangruili/uiFileDnD");
+    end
+    java_dnd(obj, dropFcn);
+    return
+end
+
+hBtn = findall(fh, 'Type', 'uibutton', 'Tag', 'uiFileDropBtn');
 if ~isempty(hBtn)
-    hBtn.UserData(end+1,:) = {dropFcn target};
+    ind = find([hBtn.UserData{:,2}]==obj, 1, 'last');
+    if isempty(ind), hBtn.UserData(end+1,:) = {dropFcn obj};
+    else, hBtn.UserData{ind,1} = dropFcn;
+    end
     return;
 end
 
-drawnow;
-old = warning('off'); cln = onCleanup(@()warning(old)); % MATLAB:structOnObject
 try
-    ww = struct(struct(struct(fh).Controller).PlatformHost).CEF;
-    ww.enableDragAndDropAll; % DnD to whole uifigure: no-op for Linux till 2024b
+    ww = struct(struct(fhS.Controller).PlatformHost).CEF;
+    ww.enableDragAndDropAll; % DnD to whole figure: no-op for Linux till 2024b
 catch me
-    if verLessThan('matlab', '9.9') %#ok < R2020b
-        error('Matlab R2020b or later needed for file drag and drop');
-    elseif verLessThan('matlab', '25.1') %#ok < R2025a 
-        rethrow(me);
-    else
+    if regexp(me.message, 'Unrecognized.+CEF') % >=R2025a
         error("For Matlab R2025a or later, add the following line into " + ...
             "your startup.m file (create it if not exists):" + newline +...
             "try addprop(groot, 'ForceIndependentlyHostedFigures'); catch, end");
+    elseif regexp(me.message, 'Unrecognized.+enableDragAndDropAll') % <R2020b
+        error('Matlab R2020b or later needed for file drag and drop onto uifigure');
+    else % other error
+        rethrow(me);
     end
 end
-hBtn = uibutton(fh, 'Position', [1 1 0 0], 'Text', '4JS2identify_me', ...
-    'ButtonPushedFcn', {@drop ww}, 'UserData', {dropFcn target}, ...
-    'Tag', 'uiFileDnDBtn', 'Visible', 'off', 'HandleVisibility', 'off');
+hBtn = uibutton(fh, 'Position', [1 1 0 0], 'Text', 'uiFileDropBtn', ...
+    'ButtonPushedFcn', {@drop ww}, 'Visible', 'off', 'HandleVisibility', 'off');
+h = copyobj(hBtn, fh); 
+set(h, 'Text', 'uiFileDragBtn', 'ButtonPushedFcn', {@dragEnter ww hBtn});
+set(hBtn, 'Tag', 'uiFileDropBtn', 'UserData', {dropFcn obj});
+jsStr = fileread(mfilename("fullpath")+".m");
+jsStr = regexp(jsStr, 'javascript\s+\%\{\s+(.*?)\%\}', 'tokens', 'once');
+drawnow; ww.executeJS(jsStr{1});
+ww.FileDragDropCallback = @(o,names)set(hBtn,'Text',cellstr(names));
 
-jsStr = char(strjoin([ ... % webwindow accepts only char at least for R2020b
-    % """use strict"";"
-    "let uiFileDnDJS = {rects: [], lastOver: 0,"
-    "   data: {ctrlKey: false, shiftKey: false, index: 0},"
-    "   button: [...document.querySelectorAll('.mwPushButton')].find("
-    "      btn => btn.textContent.trim() === '"+hBtn.Text+"')};"
-    "document.ondragenter = (e) => { // prevent default before firing ondragover"
-    "  e.dataTransfer.dropEffect = 'none';"
-    "  return false;"
-    "};"
-    "document.ondragover = (e) => {"
-    "  e.returnValue = false; // preventDefault & stopPropagation"
-    "  let now = new Date().getTime();"
-    "  if (now < uiFileDnDJS.lastOver+16) { return; }"
-    "  uiFileDnDJS.lastOver = now;"
-    "  let x = e.clientX+1, y = document.body.clientHeight-e.clientY;"
-    "  for (let i = uiFileDnDJS.rects.length-1; i >= 0; i--) {"
-    "    let p = uiFileDnDJS.rects[i]; // [left bottom width height]"
-    "    if (x>=p[0] && y>=p[1] && x<p[0]+p[2] && y<p[1]+p[3]) {"
-    "      uiFileDnDJS.data.index = i; // target index in rects"
-    "      return; // keep OS default dropEffect"
-    "    };"
-    "  };"
-    "  e.dataTransfer.dropEffect = 'none'; // disable drop"
-    "};"
-    "document.ondrop = (e) => {"
-    "  e.returnValue = false;"
-    "  uiFileDnDJS.data.ctrlKey = e.ctrlKey;"
-    "  uiFileDnDJS.data.shiftKey = e.shiftKey;"
-    "  uiFileDnDJS.button.click(); // fire Matlab callback"
-    "};" ], newline));
-drawnow; ww.executeJS(jsStr);
-ww.FileDragDropCallback = {@dragEnter hBtn};
-
-%% fired when drag enters figure
-function dragEnter(ww, names, hBtn)
-for i = size(hBtn.UserData,1):-1:1 % redo in case pos changed or resized
-    p{i} = round(getpixelposition(hBtn.UserData{i,2}, 1));
-    if hBtn.UserData{i,2}.Type == "figure", p{i}(1:2) = 1; end
+%% fired by javascript fake button press
+function dragEnter(~, ~, ww, h)
+h.UserData = h.UserData(isvalid([h.UserData{:,2}]), :); % remove invalid
+for i = size(h.UserData,1):-1:1 % redo in case pos changed or resized
+    obj = h.UserData{i,2};
+    p{i} = round(getpixelposition(obj, true));
+    if p{i}(4)==0, p{i} = getpixelposition(obj.Parent, true); % axes' child
+    elseif obj.Type == "figure", p{i}(1:2) = 1;
+    end
 end
-ww.executeJS(['uiFileDnDJS.rects=' jsonencode(p)]);
-hBtn.Text = cellstr(names); % store file names
+ww.executeJS(['rects=' jsonencode(p)]);
 
-%% fired by javascript fake button press in ondrop
-function drop(hBtn, ~, ww)
-dat = jsondecode(ww.executeJS('uiFileDnDJS.data'));
-dat.names = hBtn.Text;
-args = [hBtn.UserData(dat.index+1,:) rmfield(dat, 'index')];
+function drop(h, ~, ww)
+dat = jsondecode(ww.executeJS('Data'));
+dat.dropXY = dat.dropXY';
+if isempty(dat.names), dat.names = h.Text; end
+args = [h.UserData(dat.index+1,:) rmfield(dat, 'index')];
 if iscell(args{1}), args = [args{1}(1) args(2:3) args{1}(2:end)]; end
 feval(args{:});
 
-%%
+%% following script must start with % javascript, will run once for 1st obj
+% javascript
+%{
+let rects = [];
+let Data = {dropXY: [0,0], ctrlKey: false, shiftKey: false, names: [], index: 0};
+const bDrag = [...document.querySelectorAll('.mwPushButton')].find(btn => btn.textContent.trim() === 'uiFileDragBtn');
+const bDrop = [...document.querySelectorAll('.mwPushButton')].find(btn => btn.textContent.trim() === 'uiFileDropBtn');
+
+document.ondragenter = (e) => {
+    bDrag.click(); // ask to update rects
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    return false;
+};
+document.ondragover = (e) => {
+    e.returnValue = false;
+    if (!e.dataTransfer) return;
+    const x = e.clientX+1, y = window.innerHeight-e.clientY;
+    for (let i = rects.length-1; i >= 0; i--) {
+        const p = rects[i]; // [left bottom width height]
+        if (x>p[0] && y>p[1] && x<p[0]+p[2] && y<p[1]+p[3]) {
+            Data.index = i;
+            Data.dropXY = [x,y];
+            return;
+        };
+    };
+    e.dataTransfer.dropEffect = 'none'; // disable drop
+};
+document.ondrop = (e) => {
+    e.returnValue = false;
+    Data.ctrlKey = e.ctrlKey;
+    Data.shiftKey = e.shiftKey;
+    Data.names = [];
+    if (e.dataTransfer.types.includes("text/plain")) {
+       Data.names = [e.dataTransfer.getData("text/plain")];
+    }
+    bDrop.click();
+};
+%}
