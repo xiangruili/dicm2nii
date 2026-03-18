@@ -519,7 +519,11 @@ try % panel has JavaFrame in later matlab
     jFrame = handle(hs.frame.JavaFrame.getGUIDEView, 'CallbackProperties');
 catch
     warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
-    jFrame = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
+    if isMATLABReleaseOlderThan("R2025a")
+        jFrame = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
+    else
+        jFrame = [];
+    end
 end
 if usejava('awt')
     try java_dnd(jFrame, cb('drop')); catch me, disp(me.message); end
