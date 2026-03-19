@@ -203,7 +203,7 @@ if ~no_save && ~isfolder(niiFolder), mkdir(niiFolder); end
 niiFolder = strcat(fullName(niiFolder), filesep);
 converter = ['dicm2nii.m ' getVersion];
 if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
-    more off;
+    try more off; catch, end
     disp(['Xiangrui Li''s ' converter ' (feedback to xiangrui.li@gmail.com)']);
 end
 
@@ -1804,16 +1804,16 @@ drawnow;
 switch cmd
     case 'do_convert'
         src = get(fh, 'UserData');
-        dst = hs.dst.Text;
+        dst = hs.dst.Value;
         if isempty(src) || isempty(dst)
             str = 'Source folder/file(s) and Result folder must be specified';
             errordlg(str, 'Error Dialog');
             return;
         end
-        rstFmt = (get(hs.rstFmt, 'Value') - 1) * 2; % 0 or 2
+        rstFmt = (hs.rstFmt.ValueIndex - 1) * 2; % 0 or 2
         if rstFmt == 4
             if verLessThanOctave
-                fprintf('BIDS conversion is easier with MATLAB R2018a or more.\n');
+                fprintf('BIDS conversion is easier with MATLAB R2018a+.\n');
             end
             if get(hs.gzip,  'Value')
                 rstFmt = 'bids';
@@ -1824,31 +1824,31 @@ switch cmd
             if get(hs.gzip,  'Value'), rstFmt = rstFmt + 1; end % 1 or 3
             if get(hs.rst3D, 'Value'), rstFmt = rstFmt + 4; end % 4 to 7
         end
-        set(h, 'Enable', 'off', 'string', 'Conversion in progress');
-        clnObj = onCleanup(@()set(h, 'Enable', 'on', 'String', 'Start conversion')); 
+        set(h, 'Enable', 'off', 'Text', 'Conversion in progress');
+        clnObj = onCleanup(@()set(h, 'Enable', 'on', 'Text', 'Start conversion')); 
         drawnow;
         dicm2nii(src, dst, rstFmt);
         
         % save parameters if last conversion succeed
         pf = getpref('dicm2nii_gui_para');
-        pf.rstFmt = get(hs.rstFmt, 'Value');
+        pf.rstFmt = get(hs.rstFmt, 'ValueIndex');
         pf.rst3D = get(hs.rst3D, 'Value');
         pf.gzip = get(hs.gzip, 'Value');
-        pf.src = hs.src.Text;
+        pf.src = hs.src.Value;
         ind = strfind(pf.src, '{');
         if ~isempty(ind), pf.src = strtrim(pf.src(1:ind-1)); end
-        pf.dst = hs.dst.Text;
+        pf.dst = hs.dst.Value;
         setpref('dicm2nii_gui_para', fieldnames(pf), struct2cell(pf));
     case 'dstDialog'
-        folder = hs.dst.Text; % current folder
-        if ~isfolder(folder), folder = hs.src.Text; end
+        folder = hs.dst.Value; % current folder
+        if ~isfolder(folder), folder = hs.src.Value; end
         if ~isfolder(folder), folder = fileparts(folder); end
         if ~isfolder(folder), folder = pwd; end
         dst = uigetdir(folder, 'Select a folder for result files');
         if isnumeric(dst), return; end
-        hs.dst.Text = dst;
+        hs.dst.Value = dst;
     case 'srcDir'
-        folder = hs.src.Text; % initial folder
+        folder = hs.src.Value; % initial folder
         if ~isfolder(folder), folder = fileparts(folder); end
         if ~isfolder(folder), folder = pwd; end
         src = jFileChooser(folder, 'Select folders/files to convert');
@@ -1856,9 +1856,9 @@ switch cmd
         set(hs.fig, 'UserData', src);
         txt = src{1};
         if numel(src) > 1,  txt = [txt ' {and more}']; end 
-        hs.src.Text = txt;
+        hs.src.Value = txt;
     case 'set_src'
-        str = hs.src.Text;
+        str = hs.src.Value;
         ind = strfind(str, '{');
         if ~isempty(ind), return; end % no check with multiple files
         if ~isempty(str) && ~exist(str, 'file')
@@ -1869,7 +1869,7 @@ switch cmd
                 if iscellstr(val)
                     val = [fileparts(val{1}), sprintf(' {%g files}', numel(val))];
                 end
-                if ~isempty(val), hs.src.Text = val; end
+                if ~isempty(val), hs.src.Value = val; end
                 errordlg('Invalid input', 'Error Dialog');
                 return;
             end
@@ -1878,10 +1878,10 @@ switch cmd
         end
         set(fh, 'UserData', str);
     case 'set_dst'
-        str = hs.dst.Text;
+        str = hs.dst.Value;
         if isempty(str), return; end
         if ~exist(str, 'file') && ~mkdir(str)
-            hs.dst.Text = '';
+            hs.dst.Value = '';
             errordlg(['Invalid folder name ''' str ''''], 'Error Dialog');
             return;
         end
@@ -1889,55 +1889,44 @@ switch cmd
         if get(hs.rst3D, 'Value'), set(hs.gzip, 'Value', 0); end
     case 'about'
         item = get(hs.about, 'Value');
-        if item == 1 % about
+        if item == "About"
             str = sprintf(['dicm2nii.m by Xiangrui Li\n\n' ...
                 'Feedback to: xiangrui.li@gmail.com\n\n' ...
                 'Last updated on %s\n'], getVersion);
             helpdlg(str, 'About dicm2nii')
-        elseif item == 2 % license
+        elseif item == "License"
             try
                 str = fileread([fileparts(mfilename('fullpath')) '/LICENSE']);
             catch
                 str = 'license.txt file not found';
             end
             helpdlg(strtrim(str), 'License')
-        elseif item == 3
+        elseif item == "Help text"
             doc dicm2nii;
-        elseif item == 4
+        elseif item == "Check update"
             checkUpdate(mfilename);
-        elseif item == 5
+        else
             web('www.sciencedirect.com/science/article/pii/S0165027016300073', '-browser');
         end
-        set(hs.about, 'Value', 1);
-    case 'drop_src' % Java drop source
+    case 'drop_src' % drop source
         try
-            if strcmp(evt.DropType, 'file')
-                n = numel(evt.Data);
-                if n == 1
-                    hs.src.Text = evt.Data{1};
-                    set(hs.fig, 'UserData', evt.Data{1});
-                else
-                    hs.src.Text = sprintf('%s {%g files}', ...
-                        fileparts(evt.Data{1}), n);
-                    set(fh, 'UserData', evt.Data);
-                end
-            else % string
-                hs.src.Text = strtrim(evt.Data);
-                gui_callback([], [], 'set_src', fh);
+            n = numel(evt.names);
+            if n == 1
+                hs.src.Value = evt.names{1};
+                set(hs.fig, 'UserData', evt.names{1});
+            else
+                hs.src.Value = sprintf('%s {%g files}', ...
+                    fileparts(evt.names{1}), n);
+                set(fh, 'UserData', evt.names);
             end
         catch me
             errordlg(me.message);
         end
-    case 'drop_dst' % Java drop dst
+    case 'drop_dst' % drop dst
         try
-            if strcmp(evt.DropType, 'file')
-                nam = evt.Data{1};
-                if ~isfolder(nam), nam = fileparts(nam); end
-                hs.dst.Text = nam;
-            else
-                hs.dst.Text = strtrim(evt.Data);
-                gui_callback([], [], 'set_dst', fh);
-            end
+            nam = evt.names{1};
+            if ~isfolder(nam), nam = fileparts(nam); end
+            hs.dst.Value = nam;
         catch me
             errordlg(me.message);
         end
@@ -1947,130 +1936,101 @@ end
 
 %% Subfuction: create GUI or bring it to front if exists
 function create_gui
-fh = figure('dicm' * 256.^(0:3)'); % arbitury integer
-if strcmp('dicm2nii_fig', get(fh, 'Tag')), return; end
+fh = findall(0, 'Type', 'figure', 'Tag', 'dicm2nii_fig');
+if ~isempty(fh), fh.Visible = 'off'; fh.Visible = 'on'; return; end % focus(fh); 
+fh = uifigure('Tag', 'dicm2nii_fig', 'Visible', 'off');
+
+cb = @(cmd) {@gui_callback cmd fh}; % callback shortcut
+getpf = @(p,dft)getpref('dicm2nii_gui_para', p, dft);
+chkbox = @(parent,pos,val,str,cbk,tip) uicheckbox(parent, 'Position', pos, ...
+    'Value', val, 'Text', str, 'ValueChangedFcn', cbk, 'Tooltip', tip);
 
 scrSz = get(0, 'ScreenSize');
-fSz = 9; % + ~(ispc || ismac);
-clr = [1 1 1]*206/256;
-clrButton = [1 1 1]*216/256;
-cb = @(cmd) {@gui_callback cmd fh}; % callback shortcut
-uitxt = @(txt,pos) uicontrol('Style', 'text', 'Position', pos, 'FontSize', fSz, ...
-    'HorizontalAlignment', 'left', 'String', txt, 'BackgroundColor', clr);
-getpf = @(p,dft)getpref('dicm2nii_gui_para', p, dft);
-chkbox = @(parent,val,str,cbk,tip) uicontrol(parent, 'Style', 'checkbox', ...
-    'FontSize', fSz, 'HorizontalAlignment', 'left', 'BackgroundColor', clr, ...
-    'Value', val, 'String', str, 'Callback', cbk, 'TooltipString', tip);
+set(fh, 'Resize', 'off', 'Position', [200 scrSz(4)-600 420 324], ...
+    'Name', 'dicm2nii - DICOM to NIfTI Converter');
 
-set(fh, 'Toolbar', 'none', 'Menubar', 'none', 'Resize', 'off', 'Color', clr, ...
-    'Tag', 'dicm2nii_fig', 'Position', [200 scrSz(4)-600 420 324], 'Visible', 'off', ...
-    'Name', 'dicm2nii - DICOM to NIfTI Converter', 'NumberTitle', 'off');
+uilabel(fh, 'Position', [8 298 400 16], 'Text', 'Hover mouse onto button, text box or check box for help');
+str = sprintf(['Browse convertible files or folders containing files.\n' ...
+    'Convertible files can be dicom, Philips PAR, ' ...
+    'AFNI HEAD, BrainVoyager files, or a zip file containing those files']);
+uibutton(fh, 'Position', [6 260 112 24], 'Text', 'DICOM folder/files', ...
+    'Tooltip', str, 'ButtonPushedFcn', cb('srcDir'));
+hs.src = uieditfield(fh, 'Position', [118 260 294 24], 'ValueChangedFcn', cb('set_src'));
+hs.src.Value = getpf('src', pwd);
+hs.src.Tooltip = "This is the source folder or file(s). You can" + newline + ...
+    "Type the source folder name into the box, or" + newline + ...
+    "Click DICOM folder/files button to browse, or" + newline + ...
+    "Drag and drop a folder or file(s) into the box";
 
-uitxt('Move mouse onto button, text box or check box for help', [8 298 400 16]);
-str = sprintf(['Browse convertible files or folders (can have subfolders) ' ...
-    'containing files.\nConvertible files can be dicom, Philips PAR,' ...
-    ' AFNI HEAD, BrainVoyager files, or a zip file containing those files']);
-uicontrol('Style', 'Pushbutton', 'Position', [6 259 112 24], ...
-    'FontSize', fSz, 'String', 'DICOM folder/files', 'Background', clrButton, ...
-    'TooltipString', str, 'Callback', cb('srcDir'));
+uibutton(fh, 'Position', [6 222 112 24], 'Text', 'Result folder', ...
+    'Tooltip', 'Browse result folder', 'ButtonPushedFcn', cb('dstDialog'));
+hs.dst = uieditfield(fh, 'Position', [118 222 294 24], 'ValueChangedFcn', cb('set_dst'));
+hs.dst.Value = getpf('dst', pwd);
+hs.dst.Tooltip = "This is the result folder name. You can" + newline + ...
+    "Type the folder name into the box, or" + newline + ...
+    "Click Result folder button to set the value, or" + newline + ...
+    "Drag and drop a folder into the box";
 
-jSrc = javaObjectEDT('javax.swing.JTextField');
-warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
-hs.src = javacomponent(jSrc, [118 258 294 24], fh); %#ok<*JAVCM>
-hs.src.FocusLostCallback = cb('set_src');
-hs.src.Text = getpf('src', pwd);
-% hs.src.ActionPerformedCallback = cb('set_src'); % fire when pressing ENTER
-hs.src.ToolTipText = ['<html>This is the source folder or file(s). You can<br>' ...
-    'Type the source folder name into the box, or<br>' ...
-    'Click DICOM folder/files button to browse, or<br>' ...
-    'Drag and drop a folder or file(s) into the box'];
+uilabel(fh, 'Position', [8 189 82 16], 'Text', 'Output format');
+hs.rstFmt = uidropdown(fh, 'ValueIndex', getpf('rstFmt',1), 'Position', [92 186 82 22], ...
+    'Items', {' .nii' ' .hdr/.img' ' BIDS (http://bids.neuroimaging.io)'}, 'Tooltip', 'Choose output file format');
 
-uicontrol('Style', 'Pushbutton', 'Position', [6 223 112 24], ...
-    'FontSize', fSz, 'String', 'Result folder', 'Background', clrButton, ...
-    'TooltipString', 'Browse result folder', 'Callback', cb('dstDialog'));
-jDst = javaObjectEDT('javax.swing.JTextField');
-hs.dst = javacomponent(jDst, [118 222 294 24], fh);
-hs.dst.FocusLostCallback = cb('set_dst');
-hs.dst.Text = getpf('dst', pwd);
-hs.dst.ToolTipText = ['<html>This is the result folder name. You can<br>' ...
-    'Type the folder name into the box, or<br>' ...
-    'Click Result folder button to set the value, or<br>' ...
-    'Drag and drop a folder into the box'];
+hs.gzip = chkbox(fh, [220 186 76 24], getpf('gzip',true), 'Compress', '', 'Compress into .gz files');
 
-uitxt('Output format', [8 190 82 16]);
-hs.rstFmt = uicontrol('Style', 'popup', 'Background', 'white', 'FontSize', fSz, ...
-    'Value', getpf('rstFmt',1), 'Position', [92 186 82 24], ...
-    'String', {' .nii' ' .hdr/.img' ' BIDS (http://bids.neuroimaging.io)'}, ...
-    'TooltipString', 'Choose output file format');
-
-hs.gzip = chkbox(fh, getpf('gzip',true), 'Compress', '', 'Compress into .gz files');
-sz = get(hs.gzip, 'Extent'); set(hs.gzip, 'Position', [220 190 sz(3)+24 sz(4)]);
-
-hs.rst3D = chkbox(fh, getpf('rst3D',false), 'SPM 3D', cb('SPMStyle'), ...
+hs.rst3D = chkbox(fh, [330 186 66 24], getpf('rst3D',false), 'SPM 3D', cb('SPMStyle'), ...
     'Save one file for each volume (SPM style)');
-sz = get(hs.rst3D, 'Extent'); set(hs.rst3D, 'Position', [330 190 sz(3)+24 sz(4)]);
            
-hs.convert = uicontrol('Style', 'Pushbutton', 'Position', [104 8 200 30], ...
-    'FontSize', fSz, 'String', 'Start conversion', ...
-    'Background', clrButton, 'Callback', cb('do_convert'), ...
-    'TooltipString', 'Dicom source and Result folder needed before start');
+hs.convert = uibutton(fh, 'Position', [104 8 200 30], ...
+    'Text', 'Start conversion', 'ButtonPushedFcn', cb('do_convert'), ...
+    'Tooltip', 'Dicom source and Result folder needed before start');
 
-hs.about = uicontrol('Style', 'popup',  'String', ...
-    {'About' 'License' 'Help text' 'Check update' 'A paper about conversion'}, ...
-    'Position', [326 12 88 20], 'Callback', cb('about'));
+hs.about = uidropdown(fh, 'Position', [326 12 88 20], 'ValueChangedFcn', cb('about'), ...
+    'Items', {'About' 'License' 'Help text' 'Check update' 'A paper about conversion'});
 
-ph = uipanel(fh, 'Units', 'Pixels', 'Position', [4 50 410 126], 'FontSize', fSz, ...
-    'BackgroundColor', clr, 'Title', 'Preferences (also apply to command line and future sessions)');
+ph = uipanel(fh, 'Units', 'Pixels', 'Position', [8 50 402 126], ...
+    'Title', 'Preferences (also apply to command line and future sessions)');
 setpf = @(p)['setpref(''dicm2nii_gui_para'',''' p ''',get(gcbo,''Value''));'];
 
 p = 'use_parfor';
-h = chkbox(ph, getpf(p,true), 'Use parfor if needed', setpf(p), ...
+chkbox(ph, [4 80 130 24], getpf(p,true), 'Use parfor if needed', setpf(p), ...
     'Converter will start parallel tool if necessary');
-sz = get(h, 'Extent'); set(h, 'Position', [4 84 sz(3)+24 sz(4)]);
 
 p = 'use_seriesUID';
-h = chkbox(ph, getpf(p,true), 'Use SeriesInstanceUID if exists', setpf(p), ...
+chkbox(ph, [4 56 200 24], getpf(p,true), 'Use SeriesInstanceUID if exists', setpf(p), ...
     'Only uncheck this if SeriesInstanceUID is messed up by some third party archive software');
-sz = get(h, 'Extent'); set(h, 'Position', [4 60 sz(3)+24 sz(4)]);
 
 p = 'save_json';
-h = chkbox(ph, getpf(p,false), 'Save json file', setpf(p), ...
+chkbox(ph, [4 32 100 24], getpf(p,false), 'Save json file', setpf(p), ...
     'Save json file for BIDS (http://bids.neuroimaging.io/)');
-sz = get(h, 'Extent'); set(h, 'Position', [4 36 sz(3)+24 sz(4)]);
 
 p = 'save_patientName';
-h = chkbox(ph, getpf(p,true), 'Store PatientName', setpf(p), ...
+chkbox(ph, [4 8 120 24], getpf(p,true), 'Store PatientName', setpf(p), ...
     'Store PatientName in NIfTI hdr, ext and json');
-sz = get(h, 'Extent'); set(h, 'Position', [4 12 sz(3)+24 sz(4)]);
 
 p = 'dicom_ext';
-h = chkbox(ph, getpf(p,false), 'Save dicom extension', setpf(p), ...
+chkbox(ph, [240 80 140 24], getpf(p,false), 'Save dicom extension', setpf(p), ...
     'Save header of the first DICOM file into NIfTI extension');
-sz = get(h, 'Extent'); set(h, 'Position', [240 84 sz(3)+24 sz(4)]);
 
 p = 'scale_16bit';
-h = chkbox(ph, getpf(p,false), 'Use 16-bit scaling', setpf(p), ...
+chkbox(ph, [240 56 120 24], getpf(p,false), 'Use 16-bit scaling', setpf(p), ...
     'Losslessly scale 16-bit integers to use dynamic range');
-sz = get(h, 'Extent'); set(h, 'Position', [240 60 sz(3)+24 sz(4)]);
 
 p = 'lefthand';
-lh = chkbox(ph, getpf(p,true), 'Left-hand storage', setpf(p), ...
+lh = chkbox(ph, [240 8 120 24], getpf(p,true), 'Left-hand storage', setpf(p), ...
     'Left hand storage works well for FSL, and likely doesn''t matter for others');
-sz = get(lh, 'Extent'); set(lh, 'Position', [240 12 sz(3)+24 sz(4)]);
 lh.Visible = getpf('reorient', true);
 
 p = 'reorient';
-h = chkbox(ph, getpf(p,true), 'Reorient NIfTI', {@setReorient lh}, ...
+chkbox(ph, [240 32 100 24], getpf(p,true), 'Reorient NIfTI', {@setReorient lh}, ...
     'Reorient the NIfTI image for better compatibility. If not sure, keep it checked');
-sz = get(h, 'Extent'); set(h, 'Position', [240 36 sz(3)+24 sz(4)]);
 
 hs.fig = fh;
 guidata(fh, hs); % store handles
 drawnow; set(fh, 'Visible', 'on', 'HandleVisibility', 'callback');
 
-try % java_dnd is based on dndcontrol by Maarten van der Seijs
-    java_dnd(jSrc, cb('drop_src'));
-    java_dnd(jDst, cb('drop_dst'));
+try
+    uiFileDnD(hs.src, cb('drop_src'));
+    uiFileDnD(hs.dst, cb('drop_dst'));
 catch me
     fprintf(2, '%s\n', me.message);
 end

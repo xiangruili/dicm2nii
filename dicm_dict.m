@@ -62,6 +62,7 @@ C = {
     '0008' '0090' 'PN' 'ReferringPhysicianName'
     '0008' '0100' 'SH' 'CodeValue'
     '0008' '0102' 'SH' 'CodingSchemeDesignator'
+    '0008' '0103' 'SH' 'CodingSchemeVersion'
     '0008' '0104' 'LO' 'CodeMeaning'
     '0008' '010B' 'CS' 'ContextGroupExtensionFlag'
     '0008' '0201' 'SH' 'TimezoneOffsetFromUTC'
