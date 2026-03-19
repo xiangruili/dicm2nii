@@ -485,7 +485,7 @@ for i = 1:nRun
     if ~keep(i) || nFile<2 || ~isfield(s, 'ImagePositionPatient'), continue; end
     if s.isEnh, continue; end % Siemens enhanced dicom
     
-    [err, h{i}] = checkImagePosition(h{i}); % may re-oder h{i} for Philips
+    [err, h{i}] = checkImagePosition(h{i}); % may re-order h{i} for Philips
     if ~isempty(err)
         errorLog([err ' for ' series '. Series skipped.']);
         keep(i) = 0; continue; % skip
