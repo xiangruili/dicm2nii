@@ -10,6 +10,11 @@ function write_tsv(id,tsvfile,varargin)
 %   write_tsv('Jean',  'stats.tsv','height',180)
 
 if iscell(tsvfile), tsvfile = tsvfile{1}; end
+% Ensure parent directory exists before reading or writing the TSV file
+[parentDir, ~, ~] = fileparts(tsvfile);
+if ~isempty(parentDir) && ~exist(parentDir,'dir')
+    mkdir(parentDir);
+end
 if exist(tsvfile,'file') % read already existing tsvfile
     % Number of columns
     fid = fopen(tsvfile);
