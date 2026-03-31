@@ -35,9 +35,7 @@ if exist(tsvfile,'file') && ~isempty(T) % append to already existing tsvfile
     end
     
     for ii=1:2:length(varargin)
-        if ismember(varargin{ii},T.Properties.VariableNames)
-            
-        else
+        if ~ismember(varargin{ii},T.Properties.VariableNames)
             if isnumeric(varargin{ii+1})
                 T.(varargin{ii}) = nan(size(T,1),1);
             else
