@@ -38,6 +38,7 @@ classdef mp4_video < VideoWriter
         profile = 'MPEG-4';
         if ~ismember(profile, {VideoWriter.getProfiles.Name}) % likely Linux
             profile = 'Uncompressed AVI'; % use ffmpeg to compress later
+            setenv('LD_LIBRARY_PATH', getenv('PATH'));
             [err, ~] = system('ffmpeg -version');
             if err
                 fprintf(['OS ffmpeg was not installed or not on path. '...
