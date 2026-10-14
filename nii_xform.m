@@ -72,7 +72,7 @@ if isstruct(src), nii = src;
 else, nii = nii_tool('load', src);
 end
 
-if isstruct(target) || ischar(target) || (iscell(target) && numel(target)==1)
+if isstruct(target) || ischar(target) || (iscell(target) && isscalar(target))
     hdr = get_hdr(target);
 elseif iscell(target)
     hdr = get_hdr(target{1});
@@ -114,7 +114,7 @@ elseif iscell(target)
         R = R / rotM;
     end
 elseif isnumeric(target) && any(numel(target)==[1 3]) % new resolution in mm
-    if numel(target)==1, target = target * [1 1 1]; end
+    if isscalar(target), target = target * [1 1 1]; end
     hdr = nii.hdr;
     ratio = target(:)' ./ hdr.pixdim(2:4);
     hdr.pixdim(2:4) = target;
