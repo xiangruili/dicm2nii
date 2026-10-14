@@ -58,7 +58,8 @@ if nargin<1 || isempty(files)
                    '2: BrainVoyager format (subj-series-acquisiton-instance)\n' ...
                    '3: run1_001_00001.dcm (SeriesDescription_series_instance)\n' ...
                    '4: subj_run1_00001.dcm (subj_SeriesDescription_instance)\n' ...
-                   '5: run1_001_001_00001.dcm (SeriesDescription_series_acquisition_instance)\n']);
+                   '5: run1_001_001_00001.dcm (SeriesDescription_series_acquisition_instance)\n' ...
+                   '6: Siemens Realtime push format (001_000001_000001_MediaStorageSOPInstanceUID.dcm)\n']);
     fmt = inputdlg(str, 'Rename Dicom', 1, {'5'});
     if isempty(fmt), return; end
     fmt = str2double(fmt{1});
@@ -70,14 +71,15 @@ else
         files = {files.name};
     else % files
         if ~iscell(files), files = {files}; end
-        folder = fileparts(files{1});
-        if ~isempty(folder), folder = pwd; end
+        [folder, files, ext] = fileparts(files);
+        files = strcat(files, ext);
+        if isempty(folder), folder = pwd; else, folder = folder{1}; end
     end
     if nargin<2 || isempty(fmt), fmt = 5; end
 end
 
 flds = {'InstanceNumber' 'AcquisitionNumber' 'SeriesNumber' 'EchoNumber' 'ProtocolName' ...
-        'SeriesDescription' 'PatientName' 'PatientID' 'Manufacturer'};
+        'MediaStorageSOPInstanceUID' 'SeriesDescription' 'PatientName' 'PatientID' 'Manufacturer'};
 dict = dicm_dict('', flds);
 tryGetField = dicm2nii('', 'tryGetField', 'func_handle');
 
@@ -114,7 +116,7 @@ for i = 1:nFile
             sName(~isstrprop(sName, 'alphanum')) = '_';
             sName = regexprep(sName, '_{2,}', '_');
         end
-    catch me %#ok
+    catch
         continue;
     end
     
@@ -134,6 +136,8 @@ for i = 1:nFile
         name = sprintf('%s_%s_%05g.dcm', sName, pName, iN); 
     elseif fmt == 5 % pN_003_001_001
         name = sprintf('%s_%03g_%03g_%05g.dcm', pName, sN, aN, iN); 
+    elseif fmt == 6 % 001_000001_000001_MediaStorageSOPInstanceUID.dcm
+        name = sprintf('001_%06g_%06g_%s.dcm', sN, iN, s.MediaStorageSOPInstanceUID); 
     else
         error('Invalid format.');
     end
