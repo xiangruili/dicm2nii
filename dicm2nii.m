@@ -198,11 +198,22 @@ if nargin<1 || isempty(src) || (nargin<2 || isempty(niiFolder))
     return;
 end
 
+%% user preference
+pf.save_patientName = getpref('dicm2nii_gui_para', 'save_patientName', true);
+pf.save_json        = getpref('dicm2nii_gui_para', 'save_json', false);
+pf.use_parfor       = getpref('dicm2nii_gui_para', 'use_parfor', true);
+pf.use_seriesUID    = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
+pf.lefthand         = getpref('dicm2nii_gui_para', 'lefthand', true);
+pf.scale_16bit      = getpref('dicm2nii_gui_para', 'scale_16bit', false);
+pf.reorient         = getpref('dicm2nii_gui_para', 'reorient', true);
+pf.dicom_ext        = getpref('dicm2nii_gui_para', 'dicom_ext', false);
+verbose = getpref('dicm2nii_gui_para', 'verbosity', 1) && ~no_save;
+
 %% Deal with niiFolder
 if ~no_save && ~isfolder(niiFolder), mkdir(niiFolder); end
 niiFolder = strcat(fullName(niiFolder), filesep);
-converter = ['dicm2nii.m ' getVersion];
-if errorLog('', niiFolder) && ~no_save % remember niiFolder for later call
+converter = ['dicm2nii.m ' getVersion()];
+if errorLog('', niiFolder) && verbose % remember niiFolder for later call
     try more off; catch, end
     disp(['Xiangrui Li''s ' converter ' (feedback to xiangrui.li@gmail.com)']);
 end
@@ -264,16 +275,6 @@ end
 nFile = numel(fnames);
 if nFile<1, error(' No files found in the data source.'); end
 
-%% user preference
-pf.save_patientName = getpref('dicm2nii_gui_para', 'save_patientName', true);
-pf.save_json        = getpref('dicm2nii_gui_para', 'save_json', false);
-pf.use_parfor       = getpref('dicm2nii_gui_para', 'use_parfor', true);
-pf.use_seriesUID    = getpref('dicm2nii_gui_para', 'use_seriesUID', true);
-pf.lefthand         = getpref('dicm2nii_gui_para', 'lefthand', true);
-pf.scale_16bit      = getpref('dicm2nii_gui_para', 'scale_16bit', false);
-pf.reorient         = getpref('dicm2nii_gui_para', 'reorient', true);
-pf.dicom_ext        = getpref('dicm2nii_gui_para', 'dicom_ext', false);
-
 %% Check each file, store partial header in cell array hh
 % first 2 fields are must. First 10 indexed in code
 flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
@@ -289,7 +290,7 @@ flds = {'Columns' 'Rows' 'BitsAllocated' 'SeriesInstanceUID' 'SeriesNumber' ...
 dict = dicm_dict('SIEMENS', flds); % dicm_hdr will update vendor if needed
 
 % read header for all files, use parpool if available and worthy
-if ~no_save, fprintf('Validating %g files ... ', nFile); end
+if verbose, fprintf('Validating %g files ... ', nFile); end
 hh = cell(1, nFile); errStr = cell(1, nFile);
 doParFor = pf.use_parfor && nFile>2000 && useParTool;
 for k = 1:nFile
@@ -303,7 +304,7 @@ for k = 1:nFile
 end
 hh(cellfun(@(c)isempty(c) || any(~isfield(c, flds(1:2))) || ~isfield(c, 'PixelData') ...
     || (isstruct(c.PixelData) && c.PixelData.Bytes<1), hh)) = [];
-if ~no_save, fprintf('(%g valid)\n', numel(hh)); end
+if verbose, fprintf('(%g valid)\n', numel(hh)); end
 
 %% sort headers into cell h by SeriesInstanceUID/SeriesNumber
 h = {}; % in case of no dicom files at all
@@ -572,7 +573,7 @@ fmtStr = sprintf(' %%-%gs %%dx%%dx%%dx%%d\n', max(cellfun(@numel, fnames))+12);
 %% Now ready to convert nii series by series
 subjStr = sprintf('''%s'', ', subj{:}); subjStr(end+(-1:0)) = [];
 vendor = sprintf('%s, ', vendor{:}); vendor(end+(-1:0)) = [];
-if ~no_save
+if verbose
     fprintf('Converting %g series (%s) into %g-D %s: subject %s\n', ...
             nRun, vendor, 4-rst3D, ext, subjStr);
 end
@@ -878,27 +879,26 @@ for i = 1:nRun
     fname = fullfile(niiFolder, fnames{i}); % name without ext
     if s.isDTI && ~no_save, save_dti_para(h{i}{1}, fname); end
 
-    nii = split_components(nii, h{i}); % split vol components
-    if no_save % only return the first nii
-        nii(1).hdr.file_name = strcat(fnames{i}, '.nii');
-        nii(1).hdr.magic = 'n+1';
-        varargout{1} = nii_tool('update', nii(1));
-        return;
-    end
-    
+    nii = split_components(nii, h{i}); % split vol components    
     for j = 1:numel(nii)
         nam = fnames{i};
         if numel(nii)>1, nam = nii(j).hdr.file_name; end
-        fprintf(fmtStr, nam, nii(j).hdr.dim(2:5));
+        if verbose, fprintf(fmtStr, nam, nii(j).hdr.dim(2:5)); end
         if pf.dicom_ext; sDcm = s; else, sDcm = ''; end
         nii(j).ext = set_nii_ext(nii(j).json, sDcm); % NIfTI extension
+        if no_save % only return the first nii
+            nii(j).hdr.file_name = strcat(fnames{i}, '.nii');
+            nii(j).hdr.magic = 'n+1';
+            varargout{1} = nii_tool('update', nii(j));
+            return;
+        end
         if pf.save_json, save_json(nii(j).json, fname); end
         nii_tool('save', nii(j), fullfile(niiFolder, strcat(nam, ext)), rst3D);
     end
         
     if isfield(nii(1).hdr, 'hdrTilt')
         nii = nii_xform(nii(1), nii.hdr.hdrTilt);
-        fprintf(fmtStr, strcat(fnames{i}, '_Tilt'), nii.hdr.dim(2:5));
+        if verbose, fprintf(fmtStr, strcat(fnames{i}, '_Tilt'), nii.hdr.dim(2:5)); end
         nii_tool('save', nii, strcat(fname, '_Tilt', ext), rst3D); % save xformed nii
     end
     
@@ -920,7 +920,7 @@ if exist(fname, 'file') % if file exists, we update fields only
 end
 save(fname, 'h', '-v7'); % -v7 better compatibility
 
-fprintf('Elapsed time by dicm2nii is %.1f seconds\n\n', toc);
+if verbose, fprintf('Elapsed time by dicm2nii is %.1f seconds\n\n', toc); end
 return;
 
 %% Subfunction: return PatientName
@@ -2151,7 +2151,7 @@ if n>0 && isfield(s, 'DimensionIndexSequence')
         end
         s.SortFrames = ind; % to sort img and get iVol/iSL for PerFrameSQ
     end
-    s.LocationsInAcquisition = max(sorted(:,end));
+    s.LocationsInAcquisition = numel(unique(sorted(:,end)));
     if mod(nFrame, s.LocationsInAcquisition)
         err = "nFrame="+nFrame+"; nSlice="+s.LocationsInAcquisition;
         return;
@@ -2161,8 +2161,8 @@ end
 % copy important fields into s
 flds = {'EchoTime' 'PixelSpacing' 'SpacingBetweenSlices' 'SliceThickness' ...
         'RepetitionTime' 'FlipAngle' 'RescaleIntercept' 'RescaleSlope' ...
-        'ImageOrientationPatient' 'ImagePositionPatient' ...
-        'ImageTypeText' 'ImageHistory' 'ICE_Dims' ...
+        'ImageOrientationPatient' 'ImagePositionPatient' 'NumberOfAverages' ...
+        'ImageTypeText' 'ImageHistory' 'ICE_Dims' 'UsedChannelString' 'ImageType4MF' ...
         'InPlanePhaseEncodingDirection' 'MRScaleSlope' 'CardiacTriggerDelayTime'};
 iF = 1; if isfield(s, 'SortFrames'), iF = s.SortFrames(1); end
 for i = 1:numel(flds)
@@ -2214,6 +2214,8 @@ function val = MF_val(fld, s, iFrame)
 pffgs = 'PerFrameFunctionalGroupsSequence';
 sfgs = 'SharedFunctionalGroupsSequence';
 switch fld
+    case 'NumberOfAverages'
+        sq = 'MRAveragesSequence';
     case 'EffectiveEchoTime'
         sq = 'MREchoSequence';
     case {'DiffusionDirectionality' 'DiffusionGradientDirection' 'B_value'}
@@ -2240,7 +2242,7 @@ switch fld
         sq = 'CardiacTriggerSequence';
     case {'SliceNumberMR' 'EchoTime' 'MRScaleSlope' 'PhaseNumber' 'MRImageLabelType'}
         sq = 'PrivatePerFrameSq'; % Philips
-    case {'ImageTypeText' 'ImageHistory' 'ICE_Dims'}
+    case {'ImageTypeText' 'ImageHistory' 'ICE_Dims' 'UsedChannelString' 'ImageType4MF'}
         sq = 'CSAImageHeaderInfo';
     otherwise
         error('Sequence for %s not set.', fld);
@@ -2267,6 +2269,7 @@ if s.isEnh && strncmpi(s.Manufacturer, 'Siemens', 7)
         s1 = dicm_hdr(h{i}.Filename, dict);
         ETs(i) = s1.EffectiveEchoTime;
     end
+    if numel(unique(ETs))<2, return; end
     if numel(h) <= nTE % no split for vNav or _SBRef
         nii.json.EchoTimes = ETs;
         return;
@@ -3060,4 +3063,3 @@ c = a([2 3 1]).*b([3 1 2]) - a([3 1 2]).*b([2 3 1]);
 function TF = containsI(str, pat)
 TF = contains(str, pat, 'IgnoreCase', true);
 %%
-
