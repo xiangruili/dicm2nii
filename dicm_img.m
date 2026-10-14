@@ -93,7 +93,14 @@ if any(strcmp(tsUID, {'1.2.840.10008.1.2.1' '1.2.840.10008.1.2.2' '1.2.840.10008
         error('Unknown data type for %s', s.Filename);
     end
     
+    dim = double([s.Columns s.Rows]);
     n = double(s.PixelData.Bytes) / (bpp/8);
+    nFrame = n / (spp * dim(1) * dim(2));
+    if isfield(s, 'NumberOfFrames') && nFrame == 2*s.NumberOfFrames
+        nFrame = s.NumberOfFrames;
+        fmt = '*single'; % best guess: override wrong hdr
+        n = n / 2;
+    end
     img = fread(fid, n, fmt);
     
     if all(isfield(s, {'BitsStored' 'HighBit' 'BitsAllocated'})) && ...
@@ -101,8 +108,6 @@ if any(strcmp(tsUID, {'1.2.840.10008.1.2.1' '1.2.840.10008.1.2.2' '1.2.840.10008
         img = bitshift(img, s.BitsStored-s.HighBit-1);
     end
     
-    dim = double([s.Columns s.Rows]);
-    nFrame = n / (spp * dim(1) * dim(2));
     if ~isfield(s, 'PlanarConfiguration') || s.PlanarConfiguration==0
         img = reshape(img, [spp dim nFrame]);
         img = permute(img, [2 3 1 4]);
