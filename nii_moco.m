@@ -13,7 +13,7 @@ function varargout = nii_moco(nii, out, ref)
 %
 % If the second optional input, the result NIfTI file name, is provided, the
 % corrected data will be saved into the file (overwrite if exists). A .mat file
-% with the same name is also saved for the correction parameters (see first
+% with the same base name is also saved for the correction parameters (see first
 % output argument below for meaning of the parameters). If no reference volume
 % is provided (see 3rd input below), a NIfTI file, with name in format of
 % fileName_out_ref.nii, will also be saved.
@@ -23,7 +23,7 @@ function varargout = nii_moco(nii, out, ref)
 %  a single number: volume index to align to;
 %  nii struct or file name: its first volume will be used as reference.
 % This argument is useful if one likes to align multiple runs to the same
-% referece img. For example align all 3 runs to run1:
+% reference img. For example align all 3 runs to run1:
 %  p = NII_MOCO('run1.nii', 'run1_moco.nii'); % return ref info for run1
 %  NII_MOCO('run2.nii', 'run2_moco.nii', p.ref); % align run2 to ref vol of run1
 %  NII_MOCO('run3.nii', 'run3_moco.nii', p.ref); % align run3
@@ -57,7 +57,7 @@ if ~toSave && nargout<1
     out = fullfile(pth, out);
     toSave = true;
 end
-if toSave && isempty(regexpi(out, '(.nii|.nii.gz)$')), out = [out '.nii']; end
+if toSave && isempty(regexpi(out, '(.nii|.nii.gz)$', 'once')), out = [out '.nii']; end
 
 if ischar(nii), nii = nii_tool('load', nii); end % file name
 if ~isstruct(nii) || ~all(isfield(nii, {'hdr' 'img'}))
@@ -88,7 +88,7 @@ if nargin<3 || isempty(ref) % pick a good vol as ref: similar to next vol
     [~, p.ref] = min(mss);
     p.ref = p.ref + 1; % later one less affected by spin history?
     refV.hdr = nii.hdr; refV.img = nii.img(:,:,:,p.ref);
-elseif isnumeric(ref) && numel(ref)==1 % ref vol index in moving nii
+elseif isnumeric(ref) && isscalar(ref) % ref vol index in moving nii
     refV.hdr = nii.hdr; refV.img = nii.img(:,:,:,ref);
     p.ref = ref;
 else % ref NIfTI file or struct
@@ -243,7 +243,7 @@ end
 d = size(in);
 I = {1:d(1) 1:d(2) 1:d(3)};
 n = sz/3;
-if numel(n)==1, n = n*[1 1 1]; end
+if isscalar(n), n = n*[1 1 1]; end
 J = {1:n(1):d(1) 1:n(2):d(2) 1:n(3):d(3)};
 intp = 'linear';
 F = griddedInterpolant(I, out, intp);
